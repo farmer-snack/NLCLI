@@ -115,7 +115,6 @@ public partial class App
         services.AddTransient<GeneralSettingsViewModel>();
         services.AddTransient<ClockSettingsViewModel>();
         services.AddTransient<AdvancedSettingsViewModel>();
-        services.AddTransient<AboutSettingsViewModel>();
         services.AddTransient<AppearanceSettingsViewModel>();
         services.AddTransient<ComponentsSettingsViewModel>();
         services.AddTransient<NotificationSettingsViewModel>();
@@ -126,7 +125,6 @@ public partial class App
         services.AddTransient<StorageSettingsViewModel>();
         services.AddTransient<ErrorSettingsViewModel>();
         services.AddTransient<ThemesSettingsViewModel>();
-        services.AddTransient<UpdateSettingsPageViewModel>();
         services.AddTransient<DebugPageViewModel>();
         services.AddTransient<RefreshingSettingsViewModel>();
         // Views
@@ -169,16 +167,11 @@ public partial class App
         services.AddSettingsPage<WindowSettingsPage>();
         services.AddSettingsPage<WeatherSettingsPage>();
         services.AddSettingsPage<AutomationSettingsPage>();
-        if (UpdateService.AllowedPackageTypes.Contains(PackagingType))
-        {
-            services.AddSettingsPage<UpdateSettingsPage>();
-        }
         services.AddSettingsPage<PluginsSettingsPage>();
         services.AddSettingsPage<ThemesSettingsPage>();
         services.AddSettingsPage<TestSettingsPage>();
         services.AddSettingsPage<DebugPage>();
         // services.AddSettingsPage<DebugBrushesSettingsPage>();
-        services.AddSettingsPage<AboutSettingsPage>();
         services.AddSettingsPage<ManagementSettingsPage>();
         services.AddSettingsPage<ManagementCredentialsSettingsPage>();
         services.AddSettingsPage<ManagementPolicySettingsPage>();

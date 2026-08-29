@@ -18,22 +18,6 @@ public partial class LicensePage : UserControl
         InitializeComponent();
     }
 
-    private async void ButtonShowOssLicense_OnClick(object? sender, RoutedEventArgs e)
-    {
-        var license = await new StreamReader(AssetLoader.Open(new Uri("avares://ClassIsland/Assets/LICENSE.txt")))
-            .ReadToEndAsync();
-        await new FAContentDialog()
-        {
-            Title = "开放源代码许可",
-            Content = new TextBlock()
-            {
-                Text = license
-            },
-            PrimaryButtonText = "关闭",
-            DefaultButton = FAContentDialogButton.Primary
-        }.ShowAsyncAuto();
-    }
-
     private void ButtonShowPrivacyLicense_OnClick(object? sender, RoutedEventArgs e)
     {
         var mdReader = new DocumentReaderWindow()

@@ -527,7 +527,6 @@ public partial class App : AppBase, IAppHost
         SentrySdk.ConfigureScope(s => s.Transaction = transaction);
         var spanPreInit = transaction.StartChild("startup-init");
         Dispatcher.UIThread.UnhandledException += App_OnDispatcherUnhandledException;
-        MyWindow.ShowOssWatermark = ApplicationCommand.ShowOssWatermark;
         //DependencyPropertyHelper.ForceOverwriteDependencyPropertyDefaultValue(FrameworkElement.FocusVisualStyleProperty,
         //    Resources[SystemParameters.FocusVisualStyleKey]);
 

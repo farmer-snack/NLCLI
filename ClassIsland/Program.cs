@@ -45,7 +45,6 @@ public static class Program
             new Option<string>(["-externalPluginPath", "-epp"], "外部插件路径"),
             new Option<bool>(["--enableSentryDebug", "-esd"], "启用 Sentry 调试"),
             new Option<bool>(["--verbose", "-v"], "启用详细输出"),
-            new Option<bool>(["--showOssWatermark", "-ossw"], "显示开源地址水印"),
             new Option<bool>(["--recovery", "-r"], "启动时进入恢复模式"),
             new Option<bool>(["--diagnostic", "-d"], "启用诊断模式(包括详细输出)，并在桌面上生成一份诊断数据"),
             new Option<bool>(["--safe", "-s"], "启用安全模式"),

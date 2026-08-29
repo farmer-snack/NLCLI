@@ -1,0 +1,161 @@
+删除构建版本后出现的屏幕水印 - 实现说明
+================================================
+
+问题描述
+--------
+删除构建版本（即运行开发构建 / 非正式发布版本）后，ClassIsland 窗口底部会显示
+水印文字“开发中画面，不代表最终品质。”以及版本号。该水印由开发构建装饰层
+（DevelopmentBuildAdorner）在 MyWindow 加载装饰层时添加。
+
+实现方法
+--------
+水印的添加逻辑位于 ClassIsland.Core\Controls\MyWindow.cs 的装饰层初始化方法中。
+原逻辑在以下任一条件满足时都会添加 DevelopmentBuildAdorner：
+  - AppBase.Current.IsDevelopmentBuild 为 true（开发构建/删除构建版本后出现）
+  - MyWindow.ShowOssWatermark 为 true（通过 --showOssWatermark 命令行参数开启的开源地址水印）
+
+由于开源地址水印属于独立的许可/合规要求（由命令行参数 --showOssWatermark /
+-ossw 控制），不应被删除；因此仅移除了“开发构建”触发条件，保留开源水印逻辑。
+
+修改位置：ClassIsland.Core\Controls\MyWindow.cs
+原代码：
+    if ((AppBase.Current.IsDevelopmentBuild || ShowOssWatermark))
+    {
+        var adorner = new DevelopmentBuildAdorner(AppBase.Current.IsDevelopmentBuild, ShowOssWatermark);
+        layer?.Children.Add(adorner);
+        AdornerLayer.SetAdornedElement(adorner, element);
+    }
+
+修改后：
+    if (ShowOssWatermark)
+    {
+        var adorner = new DevelopmentBuildAdorner(AppBase.Current.IsDevelopmentBuild, ShowOssWatermark);
+        layer?.Children.Add(adorner);
+        AdornerLayer.SetAdornedElement(adorner, element);
+    }
+
+效果
+----
+- 开发构建（删除构建版本后）不再显示“开发中画面，不代表最终品质。”及版本号水印。
+- 通过命令行参数 --showOssWatermark 显式开启的开源地址水印（https://www.classisland.tech）
+  仍保持原有行为，不受影响。
+- DevelopmentBuildAdorner 控件类及其 axaml 模板无需改动，仅在开发构建条件下不会
+  再被实例化/添加到装饰层。
+
+验证
+----
+使用 `dotnet build ClassIsland.Core\ClassIsland.Core.csproj -c Debug` 编译通过，
+0 个错误（仅有 XML 注释和过时 API 的既有警告，与本次改动无关）。
+
+相关文件
+--------
+- ClassIsland.Core\Controls\MyWindow.cs            （修改：移除开发构建水印触发条件）
+- ClassIsland.Core\Controls\DevelopmentBuildAdorner.cs   （未改动，仅保留供 OSS 水印使用）
+- ClassIsland.Core\Controls\DevelopmentBuildAdorner.axaml （未改动，模板中的开发构建文字块仍由 IsDevelopmentBuild 绑定控制可见性）
+- ClassIsland\Program.cs / ClassIsland\Models\ApplicationCommand.cs / ClassIsland\App.axaml.cs
+  （未改动，--showOssWatermark 相关逻辑保持不变）
+
+
+================================================
+后续改动：删除更新页面、开源软件提示（开源水印 + 开放源代码许可弹窗）及关于 ClassIsland 页面
+================================================
+
+改动目标（用户确认范围）
+------------------------
+1. 删除“更新”设置页面（UpdateSettingsPage），并解除其在设置导航中的注册。
+2. 删除“开源软件提示”，即：
+   - 屏幕右下角开源地址水印（https://www.classisland.tech，OSS 水印）；
+   - “开放源代码许可”弹窗（AboutSettingsPage 与欢迎页 LicensePage 中的 OSS 许可对话框）。
+3. 删除“关于 ClassIsland”设置页面（AboutSettingsPage）及其注册。
+
+一、移除开源水印（OSS Watermark）
+---------------------------------
+- ClassIsland.Core\Controls\MyWindow.cs
+  * 删除静态属性 `ShowOssWatermark`（原 public static bool ShowOssWatermark）。
+  * 删除装饰层初始化中 `if (ShowOssWatermark) { ... new DevelopmentBuildAdorner(...) ... }` 整段，
+    不再向窗口添加开发构建/开源水印装饰层。
+- ClassIsland.Core\Controls\DevelopmentBuildAdorner.cs / .axaml
+  * 该控件仅用于上述水印，现已完全无用，直接删除两个文件。
+- ClassIsland.Core\Themes\Generic.axaml
+  * 移除对 DevelopmentBuildAdorner.axaml 的 `<ResourceInclude>` 合并引用。
+- ClassIsland\Program.cs
+  * 删除命令行选项 `--showOssWatermark / -ossw`。
+- ClassIsland\Models\ApplicationCommand.cs
+  * 删除 `ShowOssWatermark` 属性。
+- ClassIsland\App.axaml.cs
+  * 删除 `MyWindow.ShowOssWatermark = ApplicationCommand.ShowOssWatermark;` 赋值。
+- ClassIsland.Desktop\Properties\launchSettings.json
+  * 删除名为 “ClassIsland (水印)” 的启动配置（其 commandLineArgs 为 -ossw）。
+
+二、删除“更新”设置页面
+------------------------
+- ClassIsland\App.Services.xaml.cs
+  * 移除 DI 注册 `services.AddTransient<UpdateSettingsPageViewModel>();`。
+  * 移除设置页注册 `if (UpdateService.AllowedPackageTypes.Contains(PackagingType)) { services.AddSettingsPage<UpdateSettingsPage>(); }`。
+- 删除文件：
+  * ClassIsland\Views\SettingPages\UpdateSettingsPage.axaml
+  * ClassIsland\Views\SettingPages\UpdateSettingsPage.axaml.cs
+  * ClassIsland\ViewModels\SettingsPages\UpdateSettingsPageViewModel.cs
+- ClassIsland\ClassIsland.csproj
+  * 移除 <Compile Update="Views\SettingPages\UpdateSettingsPage.axaml.cs"> 条目。
+
+三、删除“关于 ClassIsland”设置页面
+-----------------------------------
+- ClassIsland\App.Services.xaml.cs
+  * 移除 DI 注册 `services.AddTransient<AboutSettingsViewModel>();`。
+  * 移除设置页注册 `services.AddSettingsPage<AboutSettingsPage>();`。
+- 删除文件：
+  * ClassIsland\Views\SettingPages\AboutSettingsPage.axaml
+  * ClassIsland\Views\SettingPages\AboutSettingsPage.axaml.cs
+  * ClassIsland\ViewModels\SettingsPages\AboutSettingsViewModel.cs
+  （该页面内含的“开放源代码许可”弹窗 SettingsExpanderItemShowOssLicense_OnClick 随之移除。）
+
+四、移除欢迎页中的“开放源代码许可”弹窗
+---------------------------------------
+- ClassIsland\Views\WelcomePages\LicensePage.axaml
+  * 移除“我已阅读并同意《ClassIsland 开源许可》”勾选框（ComboBoxOssLicense）及其超链接按钮。
+  * “下一步”按钮的 IsEnabled 由原先对 OSS + 隐私两个勾选框的 MultiBinding 改为仅绑定隐私勾选框
+    （ComboBoxPrivacy.IsChecked）。
+- ClassIsland\Views\WelcomePages\LicensePage.axaml.cs
+  * 移除 `ButtonShowOssLicense_OnClick` 方法（保留 `ButtonShowPrivacyLicense_OnClick`）。
+
+未改动项说明
+------------
+- 欢迎页 LicensePage 中的《ClassIsland 隐私政策》对话框与勾选框予以保留。
+- UpdateService 及更新下载进度窗口（UpdateProgressWindow）等更新逻辑本身未删除，仅移除“更新”设置页入口。
+
+验证
+----
+使用 `dotnet build ClassIsland.Desktop\ClassIsland.Desktop.csproj -c Debug` 编译通过，
+0 个错误（仅有与本次改动无关的既有警告，如 XML 注释缺失、过时 API、平台 CA1416 等）。
+
+
+================================================
+后续改动：移除欢迎页“ClassIsland 是开源免费的软件”提示
+================================================
+
+改动目标
+--------
+- 删除欢迎页（WelcomePage）点击“下一步”时弹出的提示气泡中关于
+  “ClassIsland 是开源免费的软件，官方没有提供任何形式的付费支持服务……”的说明文字。
+
+修改位置
+--------
+- ClassIsland\Views\WelcomePages\WelcomePage.axaml.cs
+  * 在 `NavigateNext()` 方法中，原先会通过 `ShowToast` 弹出一条
+    Title = "欢迎使用 ClassIsland"、Message 为“开源免费软件”说明的 ToastMessage（AutoClose=false，
+    Severity=Warning）。该提示整段（ShowToast 调用）已删除，仅保留
+    `WelcomeWindow.WelcomeNavigateForwardCommand.Execute(this);` 以继续进入下一页。
+  * 说明：此提示仅为欢迎页的说明性气泡，与之前删除的开源水印、开放源代码许可弹窗相互独立，
+    故此前未改动；本次按需求一并移除。
+
+未改动项说明
+------------
+- 欢迎页 WelcomePage 本身的界面内容（XAML）及“下一步/数据迁移/进入恢复模式/加入集控”等按钮逻辑均保留。
+- 欢迎页 LicensePage 中的《ClassIsland 隐私政策》对话框与勾选框保留。
+- 开放源代码许可弹窗、开源水印、更新页面、关于 ClassIsland 页面已在前面改动中移除。
+
+验证
+----
+使用 `dotnet build ClassIsland\ClassIsland.csproj -c Debug` 编译通过，
+0 个错误（仅有与本次改动无关的既有警告）。

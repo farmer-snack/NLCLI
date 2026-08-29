@@ -37,11 +37,6 @@ public partial class MyWindow : FAAppWindow
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_PseudoClasses")]
     private static extern IPseudoClasses GetPseudoClasses(StyledElement element);
 
-    /// <summary>
-    /// 是否显示开源警告水印
-    /// </summary>
-    public static bool ShowOssWatermark { get; internal set; } = false;
-
     private bool _enableMicaWindow;
     
     /// <summary>
@@ -210,13 +205,6 @@ public partial class MyWindow : FAAppWindow
             var appToastAdorner = state.AppToastAdorner = new AppToastAdorner(GetTopLevel(window)!);
             layer.Children.Add(appToastAdorner);
             AdornerLayer.SetAdornedElement(appToastAdorner, element);
-
-            if ((AppBase.Current.IsDevelopmentBuild || ShowOssWatermark))
-            {
-                var adorner = new DevelopmentBuildAdorner(AppBase.Current.IsDevelopmentBuild, ShowOssWatermark);
-                layer?.Children.Add(adorner);
-                AdornerLayer.SetAdornedElement(adorner, element);
-            }
 
             state.IsAdornerAdded = true;
         }
