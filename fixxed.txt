@@ -218,3 +218,41 @@
 ----
 使用 `dotnet build ClassIsland\ClassIsland.csproj -c Debug` 编译通过，
 0 个错误（仅有与本次改动无关的既有警告）。
+
+
+================================================
+检测上游 GitHub Actions 更新（基于 develop/v2/misha-alpha 分支）
+================================================
+
+检测目标与方法
+--------------
+- 上游仓库：github.com/ClassIsland/ClassIsland
+- 对比分支：develop/v2/misha-alpha（本 fork 的基准分支；master 分支为旧栈，.NET 8 / macos-15 / 无 Android，
+  仅用作参照，不作为同步目标）
+- 比对文件：.github/workflows 下 4 个工作流
+  build_release.yml、close_stale_issues.yml、issues_similarity_analysis.yml、qodana_code_quality.yml
+- 方法：下载上游对应分支原始文件，与本地文件做规范化（统一换行 CRLF→LF）后的逐行内容与
+  “忽略空白”比对（collapse 所有空白后比较）。
+
+检测结果
+--------
+- issues_similarity_analysis.yml：内容一致（字节级/空白无关均一致）。
+- qodana_code_quality.yml：内容一致（字节级/空白无关均一致）。
+- build_release.yml：与上游 develop/v2/misha-alpha 分支“忽略空白”后完全一致；
+  逐行差异仅为 YAML 注释行换行/空格等格式差异（如 `build_type: full  # ...` 与下一行 `include:` 的折行位置），
+  功能等价（均含 build_android 作业、success('build_android') 条件与 needs 列表）。
+- close_stale_issues.yml：与上游 develop/v2/misha-alpha 分支“忽略空白”后完全一致；
+  差异仅为 `any-of-labels` 注释/标签行的折行格式，配置语义相同。
+
+结论
+----
+- 本地仓库的 GitHub Actions 已实现（功能上）与上游 develop/v2/misha-alpha 分支同步，
+  不存在需要“仿照上游实现方法”再修改的实质性更新。
+- 因此本次未修改任何工作流文件，也未改动其他仓库代码；fixxed.txt 中所述各项既往改动均保持原样。
+
+说明
+----
+- 此前曾误以 master 分支为基准，发现本地 build_release.yml 含 Android/.NET10 等定制而 master 无；
+  经用户提示改以 develop/v2/misha-alpha 为基准后确认本地即为该分支的等价实现，无需回退。
+- 若后续上游 develop/v2/misha-alpha 工作流出现功能性变更（新增作业/步骤/密钥/secrets 引用等），
+  可再次执行本检测流程并据此同步。
