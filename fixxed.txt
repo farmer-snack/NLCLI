@@ -189,3 +189,32 @@
 验证
 ----
 文本文件改动，不影响编译；无需构建验证（纯资源配置与文档改动）。
+
+
+================================================
+后续改动：移除“基本/通用”页开源提示 与 取消隐私政策强制同意
+================================================
+
+一、移除通用（基本）设置页中的开源提示
+--------------------------------------
+- ClassIsland\Views\SettingPages\GeneralSettingsPage.axaml
+  * 删除 `<StackPanel Classes="settings-container animated-intro">` 内首个
+    `controls3:FAInfoBar`（Severity=Warning，Message 为“ClassIsland 是开源免费的软件……”的开源反诈声明），
+    该 InfoBar 原先绑定 `SettingsService.Settings.ShowSellingAnnouncement` 显示。
+  * 仅移除该开源声明 InfoBar；下方的公告列表（AnnouncementService.Announcements）与其它设置项保留。
+- 说明：对应的本地化资源（Localization.SettingsPage*.resx 中 key=开源反诈声明 的字符串）为未使用残留，
+  不影响显示，可后续清理。
+
+二、取消欢迎页隐私政策强制同意
+------------------------------
+- ClassIsland\Views\WelcomePages\LicensePage.axaml
+  * 移除“我已阅读并同意《ClassIsland 隐私政策》”勾选框（ComboBoxPrivacy）。
+  * “下一步”按钮去掉原先对隐私勾选框的 IsEnabled 绑定，改为始终可点击。
+  * 页面标题由“同意许可条款”改为“欢迎使用 ClassIsland”，说明文字改为“查看《ClassIsland 隐私政策》”
+    （仍可点击打开隐私政策，但不再强制勾选同意）。
+  * 保留 ButtonShowPrivacyLicense_OnClick 超链接按钮与对应后台处理方法，仅作为可查阅的隐私政策入口。
+
+验证
+----
+使用 `dotnet build ClassIsland\ClassIsland.csproj -c Debug` 编译通过，
+0 个错误（仅有与本次改动无关的既有警告）。

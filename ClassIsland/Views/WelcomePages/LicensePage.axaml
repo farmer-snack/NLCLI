@@ -8,16 +8,13 @@
              x:Class="ClassIsland.Views.WelcomePages.LicensePage">
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                 Classes="settings-container animated-intro">
-        <TextBlock Text="同意许可条款" HorizontalAlignment="Center"
+        <TextBlock Text="欢迎使用 ClassIsland" HorizontalAlignment="Center"
                    Margin="0 0 0 4"
                    Theme="{StaticResource SubtitleTextBlockStyle}"/>
-        <TextBlock Text="要继续使用 ClassIsland，您必须阅读并同意以下许可条款。" HorizontalAlignment="Center"/>
-        <CheckBox x:Name="ComboBoxPrivacy">
-            <TextBlock VerticalAlignment="Center" Margin="0 4 0 0" >
-                我已阅读并同意<HyperlinkButton Content="《ClassIsland 隐私政策》" Margin="0 -2 0 0"
-                                         Click="ButtonShowPrivacyLicense_OnClick"/>。
-            </TextBlock>
-        </CheckBox>
+        <TextBlock HorizontalAlignment="Center">
+            查看<HyperlinkButton Content="《ClassIsland 隐私政策》" Margin="0 -2 0 0"
+                              Click="ButtonShowPrivacyLicense_OnClick"/>。
+        </TextBlock>
         <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
             <Button Command="{x:Static views:WelcomeWindow.WelcomeNavigateForwardCommand}"
                     ToolTip.Tip="下一步"
@@ -25,11 +22,7 @@
                     Width="48" Height="48"
                     CornerRadius="24"
                     Classes="accent" 
-                    Margin="0 8 0 0">
-                <Button.IsEnabled>
-                    <Binding Path="#ComboBoxPrivacy.IsChecked"/>
-                </Button.IsEnabled>
-            </Button>
+                    Margin="0 8 0 0"/>
         </StackPanel>
     </StackPanel>
 </UserControl>
