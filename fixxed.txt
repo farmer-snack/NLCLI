@@ -159,3 +159,33 @@
 ----
 使用 `dotnet build ClassIsland\ClassIsland.csproj -c Debug` 编译通过，
 0 个错误（仅有与本次改动无关的既有警告）。
+
+
+================================================
+后续改动：移除除 farmer-snack 之外的所有 contributor
+================================================
+
+改动目标
+--------
+- 仅保留 GitHub 用户 farmer-snack（即“我”），移除其余全部贡献者。
+
+修改位置
+--------
+- .all-contributorsrc
+  * 将 contributors 数组从 49 个条目替换为仅含 farmer-snack 的单个条目
+    （login/name=farmer-snack，avatar_url 取自 GitHub 用户 222942863，profile=https://github.com/farmer-snack，
+    contributions=["code"]）；其余字段（files、imageSize、contributorsPerLine、projectName/owner 等）保持不变。
+- README.md
+  * 将“All Contributors”徽章计数由 `all_contributors-49` 改为 `all_contributors-1`。
+  * 将自动生成的贡献者表格（<!-- ALL-CONTRIBUTORS-LIST:START --> … :END --> 之间，
+    原 49 人的 <td> 单元格）替换为仅 farmer-snack 的单个 <td> 单元格。
+
+说明
+----
+- 应用内“关于 ClassIsland”页面的贡献者抽屉已在先前改动中随该页面一同移除，
+  故应用运行时已不再展示贡献者列表；本次仅清理仓库数据源（.all-contributorsrc）与 README 文档。
+- .all-contributorsrc 由 all-contributors 工具/CI 用于生成 README 贡献者区块；手动同步后如再运行该工具会保持一致。
+
+验证
+----
+文本文件改动，不影响编译；无需构建验证（纯资源配置与文档改动）。
