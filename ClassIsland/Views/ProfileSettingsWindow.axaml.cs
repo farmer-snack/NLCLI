@@ -56,6 +56,9 @@ public partial class ProfileSettingsWindow : ViewBase
     private record UndoEntry(bool IsAdd, TimeLayoutItem Item, TimeLayout Layout, int Index, string Description);
     private readonly Stack<UndoEntry> _undoStack = new();
     private readonly Stack<UndoEntry> _redoStack = new();
+    private readonly List<IDisposable> _externalSubscriptions = [];
+    private readonly List<Action> _eventUnhookActions = [];
+    private bool _resourcesReleased;
 
     public static readonly FuncValueConverter<ProfileTransferProviderType, string>
         ProfileTransferProviderTypeToImportButtonTextConverter = new(x => x switch
@@ -83,17 +86,17 @@ public partial class ProfileSettingsWindow : ViewBase
         ListViewTimePoints.KeyDown += OnKeyDown;
         // 撤销/重做使用窗口级快捷键，避免依赖时间点列表是否获得焦点
         AddHandler(KeyDownEvent, OnGlobalUndoRedoKeyDown, RoutingStrategies.Tunnel);
-        ViewModel.ObservableForProperty(x => x.IsDrawerOpen)
-            .Subscribe(_ => OnDrawerStateChanged());
-        ViewModel.ObservableForProperty(x => x.SelectedTimeLayout)
-            .Subscribe(_ => TimeLineListControl?.ScrollIntoViewCentered(ViewModel.SelectedTimeLayout?.Layouts.FirstOrDefault()));
-        ViewModel.ObservableForProperty(x => x.SelectedTimeLayout)
+        _externalSubscriptions.Add(ViewModel.ObservableForProperty(x => x.IsDrawerOpen)
+            .Subscribe(_ => OnDrawerStateChanged()));
+        _externalSubscriptions.Add(ViewModel.ObservableForProperty(x => x.SelectedTimeLayout)
+            .Subscribe(_ => TimeLineListControl?.ScrollIntoViewCentered(ViewModel.SelectedTimeLayout?.Layouts.FirstOrDefault())));
+        _externalSubscriptions.Add(ViewModel.ObservableForProperty(x => x.SelectedTimeLayout)
             .Subscribe(_ =>
             {
                 _undoStack.Clear(); _redoStack.Clear();
                 ViewModel.CanUndo = false; ViewModel.CanRedo = false;
                 ViewModel.UndoDescriptions.Clear(); ViewModel.RedoDescriptions.Clear();
-            });
+            }));
     }
 
     private void OnGlobalUndoRedoKeyDown(object? sender, KeyEventArgs e)
@@ -163,6 +166,11 @@ public partial class ProfileSettingsWindow : ViewBase
     
     private void Control_OnLoaded(object? sender, RoutedEventArgs e)
     {
+        if (_resourcesReleased)
+        {
+            return;
+        }
+
         BuildTransferNavigationItems();
     }
 
@@ -178,6 +186,11 @@ public partial class ProfileSettingsWindow : ViewBase
 
     public void OpenDrawer(string key)
     {
+        if (_resourcesReleased)
+        {
+            return;
+        }
+
         ViewModel.IsDrawerOpen = true;
         if (this.FindResource(key) is { } o)
         {
@@ -197,17 +210,47 @@ public partial class ProfileSettingsWindow : ViewBase
 
     private async Task OpenCore(ViewBase? owner, Uri? uri)
     {
+        if (_resourcesReleased)
+        {
+            return;
+        }
+
         var isOpening = AssociatedViewHost == null;
         if (isOpening)
         {
-            if (!await ViewModel.ManagementService.AuthorizeByLevel(ViewModel.ManagementService.CredentialConfig
-                    .EditProfileAuthorizeLevel))
+            bool isAuthorized;
+            try
+            {
+                isAuthorized = await ViewModel.ManagementService.AuthorizeByLevel(ViewModel.ManagementService
+                    .CredentialConfig.EditProfileAuthorizeLevel);
+            }
+            catch
+            {
+                ReleaseResources();
+                throw;
+            }
+
+            if (!isAuthorized)
+            {
+                ReleaseResources();
+                return;
+            }
+
+            if (_resourcesReleased)
             {
                 return;
             }
 
             SentrySdk.Metrics.EmitCounter("views.ProfileSettingsWindow.open", 1);
-            base.Open(owner);
+            try
+            {
+                base.Open(owner);
+            }
+            catch
+            {
+                ReleaseResources();
+                throw;
+            }
             if (ViewModel.ManagementService.Policy is
                 {
                     DisableProfileEditing: false, DisableProfileClassPlanEditing: false,
@@ -216,6 +259,11 @@ public partial class ProfileSettingsWindow : ViewBase
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    if (_resourcesReleased)
+                    {
+                        return;
+                    }
+
                     if (ViewModel.ProfileService.Profile.TimeLayouts.Count > 0)
                     {
                         if (ViewModel.ProfileService.Profile.ClassPlans.Count <= 0)
@@ -276,11 +324,64 @@ public partial class ProfileSettingsWindow : ViewBase
         }
         ViewModel.ProfileService.SaveProfile();
     }
+
+    private void Window_OnClosed(object? sender, RoutedEventArgs e)
+    {
+        ReleaseResources();
+    }
+
+    private void ReleaseResources()
+    {
+        if (_resourcesReleased)
+        {
+            return;
+        }
+
+        _resourcesReleased = true;
+        foreach (var subscription in _externalSubscriptions)
+        {
+            subscription.Dispose();
+        }
+        _externalSubscriptions.Clear();
+        foreach (var unhookAction in _eventUnhookActions)
+        {
+            unhookAction();
+        }
+        _eventUnhookActions.Clear();
+
+        TimeLineListControl.SelectionChanged -= TimeLineListControl_OnSelectionChanged;
+        TimeLineListControl.KeyDown -= OnKeyDown;
+        ListViewTimePoints.KeyDown -= OnKeyDown;
+        RemoveHandler(KeyDownEvent, OnGlobalUndoRedoKeyDown);
+        Loaded -= Control_OnLoaded;
+        Closing -= Window_OnClosing;
+        Closed -= Window_OnClosed;
+
+        ScheduleDataGrid.ReleaseResources();
+        ScheduleDataGridAdjustment.ReleaseResources();
+        ScheduleCalendarControl.ReleaseResources();
+        ScheduleCalendarControl2.ReleaseResources();
+        ClassPlanTimeRuleEditControl.ReleaseResources();
+
+        ViewModel.IsDrawerOpen = false;
+        ViewModel.ReleaseResources();
+        _undoStack.Clear();
+        _redoStack.Clear();
+
+        DataContext = null;
+        Content = null;
+        Resources.Clear();
+    }
     
     private void MasterTabControl_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         Dispatcher.UIThread.Post(() =>
         {
+            if (_resourcesReleased)
+            {
+                return;
+            }
+
             if (ViewModel.MasterPageTabSelectIndex == 0 && ViewModel.ProfileService.Profile.TimeLayouts.Count > 0
                                                         && ViewModel.ProfileService.Profile.ClassPlans.Count <= 0)
             {
@@ -584,7 +685,7 @@ public partial class ProfileSettingsWindow : ViewBase
         await details.ShowModal(this);
     }
     
-    private void UpdateClassPlanInfoEditorTimeLayoutComboBox()
+    private void UpdateClassPlanInfoEditorComboBoxes()
     {
         if (ViewModel.SelectedClassPlan?.TimeLayout == null)
         {
@@ -595,6 +696,12 @@ public partial class ProfileSettingsWindow : ViewBase
             var kvp = ViewModel.TimeLayouts.List.FirstOrDefault(x => x.Key == ViewModel.SelectedClassPlan.TimeLayoutId);
             ViewModel.ClassPlanInfoSelectedTimeLayoutKvp = kvp;
         }
+
+        var selectedClassPlanGroupKvp = ViewModel.ClassPlanGroups.List
+            .FirstOrDefault(x => x.Key == ViewModel.SelectedClassPlan?.AssociatedGroup);
+        ViewModel.ClassPlanInfoSelectedClassPlanGroupKvp = selectedClassPlanGroupKvp.Value is null
+            ? null
+            : selectedClassPlanGroupKvp;
     }
     
     private void TreeViewClassPlans_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -613,7 +720,7 @@ public partial class ProfileSettingsWindow : ViewBase
         if (id is { } guid)
         {
             ViewModel.SelectClassPlanByGuid(guid);
-            UpdateClassPlanInfoEditorTimeLayoutComboBox();
+            UpdateClassPlanInfoEditorComboBoxes();
             OpenDrawer("ClassPlansInfoEditor");
             FlyoutHelper.CloseAncestorFlyout(sender);
         }
@@ -630,7 +737,7 @@ public partial class ProfileSettingsWindow : ViewBase
 
     private void ButtonOpenClassPlanDetails_OnClick(object? sender, RoutedEventArgs e)
     {
-        UpdateClassPlanInfoEditorTimeLayoutComboBox();
+        UpdateClassPlanInfoEditorComboBoxes();
         OpenDrawer("ClassPlansInfoEditor");
     }
 
@@ -660,7 +767,7 @@ public partial class ProfileSettingsWindow : ViewBase
         var newClassPlanGuid = Guid.NewGuid();
         ViewModel.ProfileService.Profile.ClassPlans.Add(newClassPlanGuid, newClassPlan);
         ViewModel.SelectClassPlanByGuid(newClassPlanGuid);
-        UpdateClassPlanInfoEditorTimeLayoutComboBox();
+        UpdateClassPlanInfoEditorComboBoxes();
         OpenDrawer("ClassPlansInfoEditor");
     }
 
@@ -698,7 +805,7 @@ public partial class ProfileSettingsWindow : ViewBase
         var newClassPlanGuid = Guid.NewGuid();
         ViewModel.ProfileService.Profile.ClassPlans.Add(newClassPlanGuid, s);
         ViewModel.SelectClassPlanByGuid(newClassPlanGuid);
-        UpdateClassPlanInfoEditorTimeLayoutComboBox();
+        UpdateClassPlanInfoEditorComboBoxes();
         OpenDrawer("ClassPlansInfoEditor");
         SentrySdk.Metrics.EmitCounter("views.ProfileSettingsWindow.classPlan.duplicate", 1);
     }
@@ -756,7 +863,7 @@ public partial class ProfileSettingsWindow : ViewBase
                 ActionContent = actionButton,
                 AutoClose = false
             };
-            actionButton.Click += (o, args) =>
+            EventHandler<RoutedEventArgs> actionButtonOnClick = (o, args) =>
             {
                 ViewModel.CurrentClassPlanEditDoneToast?.Close();
                 if (ViewModel.SettingsService.Settings.ClassPlanEditModeIndex == 0)
@@ -769,8 +876,10 @@ public partial class ProfileSettingsWindow : ViewBase
                     ScheduleDataGrid.ScrollIntoCurrentView();
                 }
             };
-            ViewModel.CurrentClassPlanEditDoneToast.ClosedCancellationTokenSource.Token.Register(() =>
-                ViewModel.CurrentClassPlanEditDoneToast = null);
+            actionButton.Click += actionButtonOnClick;
+            _eventUnhookActions.Add(() => actionButton.Click -= actionButtonOnClick);
+            _externalSubscriptions.Add(ViewModel.CurrentClassPlanEditDoneToast.ClosedCancellationTokenSource.Token.Register(() =>
+                ViewModel.CurrentClassPlanEditDoneToast = null));
             this.ShowToast(ViewModel.CurrentClassPlanEditDoneToast);
             return;
         }
@@ -795,7 +904,7 @@ public partial class ProfileSettingsWindow : ViewBase
     {
         ViewModel.SelectClassPlanByInstance(e.ClassPlan);
         // ViewModel.ScheduleCalendarSelectedDate = e.Date;
-        UpdateClassPlanInfoEditorTimeLayoutComboBox();
+        UpdateClassPlanInfoEditorComboBoxes();
         OpenDrawer("ClassPlansInfoEditor");
     }
 
@@ -1330,36 +1439,54 @@ public partial class ProfileSettingsWindow : ViewBase
 
     private void ButtonAddSubject_OnClick(object sender, RoutedEventArgs e)
     {
-        //DataGridSubjects.CancelEdit();
-        
-        var isCreating = DataGridSubjects.SelectedIndex == ViewModel.ProfileService.Profile.Subjects.Count;
-        
         DataGridSubjects.CancelEdit();
+        var wasReadOnly = DataGridSubjects.IsReadOnly;
         DataGridSubjects.IsReadOnly = true;
-        ViewModel.ProfileService.Profile.EditingSubjects.Add(new Subject());
-        DataGridSubjects.IsReadOnly = false;
-        DataGridSubjects.SelectedIndex = ViewModel.ProfileService.Profile.Subjects.Count - 1;
-        //TextBoxSubjectName.Focus();
+        var subject = new KeyValuePair<Guid, Subject>(Guid.NewGuid(), new Subject());
+        try
+        {
+            ViewModel.Subjects.List.Add(subject);
+            ViewModel.SelectedSubjectKvp = subject;
+        }
+        finally
+        {
+            DataGridSubjects.IsReadOnly = wasReadOnly;
+        }
         SentrySdk.Metrics.EmitCounter("views.ProfileSettingsWindow.subject.create", 1);
     }
     
     private void ButtonDuplicateSubject_OnClick(object sender, RoutedEventArgs e)
     {
         DataGridSubjects.CancelEdit();
+        var wasReadOnly = DataGridSubjects.IsReadOnly;
         DataGridSubjects.IsReadOnly = true;
-        foreach (var i in DataGridSubjects.SelectedItems)
+        KeyValuePair<Guid, Subject>? lastAddedSubject = null;
+        try
         {
-            var subject = i as Subject;
-            var o = ConfigureFileHelper.CopyObject(subject);
-            if (o == null)
+            foreach (var subject in DataGridSubjects.SelectedItems
+                         .OfType<KeyValuePair<Guid, Subject>>()
+                         .ToList())
             {
-                continue;
+                var copy = ConfigureFileHelper.CopyObject(subject.Value);
+                if (copy == null)
+                {
+                    continue;
+                }
+
+                var copyPair = new KeyValuePair<Guid, Subject>(Guid.NewGuid(), copy);
+                ViewModel.Subjects.List.Add(copyPair);
+                lastAddedSubject = copyPair;
             }
 
-            ViewModel.ProfileService.Profile.EditingSubjects.Add(o);
+            if (lastAddedSubject is { } selectedSubject)
+            {
+                ViewModel.SelectedSubjectKvp = selectedSubject;
+            }
         }
-        DataGridSubjects.SelectedItem = ViewModel.ProfileService.Profile.EditingSubjects.Last();
-        DataGridSubjects.IsReadOnly = false;
+        finally
+        {
+            DataGridSubjects.IsReadOnly = wasReadOnly;
+        }
         SentrySdk.Metrics.EmitCounter("views.ProfileSettingsWindow.subject.duplicate", 1);
     }
 
@@ -1372,40 +1499,44 @@ public partial class ProfileSettingsWindow : ViewBase
         );
 
         DataGridSubjects.CancelEdit();
+        var wasReadOnly = DataGridSubjects.IsReadOnly;
         DataGridSubjects.IsReadOnly = true;
-        var rm = new List<Subject>();
-        foreach (var i in DataGridSubjects.SelectedItems)
+        var removedSubjects = DataGridSubjects.SelectedItems
+            .OfType<KeyValuePair<Guid, Subject>>()
+            .ToList();
+        if (removedSubjects.Count == 0)
         {
-            if (i is Subject o)
-            {
-                rm.Add(o);
-            }
+            DataGridSubjects.IsReadOnly = wasReadOnly;
+            return;
         }
-        var s = ViewModel.ProfileService.Profile.EditingSubjects;
-        foreach (var t in rm)
+
+        foreach (var subject in removedSubjects)
         {
-            s.Remove(t);
+            ViewModel.Subjects.List.Remove(subject);
         }
+        ViewModel.SelectedSubjectKvp = null;
 
         var revertButton = new Button()
         {
             Content = "撤销"
         };
-        var toastMessage = new ToastMessage($"已删除 {rm.Count} 个科目。")
+        var toastMessage = new ToastMessage($"已删除 {removedSubjects.Count} 个科目。")
         {
             ActionContent = revertButton,
             Duration = TimeSpan.FromSeconds(10)
         };
-        revertButton.Click += (o, args) =>
+        EventHandler<RoutedEventArgs> revertButtonOnClick = (o, args) =>
         {
-            foreach (var subject in rm)
+            foreach (var subject in removedSubjects)
             {
-                ViewModel.ProfileService.Profile.EditingSubjects.Add(subject);
+                ViewModel.Subjects.List.Add(subject);
             }
             toastMessage.Close();
         };
+        revertButton.Click += revertButtonOnClick;
+        _eventUnhookActions.Add(() => revertButton.Click -= revertButtonOnClick);
         this.ShowToast(toastMessage);
-        DataGridSubjects.IsReadOnly = false;
+        DataGridSubjects.IsReadOnly = wasReadOnly;
     }
     #endregion
 

@@ -14,7 +14,6 @@ using Avalonia.Controls.Documents;
 using Avalonia.Controls.Metadata;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data.Core;
-using Avalonia.Diagnostics;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -621,7 +620,7 @@ public partial class MainWindow : Window, ITopmostEffectPlayer
         switch (SettingsService.Settings.TaskBarIconClickBehavior)
         {
             case 0:
-                if (!OperatingSystem.IsWindows())
+                if (!OperatingSystem.IsWindows()) // 兼容性处理：“打开主菜单”左键托盘行为仅在Windows平台上有效，为应对档案从Windows平台迁移至其他平台的情况，此处将左键托盘行为更改为“打开设置窗口”
                 {
                     SettingsService.Settings.TaskBarIconClickBehavior = 4;
                     break;
@@ -992,8 +991,8 @@ public partial class MainWindow : Window, ITopmostEffectPlayer
         }
 
         var bounds = screen.WorkingArea;
-        var width = Math.Max(bounds.Width - WindowedEditModeScreenMargin * 2, 1) / dpiX;
-        var height = Math.Max(bounds.Height - WindowedEditModeScreenMargin * 2, 1) / dpiY;
+        var width = Math.Max(bounds.Width - (WindowedEditModeScreenMargin * 2), 1) / dpiX;
+        var height = Math.Max(bounds.Height - (WindowedEditModeScreenMargin * 2), 1) / dpiY;
 
         WindowState = WindowState.Normal;
         Position = new PixelPoint(
@@ -1131,8 +1130,9 @@ public partial class MainWindow : Window, ITopmostEffectPlayer
     
     private void MenuItemTemporaryClassPlan_OnClick(object sender, EventArgs e)
     {
-        App.GetService<ProfileSettingsWindow>().OpenDrawer("TemporaryClassPlan");
-        OpenProfileSettingsWindow();
+        var window = App.GetService<ProfileSettingsWindow>();
+        window.OpenDrawer("TemporaryClassPlan");
+        window.Open();
     }
     
     private void MenuItemAbout_OnClick(object sender, EventArgs e)
@@ -1284,8 +1284,9 @@ public partial class MainWindow : Window, ITopmostEffectPlayer
         }
         if (LessonsService.CurrentClassPlan == null) // 如果今天没有课程，则选择临时课表
         {
-            App.GetService<ProfileSettingsWindow>().OpenDrawer("TemporaryClassPlan");
-            OpenProfileSettingsWindow();
+            var window = App.GetService<ProfileSettingsWindow>();
+            window.OpenDrawer("TemporaryClassPlan");
+            window.Open();
             return;
         }
 

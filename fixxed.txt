@@ -256,3 +256,60 @@
   经用户提示改以 develop/v2/misha-alpha 为基准后确认本地即为该分支的等价实现，无需回退。
 - 若后续上游 develop/v2/misha-alpha 工作流出现功能性变更（新增作业/步骤/密钥/secrets 引用等），
   可再次执行本检测流程并据此同步。
+
+
+================================================
+同步上游 develop/v2/misha-alpha（全量合并 + 重加 fork 定制）
+================================================
+
+背景
+----
+- 本地 fork 的 develop/v2/misha-alpha 停留在 045901ad（Build #1500，feat(ui): 为复杂抽屉内容添加加载动画），
+  此后未与上游同步；上游已推进至 a8af81ba（Build #1519），中间约 45 个提交。
+- 用户确认采用“全量合并后再重加定制”策略。
+
+合并过程
+--------
+- `git fetch origin develop/v2/misha-alpha` 后执行 `git merge origin/develop/v2/misha-alpha --no-edit`。
+- 自动合并成功（绝大多数文件，包括此前我们改动的 MyWindow.cs、Program.cs、ApplicationCommand.cs、
+  App.axaml.cs、GeneralSettingsPage.axaml、LicensePage.axaml、launchSettings.json、App.Services.xaml.cs、
+  ClassIsland.csproj 等），我们之前的“移除更新页/关于页/开源水印/隐私强制/贡献者”等定制在三方合并中被保留。
+- 冲突仅 2 处：
+  1) ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml：我们已删除、上游有改动 →
+     按“保留删除”处理（`git rm` 该文件），不 reintroduce 更新页。
+  2) README.md 贡献者区块：badge 与贡献者表格均冲突 → 解析为仅保留 farmer-snack。
+
+合并带入的上游主要内容（节选）
+------------------------------
+- feat(mainwindow): 主界面背景材质（mica 支持）/ 支持为单个主界面行和组件设置背景效果
+  （MainWindowBackgroundMaterialControl、PopupAcrylicMaterialControl、MainWindowBackgroundMaterialType 等新增）。
+- feat(ui): 为复杂抽屉内容/窗口开启前添加加载动画；新增 ExpressiveLoadingIndicator、Lazy、CompositionPageTransition 等控件。
+- refactor(profile): 弃用 EditingSubjects，改用前端的 SyncDictionaryList。
+- feat(data-transfer): Class Widgets 2 导入课表文件（ClassWidgets2ImportProvider 等新增）。
+- 大量 fix(ui)/perf(ui) 与 docs: add contributor（HickoryTrail、WindDrift、Victory-Aogu 等）。
+- AGENTS.md / CLAUDE.md / GEMINI.md / issue·PR 模板更新；nix 打包更新；Launcher 调试实例选择等。
+
+重加的 fork 定制（合并后复核并恢复）
+-----------------------------------
+- 更新页：UpdateSettingsPage.axaml 已删除（冲突保留删除）；其 .axaml.cs、ViewModel 因上游未改动已自动移除；
+  App.Services.xaml.cs 中确认无 UpdateSettingsPage / UpdateSettingsPageViewModel 注册。
+- 关于页：AboutSettingsPage 系列文件已删除；App.Services.xaml.cs 中确认无 AboutSettingsPage / AboutSettingsViewModel 注册。
+- 开源水印：MyWindow.cs 无 ShowOssWatermark / DevelopmentBuildAdorner 引用；Program.cs 无 --showOssWatermark；
+  ApplicationCommand.cs 无 ShowOssWatermark；App.axaml.cs 无赋值；DevelopmentBuildAdorner 文件已删除；
+  Generic.axaml 中对它的 ResourceInclude 已移除。launchSettings.json 无“(水印)”启动配置。
+- 通用页开源提示：GeneralSettingsPage.axaml 中开源反诈 FAInfoBar 仍缺失（保留移除）。
+- 隐私强制同意：LicensePage.axaml 中隐私勾选框与“下一步”绑定仍移除（保留移除）。
+- 贡献者：.all-contributorsrc 恢复为仅 farmer-snack 一条；README.md 贡献者表格恢复为仅 farmer-snack，
+  badge 计数 all_contributors-1（覆盖合并进来的 Victory-Aogu / WindDrift / HickoryTrail 等）。
+
+验证
+----
+- `dotnet build ClassIsland.Core` / `ClassIsland` / `ClassIsland.Desktop`（-c Debug）均 0 错误
+  （仅与本次改动无关的既有警告，如 XML 注释缺失、过时 API、平台 CA1416 等）。
+- 全仓库代码不再存在对 UpdateSettingsPage / AboutSettingsPage / AboutSettingsViewModel /
+  UpdateSettingsPageViewModel / DevelopmentBuildAdorner / ShowOssWatermark 的引用
+  （仅 fixxed.txt 文档中提及）。
+
+提交
+----
+- 合并提交：merge origin/develop/v2/misha-alpha，并完成上述冲突解析与定制恢复。

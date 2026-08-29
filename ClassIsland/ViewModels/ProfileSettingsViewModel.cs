@@ -28,6 +28,9 @@ namespace ClassIsland.ViewModels;
 
 public partial class ProfileSettingsViewModel : ObservableRecipient
 {
+    private readonly List<IDisposable> _externalSubscriptions = [];
+    private bool _resourcesReleased;
+
     public IProfileService ProfileService { get; }
     public IManagementService ManagementService { get; }
     public SettingsService SettingsService { get; }
@@ -48,7 +51,7 @@ public partial class ProfileSettingsViewModel : ObservableRecipient
 
 
     [ObservableProperty] private ObservableCollection<object> _transferNavigationViewItems = [];
-    [ObservableProperty] private object _drawerContent = new();
+    [ObservableProperty] private object? _drawerContent = new();
     [ObservableProperty] private bool _isClassPlansEditing = false;
     [ObservableProperty] private ObservableCollection<string> _profiles = new();
     [ObservableProperty] private bool _isRestartSnackbarActive = false;
@@ -59,6 +62,7 @@ public partial class ProfileSettingsViewModel : ObservableRecipient
     [ObservableProperty] private bool _isOfflineEditor = false;
     [ObservableProperty] private TimeLayoutItem? _selectedTimePoint;
     [ObservableProperty] private double _timeLineScale = 3.0;
+    [ObservableProperty] private KeyValuePair<Guid, Subject>? _selectedSubjectKvp;
     [ObservableProperty] private Subject? _selectedSubject;
     [ObservableProperty] private bool _isPanningModeEnabled = false;
     [ObservableProperty] private bool _isDragEntering = false;
@@ -93,6 +97,7 @@ public partial class ProfileSettingsViewModel : ObservableRecipient
     [ObservableProperty] private ToastMessage? _currentTimePointDeleteRevertToast;
     [ObservableProperty] private ToastMessage? _currentClassPlanEditDoneToast = null;
     [ObservableProperty] private KeyValuePair<Guid, TimeLayout>? _classPlanInfoSelectedTimeLayoutKvp;
+    [ObservableProperty] private KeyValuePair<Guid, ClassPlanGroup>? _classPlanInfoSelectedClassPlanGroupKvp;
     [ObservableProperty] private HashSet<string> _currentProfileBreakNames = [];
     [ObservableProperty] private ProfileTransferProviderControlBase? _transferProviderContent;
     [ObservableProperty] private bool _isProfileTransferInvoked;
@@ -153,7 +158,7 @@ public partial class ProfileSettingsViewModel : ObservableRecipient
         _groupedClassPlans = new ReadOnlyObservableCollection<ClassPlansTreeNode>(_groupedClassPlanNodes);
         SynchronizeClassPlanTree();
 
-        ClassPlanGroups.List
+        _externalSubscriptions.Add(ClassPlanGroups.List
             .ToObservableChangeSet()
             .Subscribe(_ =>
             {
@@ -161,9 +166,9 @@ public partial class ProfileSettingsViewModel : ObservableRecipient
                 {
                     SynchronizeClassPlanTree();
                 }
-            });
+            }));
 
-        ClassPlans.List
+        _externalSubscriptions.Add(ClassPlans.List
             .ToObservableChangeSet()
             .Transform(pair => new ObservableKeyValuePair<Guid, ClassPlan>(pair))
             .DisposeMany()
@@ -174,15 +179,96 @@ public partial class ProfileSettingsViewModel : ObservableRecipient
                 {
                     SynchronizeClassPlanTree();
                 }
-            });
+            }));
 
-        PropertyChanged += (sender, args) =>
+        PropertyChanged += OnViewModelPropertyChanged;
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(SelectedClassPlan))
         {
-            if (args.PropertyName == nameof(SelectedClassPlan))
+            SelectClassPlanByInstance(SelectedClassPlan, true);
+        }
+    }
+
+    partial void OnSelectedSubjectKvpChanged(KeyValuePair<Guid, Subject>? value)
+    {
+        SelectedSubject = value?.Value;
+    }
+
+    partial void OnSelectedSubjectChanged(Subject? value)
+    {
+        if (value == null)
+        {
+            SelectedSubjectKvp = null;
+            return;
+        }
+
+        if (SelectedSubjectKvp is { } selected && ReferenceEquals(selected.Value, value))
+        {
+            return;
+        }
+
+        foreach (var subject in Subjects.List)
+        {
+            if (ReferenceEquals(subject.Value, value))
             {
-                SelectClassPlanByInstance(SelectedClassPlan, true);
+                SelectedSubjectKvp = subject;
+                return;
             }
-        };
+        }
+
+        SelectedSubjectKvp = null;
+    }
+
+    public void ReleaseResources()
+    {
+        if (_resourcesReleased)
+        {
+            return;
+        }
+
+        _resourcesReleased = true;
+        PropertyChanged -= OnViewModelPropertyChanged;
+        foreach (var subscription in _externalSubscriptions)
+        {
+            subscription.Dispose();
+        }
+        _externalSubscriptions.Clear();
+        (TempClassPlanList as IDisposable)?.Dispose();
+
+        ClassPlans.Dispose();
+        TimeLayouts.Dispose();
+        Subjects.Dispose();
+        ClassPlanGroups.Dispose();
+        OrderedSchedules.Dispose();
+
+        CurrentTimePointDeleteRevertToast?.Close();
+        CurrentClassPlanEditDoneToast?.Close();
+        CurrentTimePointDeleteRevertToast = null;
+        CurrentClassPlanEditDoneToast = null;
+        DrawerContent = null;
+        (TransferProviderContent as IDisposable)?.Dispose();
+        TransferProviderContent = null;
+        SelectedTransferInfo = null;
+        SelectedTimePoint = null;
+        SelectedTimeLayout = null;
+        SelectedSubjectKvp = null;
+        SelectedSubject = null;
+        SelectedClassInfo = null;
+        SelectedClassPlan = null;
+        SelectedClassPlansTreeNode = null;
+        ClassPlanInfoSelectedTimeLayoutKvp = null;
+        ClassPlanInfoSelectedClassPlanGroupKvp = null;
+
+        TransferNavigationViewItems.Clear();
+        UndoDescriptions.Clear();
+        RedoDescriptions.Clear();
+        _groupedClassPlanNodes.Clear();
+        _classPlanTreeGroupNodes.Clear();
+        _classPlanTreeGroupChildren.Clear();
+        _classPlanTreeNodes.Clear();
     }
 
     private ClassPlansTreeNode CreateClassPlanGroupNode(Guid groupId)
