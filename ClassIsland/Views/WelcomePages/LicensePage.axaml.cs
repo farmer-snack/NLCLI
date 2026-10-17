@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using ClassIsland.Core.Controls;
+using ClassIsland.Core.Extensions;
 using ClassIsland.Core.Extensions.UI;
 using FluentAvalonia.UI.Controls;
 

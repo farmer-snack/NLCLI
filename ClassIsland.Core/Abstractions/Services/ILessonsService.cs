@@ -64,6 +64,12 @@ public interface ILessonsService : INotifyPropertyChanged, INotifyPropertyChangi
     /// </summary>
     event EventHandler? CurrentTimeStateChanged;
 
+    /// <summary>
+    /// 当课程安排失效时触发，事件参数用于判断指定日期是否受影响。
+    /// 通知包含尚未缓存课表的日期。
+    /// </summary>
+    event EventHandler<Predicate<DateOnly>>? ScheduleItemsInvalidated;
+
     internal void DebugTriggerOnClass();
     internal void DebugTriggerOnBreakingTime();
     internal void DebugTriggerOnAfterSchool();
@@ -86,4 +92,11 @@ public interface ILessonsService : INotifyPropertyChanged, INotifyPropertyChangi
     /// <param name="referenceTime">指定日期。默认为当前日期。</param>
     /// <remarks> 2-first, 1-based </remarks>
     ObservableCollection<int> GetCyclePositionsByDate(DateTime? referenceTime = null);
+    
+    /// <summary>
+    /// 获取当日的课程安排。
+    /// </summary>
+    /// <param name="date">日期</param>
+    /// <returns>这天会生效的课程安排</returns>
+    OrderedDictionary<Guid, ScheduleItem> GetScheduleItemsByDate(DateOnly date);
 }

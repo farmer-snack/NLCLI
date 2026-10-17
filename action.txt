@@ -1,0 +1,16 @@
+# 上游同步进度记录
+UPSTREAM_REPO   = https://github.com/ClassIsland/ClassIsland.git
+UPSTREAM_BRANCH = develop/v2/misha-alpha
+BRANCH_FALLBACK = 0
+LAST_SYNCED_SHA   = fd83102d2b7bc5463c9900ae4ef68bd4d72af080
+LAST_SYNCED_SHORT = fd83102
+LAST_SYNCED_AT    = 2026-10-17T17:45:23+08:00
+BASE_SHA          = a8af81ba
+BASE_SOURCE       = git merge-base（action.txt 首次创建，无历史基线）
+SYNCED_FROM       = origin/develop/v2/misha-alpha @ a672cb1
+MY_REMOTE_URL     = https://github.com/farmer-snack/NLCLI.git
+LOCAL_BRANCH      = develop/v2/misha-alpha
+UPSTREAM_COMMITS  = 43
+UPDATED_FILES     = 180
+CONFLICT_FILES    = 2
+BUILD_RESULT      = 通过（ClassIsland.Core 0 errors / ClassIsland 0 errors）

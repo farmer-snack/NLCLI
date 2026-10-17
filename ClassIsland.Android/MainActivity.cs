@@ -7,10 +7,12 @@ using Avalonia.Controls;
 using Avalonia.Threading;
 using ClassIsland.Android.Controls.UI;
 using ClassIsland.Android.Services;
+using ClassIsland.Android.Services.Platform;
 using ClassIsland.Android.Services.UI;
 using ClassIsland.Core;
 using ClassIsland.Core.Abstractions.Services.UI;
 using ClassIsland.Core.Enums;
+using ClassIsland.Platforms.Abstraction;
 using ClassIsland.Shared;
 using ClassIsland.Views;
 
@@ -25,8 +27,16 @@ public class MainActivity : AvaloniaMainActivity
     private const string NotificationPermissionPreferencesName = "notification_permissions";
     private const string NotificationPermissionRequestedKey = "post_notifications_requested";
     private const int NotificationPermissionRequestCode = 13280;
+    private const int LocationPermissionRequestCode = 13281;
+
+    private TaskCompletionSource<bool>? _locationPermissionRequest;
 
     public static WeakReference<MainActivity>? Current { get; set; }
+
+    internal static event EventHandler? Resumed;
+    internal static event EventHandler? NotificationPermissionChanged;
+
+    internal bool IsForeground { get; private set; }
 
     public event EventHandler? Destroy;
 
@@ -71,6 +81,30 @@ public class MainActivity : AvaloniaMainActivity
                 var mv = IAppHost.GetService<MainView>();
                 mv.Show();
             });
+        }
+
+        HandleNotificationIntent(Intent);
+    }
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        Intent = intent;
+        HandleNotificationIntent(intent);
+    }
+
+    private static void HandleNotificationIntent(Intent? intent)
+    {
+        var notificationId = intent?.GetStringExtra(DesktopToastService.NotificationIdExtra);
+        var actionId = intent?.GetStringExtra(DesktopToastService.ActionIdExtra);
+        intent?.RemoveExtra(DesktopToastService.NotificationIdExtra);
+        intent?.RemoveExtra(DesktopToastService.ActionIdExtra);
+
+        if (Guid.TryParse(notificationId, out var notificationGuid) &&
+            Guid.TryParse(actionId, out var actionGuid) &&
+            PlatformServices.DesktopToastService is DesktopToastService service)
+        {
+            service.QueueActivation(notificationGuid, actionGuid);
         }
     }
 
@@ -117,8 +151,75 @@ public class MainActivity : AvaloniaMainActivity
 #pragma warning restore CA1416
     }
     
+    internal Task<bool> RequestLocationPermissionAsync()
+    {
+        if (_locationPermissionRequest != null)
+        {
+            return _locationPermissionRequest.Task;
+        }
+
+        if (!IsForeground || IsFinishing || IsDestroyed)
+        {
+            return Task.FromResult(false);
+        }
+
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _locationPermissionRequest = completion;
+        try
+        {
+            RequestPermissions(
+                [global::Android.Manifest.Permission.AccessCoarseLocation,
+                    global::Android.Manifest.Permission.AccessFineLocation],
+                LocationPermissionRequestCode);
+        }
+        catch
+        {
+            _locationPermissionRequest = null;
+            throw;
+        }
+
+        return completion.Task;
+    }
+
+    public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NotificationPermissionRequestCode)
+        {
+            NotificationPermissionChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+        if (requestCode != LocationPermissionRequestCode)
+        {
+            return;
+        }
+
+        var completion = _locationPermissionRequest;
+        _locationPermissionRequest = null;
+        completion?.TrySetResult(grantResults.Length > 0 &&
+            (CheckSelfPermission(global::Android.Manifest.Permission.AccessCoarseLocation) == Permission.Granted ||
+             CheckSelfPermission(global::Android.Manifest.Permission.AccessFineLocation) == Permission.Granted));
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        IsForeground = true;
+        Resumed?.Invoke(this, EventArgs.Empty);
+    }
+
+    protected override void OnPause()
+    {
+        IsForeground = false;
+        base.OnPause();
+    }
+
     protected override void OnDestroy()
     {
+        IsForeground = false;
+        _locationPermissionRequest?.TrySetResult(false);
+        _locationPermissionRequest = null;
+
         if (ViewHost != null)
         {
             ActivityViewHostProvider.Instance.ViewHosts.Remove(ViewHost);

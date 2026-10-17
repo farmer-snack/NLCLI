@@ -1,0 +1,33 @@
+# ClassIsland 上游同步 · Action 变更记录
+（本文件为追加式日志，最新记录在最下方）
+
+================================================================
+## 2026-10-17 17:45:23  同步 fd83102
+上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (fd83102)
+本次基线 : a8af81ba
+本地分支 : develop/v2/misha-alpha  →  本地提交见本次 commit
+
+新增:
+  - (无)
+修改:
+  - build_release.yml (Build)
+删除:
+  - (无)
+未变更:
+  - close_stale_issues.yml (Close inactive issues)
+  - issues_similarity_analysis.yml (Issues Similarity Analysis)
+  - qodana_code_quality.yml (Qodana)
+
+本次同步的上游提交（43 个）:
+  - fd83102d feat(ui): 支持通过滑动消除界面 toast
+  - 9650fb0c feat(profile): 日程课表调课功能
+  - d8e5f012 feat(ui/profile-editor): 优化档案编辑器在日程模式和经典模式下的行为
+  - 35eae9d5 feat(ui/settings/realtime-notification): 为实时通知设置页面添加示意图
+  - 34b818be build: 升级 Avalonia 到 12.1.4
+  - 9a19d1f6 feat(platform/android): 优化安卓实时通知外观
+  - eba94a97 feat(profile): 允许在时间启用规则排除和附加特定日期
+  - addf7998 feat(ui): 引入日期多选控件
+  - b2ccd92c fix(platform/android/weather): 修复天气预警图标 http 未加密协议无法显示
+  - aef9f88e feat(platform/android/location): 实现安卓端定位服务
+  - ...（其余 33 个提交见 git log a8af81ba..fd83102）
+================================================================

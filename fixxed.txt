@@ -313,3 +313,71 @@
 提交
 ----
 - 合并提交：merge origin/develop/v2/misha-alpha，并完成上述冲突解析与定制恢复。
+
+
+================================================
+[2026-10-17 17:45] 同步 upstream/develop/v2/misha-alpha @ fd83102
+================================================
+
+基线说明
+--------
+- 本次由 AI 按提示词自动执行。action.txt 首次创建，无历史基线，BASE 由
+  `git merge-base HEAD upstream/develop/v2/misha-alpha` 推导，得到 a8af81ba
+  （与上一次手工同步记录的上游点完全一致）。
+- 上游 fd83102 距基线共 43 个提交。
+
+冲突自动修正（由 AI 完成）
+--------------------------
+- 文件: ClassIsland.Core/Controls/MyWindow.cs（字段声明区，约第 42-52 行）
+  * 冲突形态: ours 为空（此前已删除水印相关代码）；theirs 在改位置新增了
+    `[UnsafeAccessor] SetButtonIsPressed(Button, bool)` 以及 `ShowOssWatermark` 属性。
+  * 我的定制: 删除 `ShowOssWatermark` 静态属性，窗口不再添加开发构建 / 开源水印装饰层。
+  * 上游改动: 新增 UnsafeAccessor 方法 `SetButtonIsPressed`，用于模拟按钮按下状态。
+  * 处理方式: 保留 `SetButtonIsPressed` 声明（该文件第 193 行有实际调用，删除会编译失败），
+    继续删除 `ShowOssWatermark` 属性。
+  * 最终结果: 水印相关代码零残留；同时获得上游新增的按钮状态模拟能力。
+
+- 文件: ClassIsland/Views/WelcomePages/LicensePage.axaml.cs（类内方法区）
+  * 冲突形态: ours 为空（方法已删）；theirs 仍保留 `ButtonShowOssLicense_OnClick`。
+  * 我的定制: 删除“开放源代码许可”弹窗入口。
+  * 上游改动: 该处实质未变更，仅因上下文对齐进入冲突。
+  * 处理方式: 保持删除，不恢复该方法。
+  * 最终结果: 欢迎页无 OSS 许可弹窗；隐私政策入口 `ButtonShowPrivacyLicense_OnClick` 保留。
+
+其他由 AI 完成的调整
+--------------------
+- 171 个“仅上游改动”的文件（75 新增 + 96 修改）
+  * 原因: 上游自 a8af81ba 起的正常功能演进。
+  * 处理方式: 直接采用上游版本（本地从未改动过这些文件，无覆盖风险）。
+  * 影响面: 上游功能整体进入 fork。
+
+- ClassIsland/Views/SettingPages/AboutSettingsPage.axaml.cs
+- ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs
+  * 原因: 本地已删除这两个文件，上游对它们有修改。
+  * 处理方式: `git rm` 保持删除，不重新引入“关于”/“更新”页面。
+  * 影响面: 上游对这两个页面的改动不会进入 fork（符合定制意图）。
+
+构建失败的修复（均为环境问题，未改动任何业务代码）
+--------------------------------------------------
+- 问题: `vendors/EdgeTtsSharp` 子模块未初始化 → MSB3202 项目文件不存在。
+  * 修法: 将 submodule URL 由 SSH 改为 HTTPS 后 `git submodule update --init --depth 1`。
+  * 影响面: 仅本地构建环境，仓库内容不变。
+- 问题: 浅克隆缺少 tag → `GitInfo.Tag` 取到 "fatal: No names found, cannot describe anything."
+  → CS7034 版本号格式错误。
+  * 修法: `git fetch upstream --tags`（89 个 tag），`git describe` 恢复为 `2.1.1.1-23-ga672cb1b`。
+  * 影响面: 仅版本号生成，仓库内容不变。
+- 未做任何代码改动即通过构建，故本次没有“为编译而改代码”的修复。
+
+保留未动的本地定制
+------------------
+- fixxed.txt、.all-contributorsrc、README.md、ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml、
+  ClassIsland/Views/WelcomePages/LicensePage.axaml、WelcomePage.axaml.cs、
+  ClassIsland.Desktop/Properties/launchSettings.json、ClassIsland.Core/Themes/Generic.axaml 等，
+  上游未改动，原样保留。
+
+校验结果
+--------
+- 冲突标记残留: 0
+- 定制点断言: 水印代码 0 处 / DevelopmentBuildAdorner 0 文件 / UpdateSettingsPage 0 文件 /
+  AboutSettingsPage 0 文件 / Program.cs 无 --showOssWatermark / README 徽章 all_contributors-1
+- 构建: ClassIsland.Core 0 errors；ClassIsland 0 errors（警告均为既有问题）
