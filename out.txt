@@ -18,7 +18,7 @@
   - issues_similarity_analysis.yml (Issues Similarity Analysis)
   - qodana_code_quality.yml (Qodana)
 
-本次同步的上游提交（43 个）:
+本次同步的上游提交（43 个，全部列出）:
   - fd83102d feat(ui): 支持通过滑动消除界面 toast
   - 9650fb0c feat(profile): 日程课表调课功能
   - d8e5f012 feat(ui/profile-editor): 优化档案编辑器在日程模式和经典模式下的行为
@@ -27,7 +27,39 @@
   - 9a19d1f6 feat(platform/android): 优化安卓实时通知外观
   - eba94a97 feat(profile): 允许在时间启用规则排除和附加特定日期
   - addf7998 feat(ui): 引入日期多选控件
-  - b2ccd92c fix(platform/android/weather): 修复天气预警图标 http 未加密协议无法显示
+  - b2ccd92c fix(platform/android/weather): 修复在 android 上因为天气预警图标为 http 未加密协议无法显示的问题
   - aef9f88e feat(platform/android/location): 实现安卓端定位服务
-  - ...（其余 33 个提交见 git log a8af81ba..fd83102）
+  - 63e8c05a feat(r/notification/class): 支持在上下壳提醒中选择显示上课地点、任课教师和持续时间
+  - 576a3615 perf(platform/android/ui): 修复提醒小图标过大导致卡死系统 UI 的问题
+  - 4b0bd44f feat(platform/android/toast): 为 Android 平台加入 Toast 支持
+  - de3cad97 fix(platform/android/ui): 修复 Android 上拖动无法拖动的问题
+  - c55dd954 feat(mainwindow): 引入 Android 主界面
+  - 723fc6e6 chore: 优化 AGENTS.md
+  - 530b2e3f fix(ui/mainwindow): 修复 Rectangles 主题在展示天气提醒时崩溃的问题
+  - 866dced7 feat(ui/mainwindow): 新增 Rectangles 主题
+  - b01ab5bd feat(r/components/schedule): 课表组件支持显示科目图标
+  - 00c387fe feat(mainview): 在主页显示一天的课表
+  - 9f22cc76 feat(ui/lessons): 新增竖直版课程控件
+  - 066dc49a feat(ui): 实现 AdaptiveNavigationView
+  - 08808615 refactor(schedule-week-control): 将获取当周课程的逻辑整合到 swc 控件内
+  - 6d4661c1 feat(ui/schedule-week-control): 日程课表视图窄屏幕适配
+  - bb4a320b feat(ui/profile-editor): 在日程课表编辑器中显示科目主题色和图标
+  - 07a43d64 fix(ui/profile-editor): 修复日程课程编辑器触屏不可用的问题
+  - 319f8363 feat(profile): 自动迁移科目扩展信息
+  - 9fc53712 perf: 修复各种流泄露的问题
+  - e341f187 feat(r/notifications/class): 在上课提醒和准备上课提醒中显示科目对应的图标 #85
+  - 856fc451 feat(profile): 为科目引入主题色、图标和地点字段 #1112 #85 #339
+  - b9e7fdeb feat(ui/profile-editor): 优化课程编辑器 UI
+  - 0cc2939d ci: 固定 .NET SDK 版本
+  - b61a0353 feat(notification): 为提醒行动添加自定义图标支持
+  - 4554c57b feat(ui): 添加图标选择器
+  - 83075546 feat(ui): 添加图片 IconSouce 对应的图标表达式
+  - 27f2655c feat(profile-editor): 添加日程课表编辑器
+  - 8a6dc18d feat(lessons): 增加获取某日课程安排的 api
+  - 7cb2f85e feat(mainwindow): 为主界面隐藏/显示添加动画
+  - 5beb6b62 fix(app): 修复在启用 CepCompat 的情况下导致应用无法在部分影子栈支持不完整的平台上运行的问题 #1979
+  - 5a051b38 feat(ui/profile-editor): 优化档案编辑器导入/导出课表 UX
+  - 09385f81 feat(profile): 实现日程式课表原型
+  - 50414605 fix(ui/profile-editor): 修复课表编辑表格可能意外挤压的问题 #1975
+  - 2d0b924c feat(ui): 长按显示 ToolTip
 ================================================================
