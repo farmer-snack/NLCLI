@@ -131,6 +131,17 @@ public partial class ProfileSettingsViewModel
         return pair;
     }
 
+    public bool RemoveSelectedReplacementScheduleItem()
+    {
+        if (SelectedScheduleItemKvp is not { } selected
+            || selected.Value.ReplacementTarget == null
+            || !ScheduleItems.List.Remove(selected))
+            return false;
+
+        SelectedScheduleItemKvp = null;
+        return true;
+    }
+
     public bool ApplyScheduleWeekEdit(ScheduleWeekEditEventArgs request)
     {
         if (request.ScheduleItemId is not { } id || !ProfileService.Profile.ScheduleItems.TryGetValue(id, out var item))

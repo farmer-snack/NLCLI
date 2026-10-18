@@ -1,5 +1,33 @@
 # ClassIsland 上游同步 · Action 变更记录
-（本文件为追加式日志，最新记录在最下方）
+（最新记录在最上方，越往下越旧）
+
+================================================================
+## 2026-10-18 21:44:32  同步 41fc703
+上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (41fc703)
+本次基线 : fd83102
+本地分支 : develop/v2/misha-alpha  →  本地提交见本次 commit
+
+新增:
+  - (无)
+修改:
+  - (无)
+删除:
+  - (无)
+未变更:
+  - build_release.yml (Build)
+  - close_stale_issues.yml (Close inactive issues)
+  - issues_similarity_analysis.yml (Issues Similarity Analysis)
+  - qodana_code_quality.yml (Qodana)
+
+本次同步的上游提交（5 个，全部列出）:
+  - 41fc7035 refactor(profile): 抽取临时课程操作到 ProfileService
+  - 97e109eb feat(profile): 日程课程支持禁用
+  - d9ea85d6 feat(profile): 课程支持临时覆盖另一个课程
+  - a06aa9b9 feat(profile): 支持在课程层级覆盖科目设置的上课地点 #339
+  - ca4eaf06 feat(ui): 为 VerticalDrawer 引入全高度模式和切换高度手势
+
+本次无 Action 变更
+================================================================
 
 ================================================================
 ## 2026-10-17 17:45:23  同步 fd83102
