@@ -1,428 +1,78 @@
 ================================================
+[2026-10-24 07:25] 同步 upstream/develop/v2/misha-alpha @ 329bf4b1
+================================================
+
+范围：基线 41fc7035 → 329bf4b1，上游 1 个提交，改动 50 个文件。
+处理：冲突 0 个（残留 0 个）；本地定制 25 个文件保留未动；分支回退 0。
+构建：ClassIsland.Desktop → 通过（0 errors / 1294 warnings）
+
+改动的文件
+----------
+- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml — 取上游
+- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml.cs — 取上游
+- ClassIsland.Android/MainActivity.cs — 取上游
+- ClassIsland.Core/Abstractions/Controls/IViewHost.cs — 取上游
+- ClassIsland.Core/Abstractions/Controls/ViewBase.cs — 取上游
+- ClassIsland.Core/Assists/ViewHostAssist.cs — 取上游
+- ClassIsland.Core/Controls/VerticalDrawer.axaml — 取上游
+- ClassIsland.Core/Controls/VerticalDrawer.axaml.cs — 取上游
+- ClassIsland.Core/Models/UI/DrawerOptions.cs — 取上游
+- ClassIsland.Shared/Models/Management/ManagementPolicy.cs — 取上游
+- ClassIsland/Controls/ScheduleWeekEdit/ScheduleWeekEditControl.cs — 取上游
+- ClassIsland/Controls/UI/DrawerNavigationHost.axaml — 取上游
+- ClassIsland/Controls/UI/DrawerNavigationHost.axaml.cs — 取上游
+- ClassIsland/Controls/UI/WindowViewHost.axaml — 取上游
+- ClassIsland/Controls/UI/WindowViewHost.axaml.cs — 取上游
+- ClassIsland/Converters/SubjectPreviewConverters.cs — 取上游
+- ClassIsland/Extensions/ProfileServiceExtensions.cs — 取上游
+- ClassIsland/Helpers/ScheduleItemEditHelper.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/CourseEditViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/CourseInfoViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/ImportExportProviderViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/ImportExportViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/ProfileManagementViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/SubjectEditViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/SubjectManagementViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewParts/SubjectPickerViewModel.cs — 取上游
+- ClassIsland/ViewModels/MainViewViewModel.ScheduleEditing.cs — 取上游
+- ClassIsland/ViewModels/MainViewViewModel.ScheduleWeek.cs — 取上游
+- ClassIsland/ViewModels/ProfileEntry.cs — 取上游
+- ClassIsland/ViewModels/ProfileSettingsViewModel.ScheduleWeek.cs — 取上游
+- ClassIsland/Views/MainView.axaml — 取上游
+- ClassIsland/Views/MainView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/CourseEditView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/CourseEditView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/CourseInfoView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/CourseInfoView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/ImportExportProviderView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/ImportExportProviderView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/ImportExportView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/ImportExportView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/ProfileManagementView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/ProfileManagementView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/ScheduleModeView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/ScheduleModeView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/SubjectEditView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/SubjectEditView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/SubjectManagementView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/SubjectManagementView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewParts/SubjectPickerView.axaml — 取上游
+- ClassIsland/Views/MainViewParts/SubjectPickerView.axaml.cs — 取上游
+
+================================================
 [2026-10-18 21:44] 同步 upstream/develop/v2/misha-alpha @ 41fc703
 ================================================
 
-范围
-----
-- 基线 fd83102 → 目标 41fc703，上游 5 个提交。
-- 上游改动 25 个文件，全部为修改（无新增/删除）。
-- 本地定制 25 个文件（含三个记录文件）。
-- 两边交集为 0，**零冲突**，未做任何人工合并。
-
-上游内容（5 个提交）
---------------------
-- 41fc7035 refactor(profile): 抽取临时课程操作到 ProfileService
-- 97e109eb feat(profile): 日程课程支持禁用
-- d9ea85d6 feat(profile): 课程支持临时覆盖另一个课程
-- a06aa9b9 feat(profile): 支持在课程层级覆盖科目设置的上课地点 #339
-- ca4eaf06 feat(ui): 为 VerticalDrawer 引入全高度模式和切换高度手势
-
-冲突自动修正（由 AI 完成）
---------------------------
-- 无。交集为空，25 个文件直接采用上游版本。
-
-其他由 AI 完成的调整
---------------------
-- 25 个仅上游改动的文件：直接 git checkout 上游版本，未做二次修改。
-- 本地定制未做任何改动：水印 / 更新页 / 关于页 / 开源提示 / 隐私勾选 / 贡献者 全部保持原样。
-
-构建失败的修复
---------------
-- 无。ClassIsland.Desktop 一次构建通过（0 errors / 1319 warnings，均为既有警告）。
-
-校验结果
---------
-- 冲突标记残留: 0
-- 定制点断言: 水印 0 / DevelopmentBuildAdorner 0 / UpdateSettingsPage 0 / AboutSettingsPage 0 /
-  --showOssWatermark 0 / README all_contributors-1
-- 构建: ClassIsland.Desktop 0 errors
-
-说明
-----
-- 基线 fd83102 不是本地 HEAD 的祖先（上次同步用文件级替换，未建立 merge 关系），
-  但 BASE→HEAD 与 BASE→上游 的差异均为 25 个文件，符合预期，三方合并语义成立。
-
-
-删除构建版本后出现的屏幕水印 - 实现说明
-================================================
-
-问题描述
---------
-删除构建版本（即运行开发构建 / 非正式发布版本）后，ClassIsland 窗口底部会显示
-水印文字“开发中画面，不代表最终品质。”以及版本号。该水印由开发构建装饰层
-（DevelopmentBuildAdorner）在 MyWindow 加载装饰层时添加。
-
-实现方法
---------
-水印的添加逻辑位于 ClassIsland.Core\Controls\MyWindow.cs 的装饰层初始化方法中。
-原逻辑在以下任一条件满足时都会添加 DevelopmentBuildAdorner：
-  - AppBase.Current.IsDevelopmentBuild 为 true（开发构建/删除构建版本后出现）
-  - MyWindow.ShowOssWatermark 为 true（通过 --showOssWatermark 命令行参数开启的开源地址水印）
-
-由于开源地址水印属于独立的许可/合规要求（由命令行参数 --showOssWatermark /
--ossw 控制），不应被删除；因此仅移除了“开发构建”触发条件，保留开源水印逻辑。
-
-修改位置：ClassIsland.Core\Controls\MyWindow.cs
-原代码：
-    if ((AppBase.Current.IsDevelopmentBuild || ShowOssWatermark))
-    {
-        var adorner = new DevelopmentBuildAdorner(AppBase.Current.IsDevelopmentBuild, ShowOssWatermark);
-        layer?.Children.Add(adorner);
-        AdornerLayer.SetAdornedElement(adorner, element);
-    }
-
-修改后：
-    if (ShowOssWatermark)
-    {
-        var adorner = new DevelopmentBuildAdorner(AppBase.Current.IsDevelopmentBuild, ShowOssWatermark);
-        layer?.Children.Add(adorner);
-        AdornerLayer.SetAdornedElement(adorner, element);
-    }
-
-效果
-----
-- 开发构建（删除构建版本后）不再显示“开发中画面，不代表最终品质。”及版本号水印。
-- 通过命令行参数 --showOssWatermark 显式开启的开源地址水印（https://www.classisland.tech）
-  仍保持原有行为，不受影响。
-- DevelopmentBuildAdorner 控件类及其 axaml 模板无需改动，仅在开发构建条件下不会
-  再被实例化/添加到装饰层。
-
-验证
-----
-使用 `dotnet build ClassIsland.Core\ClassIsland.Core.csproj -c Debug` 编译通过，
-0 个错误（仅有 XML 注释和过时 API 的既有警告，与本次改动无关）。
-
-相关文件
---------
-- ClassIsland.Core\Controls\MyWindow.cs            （修改：移除开发构建水印触发条件）
-- ClassIsland.Core\Controls\DevelopmentBuildAdorner.cs   （未改动，仅保留供 OSS 水印使用）
-- ClassIsland.Core\Controls\DevelopmentBuildAdorner.axaml （未改动，模板中的开发构建文字块仍由 IsDevelopmentBuild 绑定控制可见性）
-- ClassIsland\Program.cs / ClassIsland\Models\ApplicationCommand.cs / ClassIsland\App.axaml.cs
-  （未改动，--showOssWatermark 相关逻辑保持不变）
-
-
-================================================
-后续改动：删除更新页面、开源软件提示（开源水印 + 开放源代码许可弹窗）及关于 ClassIsland 页面
-================================================
-
-改动目标（用户确认范围）
-------------------------
-1. 删除“更新”设置页面（UpdateSettingsPage），并解除其在设置导航中的注册。
-2. 删除“开源软件提示”，即：
-   - 屏幕右下角开源地址水印（https://www.classisland.tech，OSS 水印）；
-   - “开放源代码许可”弹窗（AboutSettingsPage 与欢迎页 LicensePage 中的 OSS 许可对话框）。
-3. 删除“关于 ClassIsland”设置页面（AboutSettingsPage）及其注册。
-
-一、移除开源水印（OSS Watermark）
----------------------------------
-- ClassIsland.Core\Controls\MyWindow.cs
-  * 删除静态属性 `ShowOssWatermark`（原 public static bool ShowOssWatermark）。
-  * 删除装饰层初始化中 `if (ShowOssWatermark) { ... new DevelopmentBuildAdorner(...) ... }` 整段，
-    不再向窗口添加开发构建/开源水印装饰层。
-- ClassIsland.Core\Controls\DevelopmentBuildAdorner.cs / .axaml
-  * 该控件仅用于上述水印，现已完全无用，直接删除两个文件。
-- ClassIsland.Core\Themes\Generic.axaml
-  * 移除对 DevelopmentBuildAdorner.axaml 的 `<ResourceInclude>` 合并引用。
-- ClassIsland\Program.cs
-  * 删除命令行选项 `--showOssWatermark / -ossw`。
-- ClassIsland\Models\ApplicationCommand.cs
-  * 删除 `ShowOssWatermark` 属性。
-- ClassIsland\App.axaml.cs
-  * 删除 `MyWindow.ShowOssWatermark = ApplicationCommand.ShowOssWatermark;` 赋值。
-- ClassIsland.Desktop\Properties\launchSettings.json
-  * 删除名为 “ClassIsland (水印)” 的启动配置（其 commandLineArgs 为 -ossw）。
-
-二、删除“更新”设置页面
-------------------------
-- ClassIsland\App.Services.xaml.cs
-  * 移除 DI 注册 `services.AddTransient<UpdateSettingsPageViewModel>();`。
-  * 移除设置页注册 `if (UpdateService.AllowedPackageTypes.Contains(PackagingType)) { services.AddSettingsPage<UpdateSettingsPage>(); }`。
-- 删除文件：
-  * ClassIsland\Views\SettingPages\UpdateSettingsPage.axaml
-  * ClassIsland\Views\SettingPages\UpdateSettingsPage.axaml.cs
-  * ClassIsland\ViewModels\SettingsPages\UpdateSettingsPageViewModel.cs
-- ClassIsland\ClassIsland.csproj
-  * 移除 <Compile Update="Views\SettingPages\UpdateSettingsPage.axaml.cs"> 条目。
-
-三、删除“关于 ClassIsland”设置页面
------------------------------------
-- ClassIsland\App.Services.xaml.cs
-  * 移除 DI 注册 `services.AddTransient<AboutSettingsViewModel>();`。
-  * 移除设置页注册 `services.AddSettingsPage<AboutSettingsPage>();`。
-- 删除文件：
-  * ClassIsland\Views\SettingPages\AboutSettingsPage.axaml
-  * ClassIsland\Views\SettingPages\AboutSettingsPage.axaml.cs
-  * ClassIsland\ViewModels\SettingsPages\AboutSettingsViewModel.cs
-  （该页面内含的“开放源代码许可”弹窗 SettingsExpanderItemShowOssLicense_OnClick 随之移除。）
-
-四、移除欢迎页中的“开放源代码许可”弹窗
----------------------------------------
-- ClassIsland\Views\WelcomePages\LicensePage.axaml
-  * 移除“我已阅读并同意《ClassIsland 开源许可》”勾选框（ComboBoxOssLicense）及其超链接按钮。
-  * “下一步”按钮的 IsEnabled 由原先对 OSS + 隐私两个勾选框的 MultiBinding 改为仅绑定隐私勾选框
-    （ComboBoxPrivacy.IsChecked）。
-- ClassIsland\Views\WelcomePages\LicensePage.axaml.cs
-  * 移除 `ButtonShowOssLicense_OnClick` 方法（保留 `ButtonShowPrivacyLicense_OnClick`）。
-
-未改动项说明
-------------
-- 欢迎页 LicensePage 中的《ClassIsland 隐私政策》对话框与勾选框予以保留。
-- UpdateService 及更新下载进度窗口（UpdateProgressWindow）等更新逻辑本身未删除，仅移除“更新”设置页入口。
-
-验证
-----
-使用 `dotnet build ClassIsland.Desktop\ClassIsland.Desktop.csproj -c Debug` 编译通过，
-0 个错误（仅有与本次改动无关的既有警告，如 XML 注释缺失、过时 API、平台 CA1416 等）。
-
-
-================================================
-后续改动：移除欢迎页“ClassIsland 是开源免费的软件”提示
-================================================
-
-改动目标
---------
-- 删除欢迎页（WelcomePage）点击“下一步”时弹出的提示气泡中关于
-  “ClassIsland 是开源免费的软件，官方没有提供任何形式的付费支持服务……”的说明文字。
-
-修改位置
---------
-- ClassIsland\Views\WelcomePages\WelcomePage.axaml.cs
-  * 在 `NavigateNext()` 方法中，原先会通过 `ShowToast` 弹出一条
-    Title = "欢迎使用 ClassIsland"、Message 为“开源免费软件”说明的 ToastMessage（AutoClose=false，
-    Severity=Warning）。该提示整段（ShowToast 调用）已删除，仅保留
-    `WelcomeWindow.WelcomeNavigateForwardCommand.Execute(this);` 以继续进入下一页。
-  * 说明：此提示仅为欢迎页的说明性气泡，与之前删除的开源水印、开放源代码许可弹窗相互独立，
-    故此前未改动；本次按需求一并移除。
-
-未改动项说明
-------------
-- 欢迎页 WelcomePage 本身的界面内容（XAML）及“下一步/数据迁移/进入恢复模式/加入集控”等按钮逻辑均保留。
-- 欢迎页 LicensePage 中的《ClassIsland 隐私政策》对话框与勾选框保留。
-- 开放源代码许可弹窗、开源水印、更新页面、关于 ClassIsland 页面已在前面改动中移除。
-
-验证
-----
-使用 `dotnet build ClassIsland\ClassIsland.csproj -c Debug` 编译通过，
-0 个错误（仅有与本次改动无关的既有警告）。
-
-
-================================================
-后续改动：移除除 farmer-snack 之外的所有 contributor
-================================================
-
-改动目标
---------
-- 仅保留 GitHub 用户 farmer-snack（即“我”），移除其余全部贡献者。
-
-修改位置
---------
-- .all-contributorsrc
-  * 将 contributors 数组从 49 个条目替换为仅含 farmer-snack 的单个条目
-    （login/name=farmer-snack，avatar_url 取自 GitHub 用户 222942863，profile=https://github.com/farmer-snack，
-    contributions=["code"]）；其余字段（files、imageSize、contributorsPerLine、projectName/owner 等）保持不变。
-- README.md
-  * 将“All Contributors”徽章计数由 `all_contributors-49` 改为 `all_contributors-1`。
-  * 将自动生成的贡献者表格（<!-- ALL-CONTRIBUTORS-LIST:START --> … :END --> 之间，
-    原 49 人的 <td> 单元格）替换为仅 farmer-snack 的单个 <td> 单元格。
-
-说明
-----
-- 应用内“关于 ClassIsland”页面的贡献者抽屉已在先前改动中随该页面一同移除，
-  故应用运行时已不再展示贡献者列表；本次仅清理仓库数据源（.all-contributorsrc）与 README 文档。
-- .all-contributorsrc 由 all-contributors 工具/CI 用于生成 README 贡献者区块；手动同步后如再运行该工具会保持一致。
-
-验证
-----
-文本文件改动，不影响编译；无需构建验证（纯资源配置与文档改动）。
-
-
-================================================
-后续改动：移除“基本/通用”页开源提示 与 取消隐私政策强制同意
-================================================
-
-一、移除通用（基本）设置页中的开源提示
---------------------------------------
-- ClassIsland\Views\SettingPages\GeneralSettingsPage.axaml
-  * 删除 `<StackPanel Classes="settings-container animated-intro">` 内首个
-    `controls3:FAInfoBar`（Severity=Warning，Message 为“ClassIsland 是开源免费的软件……”的开源反诈声明），
-    该 InfoBar 原先绑定 `SettingsService.Settings.ShowSellingAnnouncement` 显示。
-  * 仅移除该开源声明 InfoBar；下方的公告列表（AnnouncementService.Announcements）与其它设置项保留。
-- 说明：对应的本地化资源（Localization.SettingsPage*.resx 中 key=开源反诈声明 的字符串）为未使用残留，
-  不影响显示，可后续清理。
-
-二、取消欢迎页隐私政策强制同意
-------------------------------
-- ClassIsland\Views\WelcomePages\LicensePage.axaml
-  * 移除“我已阅读并同意《ClassIsland 隐私政策》”勾选框（ComboBoxPrivacy）。
-  * “下一步”按钮去掉原先对隐私勾选框的 IsEnabled 绑定，改为始终可点击。
-  * 页面标题由“同意许可条款”改为“欢迎使用 ClassIsland”，说明文字改为“查看《ClassIsland 隐私政策》”
-    （仍可点击打开隐私政策，但不再强制勾选同意）。
-  * 保留 ButtonShowPrivacyLicense_OnClick 超链接按钮与对应后台处理方法，仅作为可查阅的隐私政策入口。
-
-验证
-----
-使用 `dotnet build ClassIsland\ClassIsland.csproj -c Debug` 编译通过，
-0 个错误（仅有与本次改动无关的既有警告）。
-
-
-================================================
-检测上游 GitHub Actions 更新（基于 develop/v2/misha-alpha 分支）
-================================================
-
-检测目标与方法
---------------
-- 上游仓库：github.com/ClassIsland/ClassIsland
-- 对比分支：develop/v2/misha-alpha（本 fork 的基准分支；master 分支为旧栈，.NET 8 / macos-15 / 无 Android，
-  仅用作参照，不作为同步目标）
-- 比对文件：.github/workflows 下 4 个工作流
-  build_release.yml、close_stale_issues.yml、issues_similarity_analysis.yml、qodana_code_quality.yml
-- 方法：下载上游对应分支原始文件，与本地文件做规范化（统一换行 CRLF→LF）后的逐行内容与
-  “忽略空白”比对（collapse 所有空白后比较）。
-
-检测结果
---------
-- issues_similarity_analysis.yml：内容一致（字节级/空白无关均一致）。
-- qodana_code_quality.yml：内容一致（字节级/空白无关均一致）。
-- build_release.yml：与上游 develop/v2/misha-alpha 分支“忽略空白”后完全一致；
-  逐行差异仅为 YAML 注释行换行/空格等格式差异（如 `build_type: full  # ...` 与下一行 `include:` 的折行位置），
-  功能等价（均含 build_android 作业、success('build_android') 条件与 needs 列表）。
-- close_stale_issues.yml：与上游 develop/v2/misha-alpha 分支“忽略空白”后完全一致；
-  差异仅为 `any-of-labels` 注释/标签行的折行格式，配置语义相同。
-
-结论
-----
-- 本地仓库的 GitHub Actions 已实现（功能上）与上游 develop/v2/misha-alpha 分支同步，
-  不存在需要“仿照上游实现方法”再修改的实质性更新。
-- 因此本次未修改任何工作流文件，也未改动其他仓库代码；fixxed.txt 中所述各项既往改动均保持原样。
-
-说明
-----
-- 此前曾误以 master 分支为基准，发现本地 build_release.yml 含 Android/.NET10 等定制而 master 无；
-  经用户提示改以 develop/v2/misha-alpha 为基准后确认本地即为该分支的等价实现，无需回退。
-- 若后续上游 develop/v2/misha-alpha 工作流出现功能性变更（新增作业/步骤/密钥/secrets 引用等），
-  可再次执行本检测流程并据此同步。
-
-
-================================================
-同步上游 develop/v2/misha-alpha（全量合并 + 重加 fork 定制）
-================================================
-
-背景
-----
-- 本地 fork 的 develop/v2/misha-alpha 停留在 045901ad（Build #1500，feat(ui): 为复杂抽屉内容添加加载动画），
-  此后未与上游同步；上游已推进至 a8af81ba（Build #1519），中间约 45 个提交。
-- 用户确认采用“全量合并后再重加定制”策略。
-
-合并过程
---------
-- `git fetch origin develop/v2/misha-alpha` 后执行 `git merge origin/develop/v2/misha-alpha --no-edit`。
-- 自动合并成功（绝大多数文件，包括此前我们改动的 MyWindow.cs、Program.cs、ApplicationCommand.cs、
-  App.axaml.cs、GeneralSettingsPage.axaml、LicensePage.axaml、launchSettings.json、App.Services.xaml.cs、
-  ClassIsland.csproj 等），我们之前的“移除更新页/关于页/开源水印/隐私强制/贡献者”等定制在三方合并中被保留。
-- 冲突仅 2 处：
-  1) ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml：我们已删除、上游有改动 →
-     按“保留删除”处理（`git rm` 该文件），不 reintroduce 更新页。
-  2) README.md 贡献者区块：badge 与贡献者表格均冲突 → 解析为仅保留 farmer-snack。
-
-合并带入的上游主要内容（节选）
-------------------------------
-- feat(mainwindow): 主界面背景材质（mica 支持）/ 支持为单个主界面行和组件设置背景效果
-  （MainWindowBackgroundMaterialControl、PopupAcrylicMaterialControl、MainWindowBackgroundMaterialType 等新增）。
-- feat(ui): 为复杂抽屉内容/窗口开启前添加加载动画；新增 ExpressiveLoadingIndicator、Lazy、CompositionPageTransition 等控件。
-- refactor(profile): 弃用 EditingSubjects，改用前端的 SyncDictionaryList。
-- feat(data-transfer): Class Widgets 2 导入课表文件（ClassWidgets2ImportProvider 等新增）。
-- 大量 fix(ui)/perf(ui) 与 docs: add contributor（HickoryTrail、WindDrift、Victory-Aogu 等）。
-- AGENTS.md / CLAUDE.md / GEMINI.md / issue·PR 模板更新；nix 打包更新；Launcher 调试实例选择等。
-
-重加的 fork 定制（合并后复核并恢复）
------------------------------------
-- 更新页：UpdateSettingsPage.axaml 已删除（冲突保留删除）；其 .axaml.cs、ViewModel 因上游未改动已自动移除；
-  App.Services.xaml.cs 中确认无 UpdateSettingsPage / UpdateSettingsPageViewModel 注册。
-- 关于页：AboutSettingsPage 系列文件已删除；App.Services.xaml.cs 中确认无 AboutSettingsPage / AboutSettingsViewModel 注册。
-- 开源水印：MyWindow.cs 无 ShowOssWatermark / DevelopmentBuildAdorner 引用；Program.cs 无 --showOssWatermark；
-  ApplicationCommand.cs 无 ShowOssWatermark；App.axaml.cs 无赋值；DevelopmentBuildAdorner 文件已删除；
-  Generic.axaml 中对它的 ResourceInclude 已移除。launchSettings.json 无“(水印)”启动配置。
-- 通用页开源提示：GeneralSettingsPage.axaml 中开源反诈 FAInfoBar 仍缺失（保留移除）。
-- 隐私强制同意：LicensePage.axaml 中隐私勾选框与“下一步”绑定仍移除（保留移除）。
-- 贡献者：.all-contributorsrc 恢复为仅 farmer-snack 一条；README.md 贡献者表格恢复为仅 farmer-snack，
-  badge 计数 all_contributors-1（覆盖合并进来的 Victory-Aogu / WindDrift / HickoryTrail 等）。
-
-验证
-----
-- `dotnet build ClassIsland.Core` / `ClassIsland` / `ClassIsland.Desktop`（-c Debug）均 0 错误
-  （仅与本次改动无关的既有警告，如 XML 注释缺失、过时 API、平台 CA1416 等）。
-- 全仓库代码不再存在对 UpdateSettingsPage / AboutSettingsPage / AboutSettingsViewModel /
-  UpdateSettingsPageViewModel / DevelopmentBuildAdorner / ShowOssWatermark 的引用
-  （仅 fixxed.txt 文档中提及）。
-
-提交
-----
-- 合并提交：merge origin/develop/v2/misha-alpha，并完成上述冲突解析与定制恢复。
-
+范围：基线 fd83102 → 41fc703，上游 5 个提交，改动 25 个文件（全部为修改）。
+处理：冲突 0 个（交集为空，25 个文件直接取上游）；本地定制 25 个文件保留未动。
+构建：ClassIsland.Desktop → 通过（0 errors / 1319 warnings）。
 
 ================================================
 [2026-10-17 17:45] 同步 upstream/develop/v2/misha-alpha @ fd83102
 ================================================
 
-基线说明
---------
-- 本次由 AI 按提示词自动执行。action.txt 首次创建，无历史基线，BASE 由
-  `git merge-base HEAD upstream/develop/v2/misha-alpha` 推导，得到 a8af81ba
-  （与上一次手工同步记录的上游点完全一致）。
-- 上游 fd83102 距基线共 43 个提交。
-
-冲突自动修正（由 AI 完成）
---------------------------
-- 文件: ClassIsland.Core/Controls/MyWindow.cs（字段声明区，约第 42-52 行）
-  * 冲突形态: ours 为空（此前已删除水印相关代码）；theirs 在改位置新增了
-    `[UnsafeAccessor] SetButtonIsPressed(Button, bool)` 以及 `ShowOssWatermark` 属性。
-  * 我的定制: 删除 `ShowOssWatermark` 静态属性，窗口不再添加开发构建 / 开源水印装饰层。
-  * 上游改动: 新增 UnsafeAccessor 方法 `SetButtonIsPressed`，用于模拟按钮按下状态。
-  * 处理方式: 保留 `SetButtonIsPressed` 声明（该文件第 193 行有实际调用，删除会编译失败），
-    继续删除 `ShowOssWatermark` 属性。
-  * 最终结果: 水印相关代码零残留；同时获得上游新增的按钮状态模拟能力。
-
-- 文件: ClassIsland/Views/WelcomePages/LicensePage.axaml.cs（类内方法区）
-  * 冲突形态: ours 为空（方法已删）；theirs 仍保留 `ButtonShowOssLicense_OnClick`。
-  * 我的定制: 删除“开放源代码许可”弹窗入口。
-  * 上游改动: 该处实质未变更，仅因上下文对齐进入冲突。
-  * 处理方式: 保持删除，不恢复该方法。
-  * 最终结果: 欢迎页无 OSS 许可弹窗；隐私政策入口 `ButtonShowPrivacyLicense_OnClick` 保留。
-
-其他由 AI 完成的调整
---------------------
-- 171 个“仅上游改动”的文件（75 新增 + 96 修改）
-  * 原因: 上游自 a8af81ba 起的正常功能演进。
-  * 处理方式: 直接采用上游版本（本地从未改动过这些文件，无覆盖风险）。
-  * 影响面: 上游功能整体进入 fork。
-
-- ClassIsland/Views/SettingPages/AboutSettingsPage.axaml.cs
-- ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs
-  * 原因: 本地已删除这两个文件，上游对它们有修改。
-  * 处理方式: `git rm` 保持删除，不重新引入“关于”/“更新”页面。
-  * 影响面: 上游对这两个页面的改动不会进入 fork（符合定制意图）。
-
-构建失败的修复（均为环境问题，未改动任何业务代码）
---------------------------------------------------
-- 问题: `vendors/EdgeTtsSharp` 子模块未初始化 → MSB3202 项目文件不存在。
-  * 修法: 将 submodule URL 由 SSH 改为 HTTPS 后 `git submodule update --init --depth 1`。
-  * 影响面: 仅本地构建环境，仓库内容不变。
-- 问题: 浅克隆缺少 tag → `GitInfo.Tag` 取到 "fatal: No names found, cannot describe anything."
-  → CS7034 版本号格式错误。
-  * 修法: `git fetch upstream --tags`（89 个 tag），`git describe` 恢复为 `2.1.1.1-23-ga672cb1b`。
-  * 影响面: 仅版本号生成，仓库内容不变。
-- 未做任何代码改动即通过构建，故本次没有“为编译而改代码”的修复。
-
-保留未动的本地定制
-------------------
-- fixxed.txt、.all-contributorsrc、README.md、ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml、
-  ClassIsland/Views/WelcomePages/LicensePage.axaml、WelcomePage.axaml.cs、
-  ClassIsland.Desktop/Properties/launchSettings.json、ClassIsland.Core/Themes/Generic.axaml 等，
-  上游未改动，原样保留。
-
-校验结果
---------
-- 冲突标记残留: 0
-- 定制点断言: 水印代码 0 处 / DevelopmentBuildAdorner 0 文件 / UpdateSettingsPage 0 文件 /
-  AboutSettingsPage 0 文件 / Program.cs 无 --showOssWatermark / README 徽章 all_contributors-1
-- 构建: ClassIsland.Core 0 errors；ClassIsland 0 errors（警告均为既有问题）
+范围：基线 a8af81ba → fd83102，上游 43 个提交，改动 173 个文件（75 新增 / 96 修改 / 2 删除）。
+处理：冲突 2 个 —— MyWindow.cs 保留上游 SetButtonIsPressed、继续删 ShowOssWatermark；
+      LicensePage.axaml.cs 保持删除，不恢复 OSS 许可弹窗。
+构建：通过（0 errors）；中途修过子模块未初始化和缺 tag 两个环境问题，未改业务代码。
+定制：删更新页 / 关于页 / 开源水印 / 贡献者以外的页脚，均保持删除。

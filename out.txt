@@ -2,6 +2,29 @@
 （最新记录在最上方，越往下越旧）
 
 ================================================================
+## 2026-10-24 07:25:45  同步 329bf4b1
+上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (329bf4b1)
+本次基线 : 41fc7035（上次同步点）
+本地分支 : develop/v2/misha-alpha  →  本地提交见本次 commit
+
+新增:
+  - (无)
+修改:
+  - (无)
+删除:
+  - (无)
+未变更:
+  - build_release.yml
+  - close_stale_issues.yml
+  - issues_similarity_analysis.yml
+  - qodana_code_quality.yml
+
+本次同步的上游提交（1 个，全部列出，每条附改动文件数）:
+  - 329bf4b1 feat(mainview): 实现主页日程课表编辑功能（50 个文件）
+冲突修正 : 无
+================================================================
+
+================================================================
 ## 2026-10-18 21:44:32  同步 41fc703
 上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (41fc703)
 本次基线 : fd83102
