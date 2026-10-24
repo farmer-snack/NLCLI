@@ -41,7 +41,7 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
     private DispatcherTimer UpdateTimer { get; } = new()
     {
-        Interval = TimeSpan.FromMinutes(5)
+        Interval = TimeSpan.FromMinutes(1)
     };
 
     public bool IsWeatherRefreshed { get; set; } = false;
