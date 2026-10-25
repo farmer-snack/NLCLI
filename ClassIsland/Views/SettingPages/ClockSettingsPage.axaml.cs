@@ -46,6 +46,12 @@ public partial class ClockSettingsPage : SettingsPageBase
         await window.ShowModal(this.FindAncestorOfType<ViewBase>());
     }
 
+    private void ButtonDisableTimeSync_OnClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.SettingsService.Settings.IsExactTimeEnabled = false;
+        ViewModel.ExactTimeService.SyncStatusMessage = "已关闭时间同步，正在使用系统时间。";
+    }
+
     private void ButtonSyncTimeNow_OnClick(object sender, RoutedEventArgs e)
     {
         _ = Task.Run(ViewModel.ExactTimeService.Sync);
