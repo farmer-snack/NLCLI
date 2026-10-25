@@ -122,6 +122,7 @@ public partial class App
         services.AddTransient<NotificationSettingsViewModel>();
         services.AddTransient<WindowSettingsViewModel>();
         services.AddTransient<WeatherSettingsViewModel>();
+        services.AddTransient<WeatherDetailSettingsViewModel>();
         services.AddTransient<AutomationSettingsViewModel>();
         services.AddTransient<PluginsSettingsPageViewModel>();
         services.AddTransient<StorageSettingsViewModel>();
@@ -173,6 +174,7 @@ public partial class App
         services.AddSettingsPage<NotificationSettingsPage>();
         services.AddSettingsPage<WindowSettingsPage>();
         services.AddSettingsPage<WeatherSettingsPage>();
+        services.AddSettingsPage<WeatherDetailSettingsPage>();
         services.AddSettingsPage<AutomationSettingsPage>();
         services.AddSettingsPage<PluginsSettingsPage>();
         services.AddSettingsPage<ThemesSettingsPage>();

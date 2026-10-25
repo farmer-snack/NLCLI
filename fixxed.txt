@@ -2,15 +2,16 @@
 [2026-10-25 17:20] [定制] 基于同步点 329bf4b1
 ================================================
 
-需求：天气 1 分钟刷新一次；请求失败时退到 2 分钟、再失败退到 3 分钟；设置页加 16 天、
-     24 小时、逐 15 分钟预报（改用 Open-Meteo），并把 Open-Meteo 能给的当前指标、空气质量、
-     16 天明细（降水/风/紫外线/日出日落）全部铺开；三天预报改七天、逐小时预报改 12 小时；
-     patches/ 不进版本库。
+需求：天气 1 分钟刷新一次；请求失败时退到 2 分钟、再失败退到 3 分钟；设置里新增独立的
+     「天气详情」页（Open-Meteo，16 天 / 24 小时 / 逐 15 分钟 / 空气质量 / 当前指标全铺开）；
+     三天预报改七天、逐小时预报改 12 小时；patches/ 不进版本库。
+     原有的「天气」设置页保持上游原样，一行未动。
 处理：改动 12 个文件；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1280 warnings）（修复轮次 0）
 
 改动的文件
 ----------
 - .gitignore — 修改
+- ClassIsland/App.Services.xaml.cs — 修改
 - ClassIsland/Services/WeatherService.cs — 修改
 - ClassIsland/Services/ActionService.cs — 修改
 - ClassIsland/Controls/ActionSettingsControls/WeatherNotificationActionSettingControl.axaml — 修改
@@ -20,15 +21,17 @@
 - ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
 - ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 新增
 - ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
-- ClassIsland/ViewModels/SettingsPages/WeatherSettingsViewModel.cs — 修改
-- ClassIsland/Views/SettingPages/WeatherSettingsPage.axaml — 修改
+- ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 新增
+- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
+- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml.cs — 新增
 
 下次同步注意
 ------------
 - WeatherService.cs：UpdateTimer 间隔被改过（1 分钟 + 失败退避 2/3 分钟），上游动这个文件必冲突。
 - 两个 NotificationProvider：逐小时从 6 条改成 12 条、日预报从 3 天改成 7 天，页面结构已从硬编码改成 ItemsControl，和上游差异大。
-- WeatherSettingsPage.axaml / WeatherSettingsViewModel.cs：新增 Open-Meteo 面板，冲突概率最高。
-- OpenMeteoForecast.cs、WeatherCodeHelper.cs 是新增文件，上游没有，不会冲突。
+- App.Services.xaml.cs：加了两行注册（WeatherDetailSettingsViewModel / WeatherDetailSettingsPage），上游改这个文件时保留这两行，否则新页面消失。
+- OpenMeteoForecast.cs、WeatherCodeHelper.cs、WeatherDetailSettings*.cs/.axaml 都是新增文件，上游没有，不会冲突。
+- 原天气设置页（WeatherSettingsPage / WeatherSettingsViewModel）没有改动，冲突时直接取上游即可。
 - .gitignore 加了 patches/，上游改这个文件时要保留这一行。
 
 ================================================

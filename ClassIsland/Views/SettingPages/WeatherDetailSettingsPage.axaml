@@ -1,0 +1,174 @@
+<controls:SettingsPageBase x:Class="ClassIsland.Views.SettingPages.WeatherDetailSettingsPage"
+      xmlns="https://github.com/avaloniaui"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:local="clr-namespace:ClassIsland.Views.SettingPages"
+      xmlns:controls="clr-namespace:ClassIsland.Core.Abstractions.Controls;assembly=ClassIsland.Core"
+      xmlns:controls1="clr-namespace:ClassIsland.Core.Controls;assembly=ClassIsland.Core"
+      xmlns:controls3="using:FluentAvalonia.UI.Controls"
+      mc:Ignorable="d"
+      d:DesignHeight="700" d:DesignWidth="800"
+      d:DataContext="{d:DesignInstance local:WeatherDetailSettingsPage}"
+      Loaded="WeatherDetailSettingsPage_OnLoaded">
+
+    <ScrollViewer>
+        <StackPanel Classes="settings-container animated-intro">
+            <controls1:IconText Glyph="&#xF464;" Text="天气详情" Margin="0 0 0 8" />
+            <TextBlock Text="数据来自 Open-Meteo，与「天气」页的小米天气互不影响。"
+                       Classes="l-instructive" FontSize="12" Opacity="0.7" Margin="0 0 0 12" />
+
+            <Border CornerRadius="16" Padding="20" ClipToBounds="True">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                        <GradientStop Color="#FF1F4E79" Offset="0" />
+                        <GradientStop Color="#FF3A2E5C" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <StackPanel Spacing="16">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding ViewModel.CityName}"
+                                       Foreground="White" Opacity="0.85" FontSize="15" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding ViewModel.OmCurrentTemp}" Foreground="White"
+                                           FontSize="46" FontWeight="SemiBold" />
+                                <TextBlock Text="°C" Foreground="White" FontSize="18"
+                                           VerticalAlignment="Bottom" Margin="0 0 0 10" Opacity="0.85" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding ViewModel.OmCurrentText}" Foreground="White" FontSize="15" />
+                            <TextBlock Text="{Binding ViewModel.OmCurrentDetail}" Foreground="White"
+                                       Opacity="0.75" FontSize="12" Margin="0 4 0 0" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding ViewModel.OmCurrentEmoji}" FontSize="54"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+
+                    <TextBlock Text="{Binding ViewModel.OpenMeteoError}" Foreground="#FFFFB4B4" FontSize="12"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding ViewModel.OpenMeteoError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                    <ItemsControl ItemsSource="{Binding ViewModel.OmMetrics}"
+                                  IsVisible="{Binding !!ViewModel.OmMetrics.Count}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="4" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#22FFFFFF" CornerRadius="8" Padding="10 8" Margin="3">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Label}" Foreground="#CCFFFFFF" FontSize="11" />
+                                        <TextBlock Text="{Binding Value}" Foreground="White" FontSize="14" FontWeight="Medium" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmHours.Count}">
+                        <TextBlock Text="未来 24 小时" Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding ViewModel.OmHours}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="16" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Spacing="3" Width="44">
+                                            <TextBlock Text="{Binding Label}" Foreground="White" Opacity="0.8"
+                                                       FontSize="12" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding Emoji}" FontSize="20" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding Temp}" Foreground="White" FontSize="13"
+                                                       FontWeight="Medium" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding Precip}" Foreground="#FFBFE3FF" FontSize="11"
+                                                       HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+
+                    <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmMinutes.Count}">
+                        <TextBlock Text="未来 2 小时（每 15 分钟）" Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
+                        <ItemsControl ItemsSource="{Binding ViewModel.OmMinutes}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="8" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Spacing="2" HorizontalAlignment="Center">
+                                        <TextBlock Text="{Binding Label}" Foreground="White" Opacity="0.75" FontSize="11" />
+                                        <TextBlock Text="{Binding Precip}" Foreground="White" FontSize="12" FontWeight="Medium" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmAqi.Count}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="空气质量" Foreground="White" Opacity="0.8" FontSize="13"
+                                       FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Border Background="#33FFFFFF" CornerRadius="6" Padding="8 1">
+                                <TextBlock Text="{Binding ViewModel.OmAqiLevel}" Foreground="White"
+                                           FontSize="11" FontWeight="Medium" />
+                            </Border>
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding ViewModel.OmAqi}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="4" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Spacing="1" Margin="3 4">
+                                        <TextBlock Text="{Binding Label}" Foreground="#CCFFFFFF" FontSize="11" />
+                                        <TextBlock Text="{Binding Value}" Foreground="White" FontSize="13" FontWeight="Medium" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <StackPanel Spacing="6" IsVisible="{Binding !!ViewModel.OmDays.Count}">
+                        <Grid ColumnDefinitions="56,26,88,110,104,52" Margin="0 0 0 2">
+                            <TextBlock Text="未来 16 天" Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="3" Text="降水" Foreground="#99FFFFFF" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="4" Text="风" Foreground="#99FFFFFF" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="5" Text="UV" Foreground="#99FFFFFF" FontSize="11" VerticalAlignment="Center" />
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding ViewModel.OmDays}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnDefinitions="56,26,88,110,104,52" Margin="0 3">
+                                        <TextBlock Text="{Binding Label}" Foreground="White" FontSize="13" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Emoji}" FontSize="16" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Text="{Binding TempRange}" Foreground="White" FontSize="13" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="3" Text="{Binding Precip}" Foreground="#FFBFE3FF" FontSize="12" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="4" Text="{Binding Wind}" Foreground="#CCFFFFFF" FontSize="12" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="5" Text="{Binding Uv}" Foreground="#CCFFFFFF" FontSize="12" VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <controls3:FAProgressRing Width="18" Height="18" IsIndeterminate="True"
+                                                  IsVisible="{Binding ViewModel.IsOpenMeteoLoading}" />
+                        <TextBlock Text="{Binding ViewModel.OmUpdatedAt}" Foreground="White" Opacity="0.55" FontSize="11"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</controls:SettingsPageBase>
