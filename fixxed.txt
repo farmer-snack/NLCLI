@@ -5,9 +5,10 @@
 需求：天气 1 分钟刷新一次；请求失败时退到 2 分钟、再失败退到 3 分钟；设置里新增独立的
      「天气详情」页（Open-Meteo，16 天日预报 / 384 小时逐小时 / 12 小时逐 15 分钟 / 空气质量 /
      当前指标全铺开；逐小时和每一天都可以点开，展开后显示接口返回的全部字段）；
+     精确时间同步改成自适应间隔 + 多服务器回退，并加关闭按钮；
      三天预报改七天、逐小时预报改 12 小时；patches/ 不进版本库。
      原有的「天气」设置页保持上游原样，一行未动。
-处理：改动 14 个文件；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1280 warnings）（修复轮次 0）
+处理：改动 41 个文件；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1280 warnings）（修复轮次 0）
 
 改动的文件
 ----------
@@ -55,8 +56,10 @@
 - 隐私政策强制同意：LicensePage.axaml/.cs 移除勾选与「下一步」的绑定
 - 贡献者：.all-contributorsrc 与 README.md 只保留 farmer-snack
 - 天气：刷新改 1 分钟 + 失败退避 2/3 分钟；新增独立「天气详情」页（Open-Meteo，见本轮 [定制] 段）
+- 精确时间：自适应间隔（成功 6h / 偏差大 1h / 失败 1-5-15-60min）、多服务器回退、
+  状态消息回 UI 线程、并发保护；时钟页新增「关闭时间同步」按钮
 
-改动的文件（38 个）
+改动的文件（41 个）
 ----------
 - .all-contributorsrc — 修改
 - .gitignore — 修改
@@ -78,12 +81,15 @@
 - ClassIsland/Models/ApplicationCommand.cs — 修改
 - ClassIsland/Program.cs — 修改
 - ClassIsland/Services/ActionService.cs — 修改
+- ClassIsland/Services/ExactTimeService.cs — 修改
 - ClassIsland/Services/WeatherService.cs — 修改
 - ClassIsland/ViewModels/SettingsPages/AboutSettingsViewModel.cs — 删除
 - ClassIsland/ViewModels/SettingsPages/UpdateSettingsPageViewModel.cs — 删除
 - ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 新增
 - ClassIsland/Views/SettingPages/AboutSettingsPage.axaml — 删除
 - ClassIsland/Views/SettingPages/AboutSettingsPage.axaml.cs — 删除
+- ClassIsland/Views/SettingPages/ClockSettingsPage.axaml — 修改
+- ClassIsland/Views/SettingPages/ClockSettingsPage.axaml.cs — 修改
 - ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml — 修改
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml — 删除
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs — 删除
