@@ -1,4 +1,36 @@
 ================================================
+[2026-10-25 17:20] [定制] 基于同步点 329bf4b1
+================================================
+
+需求：天气 1 分钟刷新一次；请求失败时退到 2 分钟、再失败退到 3 分钟；设置页加 16 天、
+     24 小时、逐 15 分钟预报（改用 Open-Meteo）；三天预报改七天、逐小时预报改 12 小时；
+     patches/ 不进版本库。
+处理：改动 12 个文件；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1280 warnings）（修复轮次 0）
+
+改动的文件
+----------
+- .gitignore — 修改
+- ClassIsland/Services/WeatherService.cs — 修改
+- ClassIsland/Services/ActionService.cs — 修改
+- ClassIsland/Controls/ActionSettingsControls/WeatherNotificationActionSettingControl.axaml — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml.cs — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
+- ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 新增
+- ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
+- ClassIsland/ViewModels/SettingsPages/WeatherSettingsViewModel.cs — 修改
+- ClassIsland/Views/SettingPages/WeatherSettingsPage.axaml — 修改
+
+下次同步注意
+------------
+- WeatherService.cs：UpdateTimer 间隔被改过（1 分钟 + 失败退避 2/3 分钟），上游动这个文件必冲突。
+- 两个 NotificationProvider：逐小时从 6 条改成 12 条、日预报从 3 天改成 7 天，页面结构已从硬编码改成 ItemsControl，和上游差异大。
+- WeatherSettingsPage.axaml / WeatherSettingsViewModel.cs：新增 Open-Meteo 面板，冲突概率最高。
+- OpenMeteoForecast.cs、WeatherCodeHelper.cs 是新增文件，上游没有，不会冲突。
+- .gitignore 加了 patches/，上游改这个文件时要保留这一行。
+
+================================================
 [2026-10-24 07:25] 同步 upstream/develop/v2/misha-alpha @ 329bf4b1
 ================================================
 
@@ -63,16 +95,16 @@
 [2026-10-18 21:44] 同步 upstream/develop/v2/misha-alpha @ 41fc703
 ================================================
 
-范围：基线 fd83102 → 41fc703，上游 5 个提交，改动 25 个文件（全部为修改）。
-处理：冲突 0 个（交集为空，25 个文件直接取上游）；本地定制 25 个文件保留未动。
-构建：ClassIsland.Desktop → 通过（0 errors / 1319 warnings）。
+范围：基线 fd83102 → 41fc703，5 个提交，改动 25 个文件（全为修改）。
+处理：冲突 0 个（交集为空，25 个文件直接取上游）；本地定制 25 个保留未动。
+构建：ClassIsland.Desktop 通过（0 errors / 1319 warnings）。
 
 ================================================
 [2026-10-17 17:45] 同步 upstream/develop/v2/misha-alpha @ fd83102
 ================================================
 
-范围：基线 a8af81ba → fd83102，上游 43 个提交，改动 173 个文件（75 新增 / 96 修改 / 2 删除）。
-处理：冲突 2 个 —— MyWindow.cs 保留上游 SetButtonIsPressed、继续删 ShowOssWatermark；
-      LicensePage.axaml.cs 保持删除，不恢复 OSS 许可弹窗。
-构建：通过（0 errors）；中途修过子模块未初始化和缺 tag 两个环境问题，未改业务代码。
-定制：删更新页 / 关于页 / 开源水印 / 贡献者以外的页脚，均保持删除。
+范围：基线 a8af81ba → fd83102，43 个提交，改动 173 个文件（75 新增 / 96 修改 / 2 删除）。
+处理：冲突 2 个 —— MyWindow.cs 保留 SetButtonIsPressed、删 ShowOssWatermark；
+      LicensePage.axaml.cs 保持删除。
+构建：通过（中途修过子模块未初始化和缺 tag，未改业务代码）。
+定制：删更新页 / 关于页 / 开源水印，均保持删除。
