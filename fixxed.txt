@@ -6,7 +6,7 @@
      「天气详情」页（Open-Meteo，16 天 / 24 小时 / 逐 15 分钟 / 空气质量 / 当前指标全铺开）；
      三天预报改七天、逐小时预报改 12 小时；patches/ 不进版本库。
      原有的「天气」设置页保持上游原样，一行未动。
-处理：改动 12 个文件；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1280 warnings）（修复轮次 0）
+处理：改动 14 个文件；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1280 warnings）（修复轮次 0）
 
 改动的文件
 ----------
