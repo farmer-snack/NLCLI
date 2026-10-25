@@ -39,9 +39,14 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
     public IRulesetService RulesetService { get; }
     public ILocationService LocationService { get; }
 
+    private const int MinRefreshMinutes = 1;
+    private const int MaxRefreshMinutes = 3;
+
+    private int _refreshMinutes = MinRefreshMinutes;
+
     private DispatcherTimer UpdateTimer { get; } = new()
     {
-        Interval = TimeSpan.FromMinutes(1)
+        Interval = TimeSpan.FromMinutes(MinRefreshMinutes)
     };
 
     public bool IsWeatherRefreshed { get; set; } = false;
@@ -218,7 +223,31 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
     private async void UpdateTimerOnTick(object? sender, EventArgs e)
     {
-        await QueryWeatherAsync();
+        var result = await QueryWeatherWithResultAsync();
+        if (result.IsSuccess)
+        {
+            SetRefreshMinutes(MinRefreshMinutes);
+            return;
+        }
+
+        // 失败（404 / 超时 / 断网）：先把间隔退到 2 分钟，再失败退到 3 分钟，封顶 3 分钟。
+        // 成功一次就回到 1 分钟，避免网络恢复后还一直按 3 分钟慢慢刷。
+        var next = Math.Min(_refreshMinutes + 1, MaxRefreshMinutes);
+        Logger.LogWarning("天气刷新失败：{Message}，刷新间隔调整为 {Minutes} 分钟",
+            result.ErrorMessage, next);
+        SetRefreshMinutes(next);
+    }
+
+    private void SetRefreshMinutes(int minutes)
+    {
+        var target = Math.Clamp(minutes, MinRefreshMinutes, MaxRefreshMinutes);
+        if (target == _refreshMinutes)
+        {
+            return;
+        }
+
+        _refreshMinutes = target;
+        UpdateTimer.Interval = TimeSpan.FromMinutes(target);
     }
 
     private async void LoadData()
