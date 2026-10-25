@@ -1,4 +1,4 @@
-﻿<ci:ActionSettingsControlBase x:Class="ClassIsland.Controls.ActionSettingsControls.WeatherNotificationActionSettingControl"
+<ci:ActionSettingsControlBase x:Class="ClassIsland.Controls.ActionSettingsControls.WeatherNotificationActionSettingControl"
                               x:TypeArguments="actionSettings:WeatherNotificationActionSettings"
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -11,7 +11,7 @@
              d:DesignHeight="450" d:DesignWidth="800">
     <Grid DataContext="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType=local:WeatherNotificationActionSettingControl}}">
         <ComboBox SelectedIndex="{Binding Settings.NotificationKind}">
-            <ComboBoxItem>三天天气预报</ComboBoxItem>
+            <ComboBoxItem>七天天气预报</ComboBoxItem>
             <ComboBoxItem>气象预警</ComboBoxItem>
             <ComboBoxItem>逐小时天气预报</ComboBoxItem>
         </ComboBox>

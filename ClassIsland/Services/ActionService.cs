@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -239,7 +239,7 @@ public class ActionService : IActionService
                 s => s.IsWaitForCompleteEnabled = false),
             new ActionMenuTreeItem<NotificationActionSettings>("classisland.showNotification", "显示提醒并等待…", "\ue02b",
                 s => s.IsWaitForCompleteEnabled = true),
-            new ActionMenuTreeItem<WeatherNotificationActionSettings>("classisland.notification.weather", "三天天气预报", "\ue4dc",
+            new ActionMenuTreeItem<WeatherNotificationActionSettings>("classisland.notification.weather", "七天天气预报", "\ue4dc",
                 s => s.NotificationKind = 0),
             new ActionMenuTreeItem<WeatherNotificationActionSettings>("classisland.notification.weather", "气象预警", "\uf431",
                 s => s.NotificationKind = 1),
