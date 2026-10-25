@@ -70,7 +70,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                       + "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,precipitation_probability,precipitation,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day"
                       + "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max,precipitation_sum,rain_sum,snowfall_sum,precipitation_hours,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
                       + "&minutely_15=temperature_2m,weather_code,precipitation,rain,snowfall,wind_speed_10m"
-                      + "&timezone=auto&forecast_days=16&forecast_hours=24&forecast_minutely_15=8";
+                      + "&timezone=auto&forecast_days=16&forecast_minutely_15=48";
 
             var data = await WebRequestHelper.Default.GetJson<OpenMeteoForecast>(new Uri(url));
             ApplyOpenMeteo(data);
@@ -169,7 +169,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         };
 
         var hours = new List<OmHourItem>();
-        for (var i = 0; i < hourly.Time.Count && hours.Count < 24; i++)
+        for (var i = 0; i < hourly.Time.Count; i++)
         {
             var time = ParseTime(hourly.Time[i]);
             if (time is null) continue;

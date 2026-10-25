@@ -68,7 +68,7 @@
                     </ItemsControl>
 
                     <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmHours.Count}">
-                        <TextBlock Text="未来 24 小时" Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
+                        <TextBlock Text="未来 16 天逐小时（384 小时，横向滚动）" Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
                         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                             <ItemsControl ItemsSource="{Binding ViewModel.OmHours}">
                                 <ItemsControl.ItemsPanel>
@@ -94,11 +94,11 @@
                     </StackPanel>
 
                     <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmMinutes.Count}">
-                        <TextBlock Text="未来 2 小时（每 15 分钟）" Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
+                        <TextBlock Text="未来 12 小时（每 15 分钟）" Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
                         <ItemsControl ItemsSource="{Binding ViewModel.OmMinutes}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <UniformGrid Columns="8" />
+                                    <UniformGrid Columns="12" />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
