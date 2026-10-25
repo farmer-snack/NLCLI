@@ -50,6 +50,7 @@ public class OmHourly
     [JsonPropertyName("weather_code")] public List<int> WeatherCode { get; set; } = [];
     [JsonPropertyName("precipitation_probability")] public List<int?> PrecipitationProbability { get; set; } = [];
     [JsonPropertyName("precipitation")] public List<double?> Precipitation { get; set; } = [];
+    [JsonPropertyName("pressure_msl")] public List<double?> PressureMsl { get; set; } = [];
     [JsonPropertyName("cloud_cover")] public List<double?> CloudCover { get; set; } = [];
     [JsonPropertyName("visibility")] public List<double?> Visibility { get; set; } = [];
     [JsonPropertyName("wind_speed_10m")] public List<double?> WindSpeed { get; set; } = [];

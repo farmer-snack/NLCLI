@@ -11,8 +11,8 @@ using Microsoft.Extensions.Logging;
 
 namespace ClassIsland.ViewModels.SettingsPages;
 
-public sealed record OmDayItem(string Label, string Emoji, string TempRange, string Precip, string Wind, string Uv);
-public sealed record OmHourItem(string Label, string Emoji, string Temp, string Precip);
+public sealed record OmDayItem(string Label, string Emoji, string TempRange, string Precip, string Wind, string Uv, List<OmMetricItem> Detail);
+public sealed record OmHourItem(string Label, string Emoji, string Temp, string Precip, List<OmMetricItem> Detail);
 public sealed record OmMinutelyItem(string Label, string Precip, string Probability);
 public sealed record OmMetricItem(string Label, string Value);
 public sealed record OmAqiItem(string Label, string Value);
@@ -46,6 +46,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     [ObservableProperty] private string _omSunTimes = "";
     [ObservableProperty] private string _omAqiLevel = "";
     [ObservableProperty] private List<OmHourItem> _omHours = new();
+    [ObservableProperty] private OmHourItem? _selectedHour;
     [ObservableProperty] private List<OmMinutelyItem> _omMinutes = new();
     [ObservableProperty] private List<OmDayItem> _omDays = new();
     [ObservableProperty] private List<OmMetricItem> _omMetrics = new();
@@ -67,7 +68,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             var url = "https://api.open-meteo.com/v1/forecast"
                       + $"?latitude={lat}&longitude={lon}"
                       + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,is_day,precipitation,rain,showers,snowfall,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m"
-                      + "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,precipitation_probability,precipitation,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day"
+                      + "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,precipitation_probability,precipitation,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day"
                       + "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max,precipitation_sum,rain_sum,snowfall_sum,precipitation_hours,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
                       + "&minutely_15=temperature_2m,weather_code,precipitation,rain,snowfall,wind_speed_10m"
                       + "&timezone=auto&forecast_days=16&forecast_minutely_15=48";
@@ -176,8 +177,25 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             var code = At(hourly.WeatherCode, i);
             var temp = At(hourly.Temperature, i);
             var pop = At(hourly.PrecipitationProbability, i);
+            var hourDetail = new List<OmMetricItem>
+            {
+                new("天气", WeatherCodeHelper.GetText(code)),
+                new("湿度", F(At(hourly.Humidity, i), "0", "%")),
+                new("露点", F(At(hourly.DewPoint, i), "0", "°")),
+                new("体感", F(At(hourly.ApparentTemperature, i), "0", "°")),
+                new("气压", F(At(hourly.PressureMsl, i), "0", " hPa")),
+                new("云量", F(At(hourly.CloudCover, i), "0", "%")),
+                new("能见度", F(At(hourly.Visibility, i) is { } v ? v / 1000 : null, "0.0", " km")),
+                new("风速", F(At(hourly.WindSpeed, i), "0", " km/h")),
+                new("阵风", F(At(hourly.WindGusts, i), "0", " km/h")),
+                new("风向", Dir(At(hourly.WindDirection, i))),
+                new("降水量", F(At(hourly.Precipitation, i), "0.0", " mm")),
+                new("降水概率", pop is null ? "--" : pop + "%"),
+                new("紫外线", F(At(hourly.UvIndex, i), "0.0")),
+                new("时段", At(hourly.IsDay, i) == 0 ? "夜间" : "白天")
+            };
             hours.Add(new OmHourItem(time.Value.ToString("HH时"), WeatherCodeHelper.GetEmoji(code),
-                F(temp, "0", "°"), pop is null ? "" : pop + "%"));
+                F(temp, "0", "°"), pop is null ? "" : pop + "%", hourDetail));
         }
         OmHours = hours;
 
@@ -208,8 +226,27 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             var uvMax = At(daily.UvIndexMax, i);
             var precipText = (pop is null ? "--" : pop + "%") + " · " + F(sum, "0.0", "mm");
             var windText = F(wind, "0", " km/h") + " " + Dir(windDir);
+            var dayDetail = new List<OmMetricItem>
+            {
+                new("最高温", F(max, "0", "°")),
+                new("最低温", F(min, "0", "°")),
+                new("日出", daily.Sunrise.Count > i ? Clock(daily.Sunrise[i]) : "--"),
+                new("日落", daily.Sunset.Count > i ? Clock(daily.Sunset[i]) : "--"),
+                new("白天时长", F(At(daily.DaylightDuration, i) is { } dl ? dl / 3600 : null, "0.0", " h")),
+                new("日照时长", F(At(daily.SunshineDuration, i) is { } sd ? sd / 3600 : null, "0.0", " h")),
+                new("降雨量", F(At(daily.RainSum, i), "0.0", " mm")),
+                new("降雪量", F(At(daily.SnowfallSum, i), "0.0", " cm")),
+                new("降水时长", F(At(daily.PrecipitationHours, i), "0.0", " h")),
+                new("最大阵风", F(At(daily.WindGustsMax, i), "0", " km/h")),
+                new("体感最高", F(At(daily.ApparentMax, i), "0", "°")),
+                new("体感最低", F(At(daily.ApparentMin, i), "0", "°")),
+                new("最大风速", windText),
+                new("紫外线", F(uvMax, "0.0")),
+                new("降水概率", pop is null ? "--" : pop + "%"),
+                new("降水量", F(sum, "0.0", " mm"))
+            };
             days.Add(new OmDayItem(DayLabel(date.Value.Date), WeatherCodeHelper.GetEmoji(code),
-                $"{F(min, "0", "°")} ~ {F(max, "0", "°")}", precipText, windText, F(uvMax, "0.0")));
+                $"{F(min, "0", "°")} ~ {F(max, "0", "°")}", precipText, windText, F(uvMax, "0.0"), dayDetail));
         }
         OmDays = days;
     }
