@@ -36,6 +36,68 @@
 - .gitignore 加了 patches/，上游改这个文件时要保留这一行。
 
 ================================================
+[长期] 本地定制清单（fork 特有，同步时一律保留）
+================================================
+
+说明：下面是当前分支相对上游 329bf4b1 的**全部**差异文件（含本轮天气定制）。
+     同步时一律保留本地版本；上游改动同一文件时按「功能定制」的口径合并，拿不准就停下来问。
+
+功能定制
+--------
+- 更新页：整页删除（UpdateSettingsPage.axaml/.cs、UpdateSettingsPageViewModel.cs），
+  ClassIsland.csproj 里的 Compile 项、App.Services 里的注册一并移除
+- 关于页：整页删除（AboutSettingsPage.axaml/.cs、AboutSettingsViewModel.cs），注册移除
+- 开源水印：DevelopmentBuildAdorner.axaml/.cs 删除；MyWindow.cs、App.axaml.cs、Program.cs、
+  ApplicationCommand.cs 去掉 ShowOssWatermark 相关代码；Generic.axaml 去掉 ResourceInclude；
+  launchSettings.json 去掉「(水印)」启动配置
+- 通用页开源反诈提示：GeneralSettingsPage.axaml 移除 FAInfoBar
+- 欢迎页开源反诈 Toast：WelcomePage.axaml.cs 移除
+- 隐私政策强制同意：LicensePage.axaml/.cs 移除勾选与「下一步」的绑定
+- 贡献者：.all-contributorsrc 与 README.md 只保留 farmer-snack
+- 天气：刷新改 1 分钟 + 失败退避 2/3 分钟；新增独立「天气详情」页（Open-Meteo，见本轮 [定制] 段）
+
+改动的文件（38 个）
+----------
+- .all-contributorsrc — 修改
+- .gitignore — 修改
+- ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml — 删除
+- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs — 删除
+- ClassIsland.Core/Controls/MyWindow.cs — 修改
+- ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 新增
+- ClassIsland.Core/Themes/Generic.axaml — 修改
+- ClassIsland.Desktop/Properties/launchSettings.json — 修改
+- ClassIsland/App.Services.xaml.cs — 修改
+- ClassIsland/App.axaml.cs — 修改
+- ClassIsland/ClassIsland.csproj — 修改
+- ClassIsland/Controls/ActionSettingsControls/WeatherNotificationActionSettingControl.axaml — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml.cs — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml — 修改
+- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
+- ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
+- ClassIsland/Models/ApplicationCommand.cs — 修改
+- ClassIsland/Program.cs — 修改
+- ClassIsland/Services/ActionService.cs — 修改
+- ClassIsland/Services/WeatherService.cs — 修改
+- ClassIsland/ViewModels/SettingsPages/AboutSettingsViewModel.cs — 删除
+- ClassIsland/ViewModels/SettingsPages/UpdateSettingsPageViewModel.cs — 删除
+- ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 新增
+- ClassIsland/Views/SettingPages/AboutSettingsPage.axaml — 删除
+- ClassIsland/Views/SettingPages/AboutSettingsPage.axaml.cs — 删除
+- ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml — 修改
+- ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml — 删除
+- ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs — 删除
+- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
+- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml.cs — 新增
+- ClassIsland/Views/WelcomePages/LicensePage.axaml — 修改
+- ClassIsland/Views/WelcomePages/LicensePage.axaml.cs — 修改
+- ClassIsland/Views/WelcomePages/WelcomePage.axaml.cs — 修改
+- README.md — 修改
+- action.txt — 新增
+- fixxed.txt — 新增
+- out.txt — 新增
+
+================================================
 [2026-10-24 07:25] 同步 upstream/develop/v2/misha-alpha @ 329bf4b1
 ================================================
 
