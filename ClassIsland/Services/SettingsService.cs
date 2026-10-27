@@ -109,6 +109,20 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
             MigrateSettings(out requiresRestarting);
         }
 
+        // 一次性迁移：旧版本中「提醒语音」「提醒音效」的总开关默认关闭，
+        // 用户在提醒提供方里打开了语音/音效后仍然完全静音，且界面上没有任何提示。
+        // 这里在升级后把这两个总开关打开一次，之后用户的修改会被正常保留。
+        if (!Settings.HasMigratedNotificationAudioSettings)
+        {
+            Settings.HasMigratedNotificationAudioSettings = true;
+            if (!Settings.AllowNotificationSpeech || !Settings.AllowNotificationSound)
+            {
+                Settings.AllowNotificationSpeech = true;
+                Settings.AllowNotificationSound = true;
+                Logger.LogInformation("已将「提醒语音」「提醒音效」总开关迁移为开启状态。");
+            }
+        }
+
         Settings.LastAppVersion = Assembly.GetExecutingAssembly().GetName().Version!;
 
         if (requiresRestarting)

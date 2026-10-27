@@ -1,0 +1,111 @@
+<controls:SettingsPageBase x:Class="ClassIsland.Views.SettingPages.ConfigDebugSettingsPage"
+      xmlns="https://github.com/avaloniaui"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:local="clr-namespace:ClassIsland.Views.SettingPages"
+      xmlns:controls="clr-namespace:ClassIsland.Core.Abstractions.Controls;assembly=ClassIsland.Core"
+      xmlns:controls1="clr-namespace:ClassIsland.Core.Controls;assembly=ClassIsland.Core"
+      xmlns:controls2="clr-namespace:ClassIsland.Controls"
+      xmlns:controls3="using:FluentAvalonia.UI.Controls"
+      xmlns:ci="http://classisland.tech/schemas/xaml/core"
+      mc:Ignorable="d"
+      d:DesignHeight="700" d:DesignWidth="900"
+      d:DataContext="{d:DesignInstance local:ConfigDebugSettingsPage}"
+      Loaded="ConfigDebugSettingsPage_OnLoaded"
+      Unloaded="ConfigDebugSettingsPage_OnUnloaded">
+
+    <Grid RowDefinitions="Auto,Auto,*" Margin="0">
+        <StackPanel Grid.Row="0" Classes="settings-container animated-intro" Margin="0 0 0 8">
+            <controls1:IconText Glyph="&#xE943;" Text="变量调试" Margin="0 0 0 6" />
+            <TextBlock Text="直接读写 Settings.json 中的每一个配置变量。这里的修改会立即写入配置文件，部分设置需要重启应用后才会生效。"
+                       Classes="l-instructive" FontSize="12" Opacity="0.75"
+                       TextWrapping="Wrap" Margin="0 0 0 12" />
+
+            <controls3:FAInfoBar Severity="Warning"
+                                 IsOpen="True"
+                                 IsClosable="False"
+                                 Message="这是调试工具。修改不熟悉的变量可能导致应用行为异常，请谨慎操作。" />
+
+            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE2C8;}"
+                                          Header="启用调试菜单"
+                                          Description="启用后，设置窗口中会显示「调试」分类下的页面。">
+                <controls3:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsDebugOptionsEnabled, Mode=TwoWay}" />
+                </controls3:FASettingsExpander.Footer>
+            </controls3:FASettingsExpander>
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,170,Auto,Auto" Margin="0 0 0 8" ColumnSpacing="8">
+            <TextBox Grid.Column="0"
+                     Watermark="搜索变量名（例如 Notification、Weather、Speech）…"
+                     Text="{Binding ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <ComboBox Grid.Column="1"
+                      ItemsSource="{Binding ViewModel.TypeFilters}"
+                      SelectedItem="{Binding ViewModel.SelectedTypeFilter, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch" />
+            <ToggleSwitch Grid.Column="2"
+                          OnContent="只读"
+                          OffContent="可写"
+                          IsChecked="{Binding ViewModel.ShowReadOnly, Mode=TwoWay}"
+                          ToolTip.Tip="是否显示只读变量（集合、复杂对象等）" />
+            <Button Grid.Column="3"
+                    Content="重启应用"
+                    Click="ButtonRestart_OnClick"
+                    ToolTip.Tip="部分变量需要重启应用后才会生效" />
+        </Grid>
+
+        <Grid Grid.Row="2" RowDefinitions="Auto,*">
+            <TextBlock Grid.Row="0"
+                       Text="{Binding ViewModel.StatusText}"
+                       FontSize="12"
+                       Opacity="0.7"
+                       Margin="0 0 0 6" />
+            <ListBox Grid.Row="1"
+                     ItemsSource="{Binding ViewModel.Variables}"
+                     SelectionMode="Single"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     Background="Transparent"
+                     BorderThickness="0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid ColumnDefinitions="270,*,Auto" ColumnSpacing="12" Margin="0 3">
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock Text="{Binding Name}"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip.Tip="{Binding Name}" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{Binding TypeName}" FontSize="11" Opacity="0.6" />
+                                    <TextBlock Text="只读" FontSize="11" Opacity="0.6"
+                                               IsVisible="{Binding !CanWrite}" />
+                                    <TextBlock Text="不写入配置文件" FontSize="11"
+                                               Foreground="#FFE8A33D"
+                                               IsVisible="{Binding !IsPersisted}" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <controls2:SettingsVariableEditor />
+                                <TextBlock Text="{Binding LastError}"
+                                           FontSize="11"
+                                           Foreground="#FFFF6B6B"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding LastError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            </StackPanel>
+
+                            <Button Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Theme="{StaticResource TransparentButton}"
+                                    ToolTip.Tip="恢复默认值"
+                                    Click="ButtonResetVariable_OnClick">
+                                <controls1:FluentIcon Glyph="&#xE4CC;" />
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+    </Grid>
+</controls:SettingsPageBase>

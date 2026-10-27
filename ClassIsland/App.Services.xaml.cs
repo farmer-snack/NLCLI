@@ -129,6 +129,7 @@ public partial class App
         services.AddTransient<ErrorSettingsViewModel>();
         services.AddTransient<ThemesSettingsViewModel>();
         services.AddTransient<DebugPageViewModel>();
+        services.AddTransient<ConfigDebugSettingsViewModel>();
         services.AddTransient<RefreshingSettingsViewModel>();
         // Views
         services.AddTransient<ITopmostEffectPlayer>(x => x.GetRequiredService<TopmostEffectWindow>());
@@ -180,6 +181,7 @@ public partial class App
         services.AddSettingsPage<ThemesSettingsPage>();
         services.AddSettingsPage<TestSettingsPage>();
         services.AddSettingsPage<DebugPage>();
+        services.AddSettingsPage<ConfigDebugSettingsPage>();
         // services.AddSettingsPage<DebugBrushesSettingsPage>();
         services.AddSettingsPage<ManagementSettingsPage>();
         services.AddSettingsPage<ManagementCredentialsSettingsPage>();

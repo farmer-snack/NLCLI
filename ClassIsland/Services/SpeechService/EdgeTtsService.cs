@@ -44,6 +44,21 @@ public class EdgeTtsService : ISpeechService
     private bool IsPlaying { get; set; } = false;
 
     private EdgeTtsPlayInfo? _currentPlayInfo;
+
+    /// <summary>
+    /// EdgeTTS 连续失败多少次后，在一段时间内直接使用备用语音引擎。
+    /// </summary>
+    private const int EdgeTtsFailureThreshold = 2;
+
+    /// <summary>
+    /// EdgeTTS 熔断后，多久内优先使用备用语音引擎。
+    /// </summary>
+    private static readonly TimeSpan EdgeTtsFallbackDuration = TimeSpan.FromMinutes(10);
+
+    private ISpeechService? _fallbackSpeechService;
+    private bool _fallbackSpeechServiceInitialized;
+    private int _consecutiveFailures;
+    private DateTime _edgeTtsSkipUntil = DateTime.MinValue;
     
     public EdgeTtsService(IAudioService audioService, ILogger<EdgeTtsService> logger, SettingsService settingsService)
     {
@@ -71,6 +86,12 @@ public class EdgeTtsService : ISpeechService
 
     public void EnqueueSpeechQueue(string text)
     {
+        if (DateTime.Now < _edgeTtsSkipUntil)
+        {
+            SpeakWithFallback(text, "EdgeTTS 连续失败，暂时跳过在线合成");
+            return;
+        }
+
         Logger.LogInformation("以{}朗读文本：{}", SettingsService.Settings.EdgeTtsVoiceName, text);
         var cancellationTokenSource = new CancellationTokenSource();
 
@@ -89,7 +110,7 @@ public class EdgeTtsService : ISpeechService
             return;
         }
 
-        PlayingQueue.Enqueue(new EdgeTtsPlayInfo(cache, cancellationTokenSource, task));
+        PlayingQueue.Enqueue(new EdgeTtsPlayInfo(text, cache, cancellationTokenSource, task));
         _ = ProcessPlayerList();
     }
 
@@ -102,6 +123,79 @@ public class EdgeTtsService : ISpeechService
             playInfo.CancellationTokenSource.Cancel();
             playInfo.CancellationTokenSource.Dispose();
         }
+        _fallbackSpeechService?.ClearSpeechQueue();
+    }
+
+    /// <summary>
+    /// 获取备用语音引擎。目前只使用 Windows 自带的系统 TTS。
+    /// EdgeTTS 依赖微软的在线服务，一旦被服务端拒绝（常见为 403）就会完全静音，
+    /// 因此在失败时回退到本地系统 TTS，保证提醒至少能发出声音。
+    /// </summary>
+    private ISpeechService? TryGetFallbackSpeechService()
+    {
+        if (_fallbackSpeechServiceInitialized)
+        {
+            return _fallbackSpeechService;
+        }
+
+        _fallbackSpeechServiceInitialized = true;
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+#pragma warning disable CA1416 // 仅在 Windows 上调用
+        try
+        {
+            _fallbackSpeechService = new SystemSpeechService();
+            Logger.LogInformation("已初始化系统 TTS，作为 EdgeTTS 不可用时的备用语音引擎。");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "初始化系统 TTS 备用语音引擎失败。");
+        }
+#pragma warning restore CA1416
+
+        return _fallbackSpeechService;
+    }
+
+    private void SpeakWithFallback(string text, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        var service = TryGetFallbackSpeechService();
+        if (service == null)
+        {
+            Logger.LogWarning("EdgeTTS 朗读失败（{Reason}），且没有可用的备用语音引擎。", reason);
+            return;
+        }
+
+        try
+        {
+            Logger.LogInformation("EdgeTTS 朗读失败（{Reason}），改用系统 TTS 朗读：{Text}", reason, text);
+            service.EnqueueSpeechQueue(text);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "备用语音引擎朗读失败。");
+        }
+    }
+
+    private void ReportEdgeTtsFailure(EdgeTtsPlayInfo playInfo, string reason)
+    {
+        _consecutiveFailures++;
+        if (_consecutiveFailures >= EdgeTtsFailureThreshold)
+        {
+            _consecutiveFailures = 0;
+            _edgeTtsSkipUntil = DateTime.Now + EdgeTtsFallbackDuration;
+            Logger.LogWarning("EdgeTTS 连续失败，接下来 {Minutes} 分钟内直接使用系统 TTS。",
+                EdgeTtsFallbackDuration.TotalMinutes);
+        }
+
+        SpeakWithFallback(playInfo.Text, reason);
     }
 
     private async Task ProcessPlayerList()
@@ -125,7 +219,8 @@ public class EdgeTtsService : ISpeechService
                         var result = await playInfo.DownloadTask;
                         if (!result)
                         {
-                            Logger.LogDebug("语音缓存生成未完成：{}", playInfo.FilePath);
+                            Logger.LogWarning("语音缓存生成未完成：{}", playInfo.FilePath);
+                            ReportEdgeTtsFailure(playInfo, "在线语音合成失败");
                             continue;
                         }
                         Logger.LogDebug("等待下载完成结束");
@@ -134,12 +229,14 @@ public class EdgeTtsService : ISpeechService
                     if (!File.Exists(playInfo.FilePath))
                     {
                         Logger.LogWarning("找不到语音缓存文件：{}", playInfo.FilePath);
+                        ReportEdgeTtsFailure(playInfo, "找不到语音缓存文件");
                         continue;
                     }
 
                     Logger.LogDebug("开始播放 {}", playInfo.FilePath);
                     await AudioService.PlayAudioAsync(playInfo.FilePath,
                         (float)SettingsService.Settings.SpeechVolume, playInfo.CancellationTokenSource.Token);
+                    _consecutiveFailures = 0;
                     Logger.LogDebug("结束播放 {}", playInfo.FilePath);
                 }
                 catch (Exception ex)

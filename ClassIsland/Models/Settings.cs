@@ -154,10 +154,11 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private double _notificationEffectRenderingScale = 1.0;
     private bool _isNotificationEffectRenderingScaleAutoSet = false;
     private AllContributorsRc _contributorsCache = new();
-    private bool _allowNotificationSpeech = false;
+    private bool _allowNotificationSpeech = true;
     private bool _allowNotificationEffect = true;
-    private bool _allowNotificationSound = false;
+    private bool _allowNotificationSound = true;
     private bool _allowNotificationTopmost = true;
+    private bool _hasMigratedNotificationAudioSettings = false;
     private string _updateArtifactHash = "";
     private ObservableCollection<string> _excludedWeatherAlerts = new();
     private string _currentComponentConfig = "Default";
@@ -1609,6 +1610,22 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
         {
             if (value == _allowNotificationTopmost) return;
             _allowNotificationTopmost = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 是否已经完成「提醒语音/音效总开关」的一次性迁移。
+    /// 旧版本中 <see cref="AllowNotificationSpeech"/> 和 <see cref="AllowNotificationSound"/> 默认关闭，
+    /// 导致用户在提醒提供方里开启了语音/音效却完全听不到声音。
+    /// </summary>
+    public bool HasMigratedNotificationAudioSettings
+    {
+        get => _hasMigratedNotificationAudioSettings;
+        set
+        {
+            if (value == _hasMigratedNotificationAudioSettings) return;
+            _hasMigratedNotificationAudioSettings = value;
             OnPropertyChanged();
         }
     }

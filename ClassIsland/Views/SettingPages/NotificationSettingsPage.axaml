@@ -222,7 +222,7 @@
                                 <!-- 启用提醒语音 -->
                                 <controls3:FASettingsExpander IconSource="{controls2:FluentIconSource &#xED53;}"
                                                             Header="启用提醒语音"
-                                                            Description="在发出提醒时用语音播报提醒内容。"
+                                                            Description="在发出提醒时用语音播报提醒内容。这是语音的总开关，关闭后即使提醒提供方中开启了语音，也不会播放。"
                                                             IsExpanded="{Binding ViewModel.SettingsService.Settings.AllowNotificationSpeech, Mode=OneWay}">
                                     <controls3:FASettingsExpander.Footer>
                                         <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.AllowNotificationSpeech, Mode=TwoWay}"/>
@@ -314,7 +314,7 @@
                                 <!-- 启用提醒音效 -->
                                 <controls3:FASettingsExpander IconSource="{controls2:FluentIconSource &#xE649;}"
                                                             Header="启用提醒音效"
-                                                            Description="启用后，发出提醒时会播放音效。"
+                                                            Description="启用后，发出提醒时会播放音效。这是音效的总开关，关闭后即使提醒提供方中开启了音效，也不会播放。"
                                                             IsExpanded="{Binding ViewModel.SettingsService.Settings.AllowNotificationSound, Mode=OneWay}">
                                     <controls3:FASettingsExpander.Footer>
                                         <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.AllowNotificationSound, Mode=TwoWay}"/>
