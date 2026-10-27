@@ -1,4 +1,39 @@
 ================================================
+[2026-10-27 22:20] [定制] 修复提醒语音/音效无声 + 新增「变量调试」页
+================================================
+
+需求：提醒页面里开了「语音提醒」/「提醒音效」却完全没有声音（选了自定义音效也不响）；
+     另外要一个独立的调试页面，既能开调试模式，又能查看并修改 Settings.json 里的每一个变量。
+处理：改动 52 个文件（相对同步点 329bf4b1）；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors）（修复轮次 0）
+
+原因与修复
+----------
+1) 全局总开关默认关闭：AllowNotificationSpeech / AllowNotificationSound 默认 false，
+   而提醒链路 NotificationWorkerService 会同时检查「提供方设置」和这两个总开关，
+   任何一个是 false 都不会发声，界面上却没有任何提示。
+   → 默认值改为 true；新增 HasMigratedNotificationAudioSettings 标记，升级后一次性把两个开关打开
+     （之后用户仍可自行关闭）；两个开关的说明文字补上「这是总开关」。
+2) EdgeTTS 不可用时会完全静音：实测 speech.platform.bing.com 返回 403，EdgeTtsService 只写日志、
+   吞掉失败，用户听不到任何声音。
+   → 失败时自动回退到系统 TTS（Windows SAPI），连续失败 2 次后 10 分钟内直接走系统 TTS；
+     系统 TTS 优先选择中文语音。
+3) 新增独立「变量调试」页（设置 → 调试 → 变量调试）：
+   反射列出 Settings 的全部属性，按类型生成开关 / 数字框 / 下拉框 / 文本框，
+   支持搜索、按类型筛选、单项恢复默认值；修改直接走属性 setter，由 SettingsService 自动写入 Settings.json。
+
+改动的文件
+----------
+（52 个，见下方 [长期] 本地定制清单）
+
+下次同步注意
+------------
+- Settings.cs / SettingsService.cs：新增了 HasMigratedNotificationAudioSettings 与一次性迁移逻辑，上游改这两个文件时必须保留。
+- EdgeTtsService.cs / EdgeTtsPlayInfo.cs / SystemSpeechService.cs：加了系统 TTS 回退与中文语音选择，上游重写语音链路时注意别丢。
+- NotificationSettingsPage.axaml：只改了两处 Description 文案，冲突时取上游再补文案即可。
+- 新增文件（SettingsVariableEditor.cs、ConfigVariableItem.cs、ConfigDebugSettingsViewModel.cs、ConfigDebugSettingsPage.axaml/.cs）上游没有，不会冲突。
+- App.Services.xaml.cs：新增两行注册（ConfigDebugSettingsViewModel / ConfigDebugSettingsPage），上游改这个文件时保留。
+
+================================================
 [2026-10-25 17:20] [定制] 基于同步点 329bf4b1
 ================================================
 
@@ -58,8 +93,11 @@
 - 天气：刷新改 1 分钟 + 失败退避 2/3 分钟；新增独立「天气详情」页（Open-Meteo，见本轮 [定制] 段）
 - 精确时间：自适应间隔（成功 6h / 偏差大 1h / 失败 1-5-15-60min）、多服务器回退、
   状态消息回 UI 线程、并发保护；时钟页新增「关闭时间同步」按钮
+- 提醒语音/音效：两个总开关默认开启 + 升级时一次性迁移；EdgeTTS 失败自动回退系统 TTS（优先中文语音），
+  连续失败 2 次后 10 分钟内直接使用系统 TTS
+- 变量调试：新增独立「变量调试」设置页（Settings 全部属性的可视化编辑，支持搜索 / 类型筛选 / 恢复默认值）
 
-改动的文件（41 个）
+改动的文件（52 个）
 ----------
 - .all-contributorsrc — 修改
 - .gitignore — 修改
@@ -77,20 +115,31 @@
 - ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml.cs — 修改
 - ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml — 修改
 - ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
+- ClassIsland/Controls/SettingsVariableEditor.cs — 新增
 - ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
 - ClassIsland/Models/ApplicationCommand.cs — 修改
+- ClassIsland/Models/Debugging/ConfigVariableItem.cs — 新增
+- ClassIsland/Models/Settings.cs — 修改
 - ClassIsland/Program.cs — 修改
 - ClassIsland/Services/ActionService.cs — 修改
 - ClassIsland/Services/ExactTimeService.cs — 修改
+- ClassIsland/Services/SettingsService.cs — 修改
+- ClassIsland/Services/SpeechService/EdgeTtsPlayInfo.cs — 修改
+- ClassIsland/Services/SpeechService/EdgeTtsService.cs — 修改
+- ClassIsland/Services/SpeechService/SystemSpeechService.cs — 修改
 - ClassIsland/Services/WeatherService.cs — 修改
 - ClassIsland/ViewModels/SettingsPages/AboutSettingsViewModel.cs — 删除
+- ClassIsland/ViewModels/SettingsPages/ConfigDebugSettingsViewModel.cs — 新增
 - ClassIsland/ViewModels/SettingsPages/UpdateSettingsPageViewModel.cs — 删除
 - ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 新增
 - ClassIsland/Views/SettingPages/AboutSettingsPage.axaml — 删除
 - ClassIsland/Views/SettingPages/AboutSettingsPage.axaml.cs — 删除
 - ClassIsland/Views/SettingPages/ClockSettingsPage.axaml — 修改
 - ClassIsland/Views/SettingPages/ClockSettingsPage.axaml.cs — 修改
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 新增
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml.cs — 新增
 - ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml — 修改
+- ClassIsland/Views/SettingPages/NotificationSettingsPage.axaml — 修改
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml — 删除
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs — 删除
 - ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
