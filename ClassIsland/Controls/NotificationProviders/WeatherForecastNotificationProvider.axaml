@@ -21,29 +21,36 @@
                                              Height="22" AllowColor="False"/>
         </StackPanel>
         <Grid HorizontalAlignment="Center" IsVisible="{Binding !IsOverlay}">
-            <ItemsControl ItemsSource="{Binding Days}" Margin="12 0">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid Columns="7" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <StackPanel Orientation="Vertical" Spacing="2"
-                                    HorizontalAlignment="Center" Margin="4 0">
-                            <TextBlock Text="{Binding Label}" Classes="l-secondary" FontWeight="Bold"
-                                       FontSize="13" HorizontalAlignment="Center"/>
-                            <controls:WeatherRangePackIconControl Value="{Binding Weather}"
-                                                                  Height="24"
-                                                                  HorizontalAlignment="Center"
-                                                                  Margin="0 0 0 2"/>
-                            <TextBlock FontWeight="Medium" FontSize="13" HorizontalAlignment="Center">
-                                <Run Text="{Binding TempFrom}"/><Run Text="~"/><Run Text="{Binding TempTo}"/><Run Text="℃"/>
-                            </TextBlock>
-                        </StackPanel>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <!-- 7 天固定列宽 + 可横向滚动：窗口再窄也不会把文字压扁 -->
+            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled"
+                          Padding="0"
+                          Margin="8 0">
+                <ItemsControl ItemsSource="{Binding Days}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="7" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Vertical" Spacing="3" Width="74"
+                                        HorizontalAlignment="Center" Margin="2 0">
+                                <TextBlock Text="{Binding Label}" Classes="l-secondary" FontWeight="Bold"
+                                           FontSize="13" HorizontalAlignment="Center"/>
+                                <controls:WeatherRangePackIconControl Value="{Binding Weather}"
+                                                                      Height="24"
+                                                                      HorizontalAlignment="Center"
+                                                                      Margin="0 0 0 2"/>
+                                <TextBlock FontWeight="Medium" FontSize="12" HorizontalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis">
+                                    <Run Text="{Binding TempFrom}"/><Run Text="~"/><Run Text="{Binding TempTo}"/><Run Text="℃"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
         </Grid>
     </Grid>
 </UserControl>

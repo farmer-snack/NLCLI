@@ -84,6 +84,9 @@ public class RectanglesNotificationPanel : Panel
     private CancellationTokenSource? _overlayCancellation;
     private CancellationTokenSource? _widthCancellation;
     private double _targetWidth;
+    // 提醒宽度锁定：同一条提醒播放期间宽度不再随内容/轮播容器变化而抖动。
+    private double _lockedWidth;
+    private DateTime? _openedAt;
     private bool _isOverlayPresentation;
     private readonly TranslateTransform _inertiaTransform = new();
     private readonly MatrixTransform _revealTransform = new();
@@ -220,7 +223,31 @@ public class RectanglesNotificationPanel : Panel
         var maximumWidth = Math.Max(0, WindowWidth * 0.8 / scale);
         var maximumBodyWidth = Math.Max(0, maximumWidth - (IsCentered ? 0 : RectanglesNotificationBubble.TipLength));
         var contentWidth = bubble.MeasureContentWidth(_isOverlayPresentation);
-        var targetWidth = Math.Min(maximumBodyWidth, Math.Max(325, contentWidth));
+        var measuredWidth = Math.Min(maximumBodyWidth, Math.Max(325, contentWidth));
+
+        // 同一条提醒的宽度在播放期间固定下来：只在刚弹出的极短时间内允许增长，
+        // 之后即使主界面的轮播容器等内容变化，也不会再改变提醒宽度。
+        if (!IsOpened)
+        {
+            _lockedWidth = 0;
+            _openedAt = null;
+        }
+        else
+        {
+            _openedAt ??= DateTime.Now;
+            if (_lockedWidth <= 0)
+            {
+                _lockedWidth = measuredWidth;
+            }
+            else if (DateTime.Now - _openedAt.Value < TimeSpan.FromMilliseconds(600))
+            {
+                _lockedWidth = Math.Max(_lockedWidth, measuredWidth);
+            }
+        }
+
+        var targetWidth = IsOpened && _lockedWidth > 0
+            ? Math.Min(maximumBodyWidth, _lockedWidth)
+            : measuredWidth;
         if (Math.Abs(_targetWidth - targetWidth) > 0.01)
         {
             _targetWidth = targetWidth;

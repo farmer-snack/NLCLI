@@ -1,21 +1,57 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Net.Http;
+using System.Text.Json;
 using System.Threading.Tasks;
 using ClassIsland.Core.Models.Weather;
 using ClassIsland.Helpers;
 using ClassIsland.Services;
+using ClassIsland.Services.Weather;
 using ClassIsland.Views.SettingPages;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Extensions.Logging;
 
 namespace ClassIsland.ViewModels.SettingsPages;
 
-public sealed record OmDayItem(string Label, string Emoji, string TempRange, string Precip, string Wind, string Uv, List<OmMetricItem> Detail);
 public sealed record OmHourItem(string Label, string Emoji, string Temp, string Precip, List<OmMetricItem> Detail);
 public sealed record OmMinutelyItem(string Label, string Precip, string Probability);
 public sealed record OmMetricItem(string Label, string Value);
 public sealed record OmAqiItem(string Label, string Value);
+
+/// <summary>
+/// 一天的预报：概览 + 这一天的小时列表 + 该日的完整字段。
+/// 内部的 <see cref="SelectedHour"/> 用于「点一个小时看它的全部数据」。
+/// </summary>
+public partial class OmDayItem(
+    string label,
+    string dateText,
+    string emoji,
+    string tempRange,
+    string precip,
+    string wind,
+    string uv,
+    string summary,
+    List<OmHourItem> hours,
+    List<OmMetricItem> detail)
+    : ObservableObject
+{
+    public string Label { get; } = label;
+    public string DateText { get; } = dateText;
+    public string Emoji { get; } = emoji;
+    public string TempRange { get; } = tempRange;
+    public string Precip { get; } = precip;
+    public string Wind { get; } = wind;
+    public string Uv { get; } = uv;
+    public string Summary { get; } = summary;
+    public List<OmHourItem> Hours { get; } = hours;
+    public List<OmMetricItem> Detail { get; } = detail;
+    public string HourCountText => $"{Hours.Count} 小时";
+
+    [ObservableProperty] private OmHourItem? _selectedHour;
+}
 
 /// <summary>
 /// 「天气详情」设置页的 ViewModel：只负责 Open-Meteo 的数据拉取与格式化，
@@ -23,18 +59,52 @@ public sealed record OmAqiItem(string Label, string Value);
 /// </summary>
 public partial class WeatherDetailSettingsViewModel : ObservableObject
 {
+    /// <summary>
+    /// 本地缓存的保鲜期：30 分钟内再次打开页面直接使用本地结果，不发起请求。
+    /// </summary>
+    private const int CacheTtlMinutes = 30;
+
     private readonly SettingsService _settingsService;
+    private readonly OpenMeteoCacheService _cacheService;
+    private readonly OpenMeteoQuotaService _quotaService;
     private readonly ILogger<WeatherDetailSettingsPage> _logger;
 
-    public WeatherDetailSettingsViewModel(SettingsService settingsService, ILogger<WeatherDetailSettingsPage> logger)
+    /// <summary>
+    /// Open-Meteo 专用 HttpClient：
+    /// 开启 gzip（38 KB → 8.6 KB，实测能快一半以上）、限制连接/整体超时，
+    /// 避免走全局 HttpClient 时既没有压缩也没有明确超时。
+    /// </summary>
+    private static readonly HttpClient OpenMeteoHttpClient = new(new SocketsHttpHandler
+    {
+        AutomaticDecompression = DecompressionMethods.All,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(25)
+    };
+
+    private static readonly JsonSerializerOptions OpenMeteoJsonOptions = new(JsonSerializerDefaults.Web);
+
+    public WeatherDetailSettingsViewModel(SettingsService settingsService,
+        OpenMeteoCacheService cacheService,
+        OpenMeteoQuotaService quotaService,
+        ILogger<WeatherDetailSettingsPage> logger)
     {
         _settingsService = settingsService;
+        _cacheService = cacheService;
+        _quotaService = quotaService;
         _logger = logger;
     }
 
     public string CityName => string.IsNullOrWhiteSpace(_settingsService.Settings.CityName)
         ? "当前定位"
         : _settingsService.Settings.CityName;
+
+    /// <summary>
+    /// 本页的维护者标识。
+    /// </summary>
+    public string MaintainerText => "该页面由 farmer-snack/NLCLI 维护";
 
     [ObservableProperty] private bool _isOpenMeteoLoading;
     [ObservableProperty] private string? _openMeteoError;
@@ -43,72 +113,189 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     [ObservableProperty] private string _omCurrentEmoji = "";
     [ObservableProperty] private string _omCurrentDetail = "";
     [ObservableProperty] private string _omUpdatedAt = "";
+    [ObservableProperty] private string _omCacheStatus = "";
+    [ObservableProperty] private string _omQuotaText = "";
     [ObservableProperty] private string _omSunTimes = "";
     [ObservableProperty] private string _omAqiLevel = "";
-    [ObservableProperty] private List<OmHourItem> _omHours = new();
-    [ObservableProperty] private OmHourItem? _selectedHour;
     [ObservableProperty] private List<OmMinutelyItem> _omMinutes = new();
     [ObservableProperty] private List<OmDayItem> _omDays = new();
     [ObservableProperty] private List<OmMetricItem> _omMetrics = new();
     [ObservableProperty] private List<OmAqiItem> _omAqi = new();
 
     /// <summary>
-    /// 拉取 Open-Meteo 的详细预报（16 天日预报、24 小时逐小时、未来 2 小时逐 15 分钟），
-    /// 再单独拉一次空气质量。空气质量失败不影响主预报。
+    /// 页面加载入口。
+    /// 1. 先读本地缓存并立刻渲染（缓存写在 Settings.json 同目录，重启客户端后仍然有效）；
+    /// 2. 缓存不到 30 分钟就直接用，不联网；
+    /// 3. 超过 30 分钟才在后台刷新，刷新回来之前屏幕上仍然是本地数据。
     /// </summary>
-    public async Task LoadOpenMeteoAsync()
+    public async Task LoadOpenMeteoAsync(bool forceRefresh = false)
+    {
+        OnPropertyChanged(nameof(CityName));
+        UpdateQuotaText();
+
+        var latitude = _settingsService.Settings.WeatherLatitude;
+        var longitude = _settingsService.Settings.WeatherLongitude;
+
+        var cache = _cacheService.Load(latitude, longitude);
+        var hasCache = cache?.Forecast != null;
+        if (hasCache)
+        {
+            ApplyOpenMeteo(cache!.Forecast!, cache.CachedAt);
+            if (cache.AirQuality != null)
+            {
+                ApplyAirQuality(cache.AirQuality);
+            }
+
+            OmCacheStatus = DescribeAge(cache.Age);
+            _logger.LogInformation("天气详情使用本地缓存，缓存时间：{}", cache.CachedAt);
+        }
+
+        if (!forceRefresh && hasCache && cache!.Age < TimeSpan.FromMinutes(CacheTtlMinutes))
+        {
+            // 半小时以内：直接用本地结果，不消耗任何请求次数。
+            return;
+        }
+
+        await RefreshAsync(latitude, longitude, hasCache);
+    }
+
+    /// <summary>
+    /// 强制联网刷新（跳过 30 分钟判断），失败时保留屏幕上已有的数据。
+    /// </summary>
+    public async Task RefreshAsync()
+    {
+        await RefreshAsync(_settingsService.Settings.WeatherLatitude,
+            _settingsService.Settings.WeatherLongitude, OmDays.Count > 0);
+    }
+
+    private async Task RefreshAsync(double latitude, double longitude, bool keepOldDataOnFailure)
     {
         IsOpenMeteoLoading = true;
         OpenMeteoError = null;
-        OnPropertyChanged(nameof(CityName));
         try
         {
-            var lat = _settingsService.Settings.WeatherLatitude.ToString(CultureInfo.InvariantCulture);
-            var lon = _settingsService.Settings.WeatherLongitude.ToString(CultureInfo.InvariantCulture);
-            var url = "https://api.open-meteo.com/v1/forecast"
-                      + $"?latitude={lat}&longitude={lon}"
-                      + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,is_day,precipitation,rain,showers,snowfall,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m"
-                      + "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,precipitation_probability,precipitation,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day"
-                      + "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max,precipitation_sum,rain_sum,snowfall_sum,precipitation_hours,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
-                      + "&minutely_15=temperature_2m,weather_code,precipitation,rain,snowfall,wind_speed_10m"
-                      + "&timezone=auto&forecast_days=16&forecast_minutely_15=48";
+            var forecast = await FetchForecastAsync(latitude, longitude);
+            var airQuality = await FetchAirQualityAsync(latitude, longitude);
+            var now = DateTime.Now;
 
-            var data = await WebRequestHelper.Default.GetJson<OpenMeteoForecast>(new Uri(url));
-            ApplyOpenMeteo(data);
+            ApplyOpenMeteo(forecast, now);
+            if (airQuality != null)
+            {
+                ApplyAirQuality(airQuality);
+            }
+
+            OmCacheStatus = "刚刚更新";
+            _cacheService.Save(new OpenMeteoCacheEntry
+            {
+                CachedAt = now,
+                Latitude = latitude,
+                Longitude = longitude,
+                Forecast = forecast,
+                AirQuality = airQuality
+            });
         }
         catch (Exception ex)
         {
-            OpenMeteoError = $"详细预报加载失败：{ex.Message}";
+            OpenMeteoError = keepOldDataOnFailure
+                ? $"刷新失败，继续显示本地缓存：{ex.Message}"
+                : $"详细预报加载失败：{ex.Message}";
             _logger.LogWarning(ex, "Open-Meteo 请求失败");
         }
         finally
         {
             IsOpenMeteoLoading = false;
+            UpdateQuotaText();
         }
-
-        await LoadAirQualityAsync();
     }
 
-    private async Task LoadAirQualityAsync()
+    private async Task<OpenMeteoForecast> FetchForecastAsync(double latitude, double longitude)
+    {
+        var lat = latitude.ToString(CultureInfo.InvariantCulture);
+        var lon = longitude.ToString(CultureInfo.InvariantCulture);
+        var url = "https://api.open-meteo.com/v1/forecast"
+                  + $"?latitude={lat}&longitude={lon}"
+                  + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,is_day,precipitation,rain,showers,snowfall,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m"
+                  + "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,precipitation_probability,precipitation,pressure_msl,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day"
+                  + "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,sunrise,sunset,daylight_duration,sunshine_duration,uv_index_max,precipitation_sum,rain_sum,snowfall_sum,precipitation_hours,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
+                  + "&minutely_15=temperature_2m,weather_code,precipitation,rain,snowfall,wind_speed_10m"
+                  + "&timezone=auto&forecast_days=16&forecast_minutely_15=48";
+
+        _quotaService.Record();
+        UpdateQuotaText();
+        return await GetJsonAsync<OpenMeteoForecast>(url);
+    }
+
+    private async Task<OpenMeteoAirQuality?> FetchAirQualityAsync(double latitude, double longitude)
     {
         try
         {
-            var lat = _settingsService.Settings.WeatherLatitude.ToString(CultureInfo.InvariantCulture);
-            var lon = _settingsService.Settings.WeatherLongitude.ToString(CultureInfo.InvariantCulture);
+            var lat = latitude.ToString(CultureInfo.InvariantCulture);
+            var lon = longitude.ToString(CultureInfo.InvariantCulture);
             var url = "https://air-quality-api.open-meteo.com/v1/air-quality"
                       + $"?latitude={lat}&longitude={lon}"
                       + "&current=european_aqi,us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone"
                       + "&timezone=auto";
-            var data = await WebRequestHelper.Default.GetJson<OpenMeteoAirQuality>(new Uri(url));
-            ApplyAirQuality(data);
+
+            _quotaService.Record();
+            UpdateQuotaText();
+            return await GetJsonAsync<OpenMeteoAirQuality>(url);
         }
         catch (Exception ex)
         {
-            OmAqi = new List<OmAqiItem>();
-            OmAqiLevel = "";
             _logger.LogWarning(ex, "Open-Meteo 空气质量请求失败");
+            return null;
         }
     }
+
+    /// <summary>
+    /// 带重试的 JSON 请求。只重试 1 次（退避 1 秒），失败时把耗时和状态码写进异常信息，
+    /// 避免像原来的全局请求那样连试 4 次、每次等好几秒，用户只看到「一直在转圈」。
+    /// </summary>
+    private async Task<T> GetJsonAsync<T>(string url) where T : class
+    {
+        Exception? last = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                using var response = await OpenMeteoHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new HttpRequestException($"HTTP {(int)response.StatusCode} {response.StatusCode}");
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                var result = await JsonSerializer.DeserializeAsync<T>(stream, OpenMeteoJsonOptions);
+                sw.Stop();
+                _logger.LogInformation("Open-Meteo 请求成功：{} ms，{}", sw.ElapsedMilliseconds, typeof(T).Name);
+                return result ?? throw new InvalidOperationException("Open-Meteo 返回了空数据");
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                last = ex;
+                _logger.LogWarning(ex, "Open-Meteo 请求失败（第 {} 次，耗时 {} ms）", attempt + 1, sw.ElapsedMilliseconds);
+                if (attempt == 0)
+                {
+                    await Task.Delay(1000);
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"请求 Open-Meteo 失败：{last?.Message}", last);
+    }
+
+    private void UpdateQuotaText()
+    {
+        var quota = _quotaService.Current;
+        OmQuotaText = $"剩余请求机会 {quota.Remaining:N0} 次"
+                      + $"（本分钟 {quota.MinuteRemaining:N0} · 本小时 {quota.HourRemaining:N0} · 24 小时 {quota.DayRemaining:N0}）";
+    }
+
+    private static string DescribeAge(TimeSpan age) => age.TotalMinutes < 1
+        ? "本地缓存 · 刚刚"
+        : $"本地缓存 · {(int)age.TotalMinutes} 分钟前";
 
     private void ApplyAirQuality(OpenMeteoAirQuality data)
     {
@@ -127,7 +314,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         };
     }
 
-    private void ApplyOpenMeteo(OpenMeteoForecast data)
+    private void ApplyOpenMeteo(OpenMeteoForecast data, DateTime timestamp)
     {
         var current = data.Current;
         var daily = data.Daily;
@@ -137,8 +324,8 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         OmCurrentText = WeatherCodeHelper.GetText(current.WeatherCode);
         OmCurrentEmoji = WeatherCodeHelper.GetEmoji(current.WeatherCode);
         OmUpdatedAt = string.IsNullOrWhiteSpace(current.Time)
-            ? ""
-            : $"更新于 {current.Time.Replace('T', ' ')}";
+            ? $"数据时间 {timestamp:HH:mm}"
+            : $"数据时间 {current.Time.Replace('T', ' ')}";
 
         var high = daily.TemperatureMax.Count > 0 ? F(daily.TemperatureMax[0], "0", "°") : "--";
         var low = daily.TemperatureMin.Count > 0 ? F(daily.TemperatureMin[0], "0", "°") : "--";
@@ -169,14 +356,27 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             new("紫外线", F(uv, "0.0"))
         };
 
-        var hours = new List<OmHourItem>();
+        // ---- 逐小时：先剪掉已经过去的小时，再按自然日分组 ----
+        var nowHour = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, DateTime.Now.Hour, 0, 0);
+        var hoursByDate = new Dictionary<DateTime, List<OmHourItem>>();
         for (var i = 0; i < hourly.Time.Count; i++)
         {
             var time = ParseTime(hourly.Time[i]);
-            if (time is null) continue;
+            if (time is null)
+            {
+                continue;
+            }
+
+            // Open-Meteo 的 hourly 永远从当天 00:00 开始返回，这里只保留「当前整点及以后」。
+            if (time.Value < nowHour)
+            {
+                continue;
+            }
+
             var code = At(hourly.WeatherCode, i);
             var temp = At(hourly.Temperature, i);
             var pop = At(hourly.PrecipitationProbability, i);
+            var isNow = time.Value == nowHour;
             var hourDetail = new List<OmMetricItem>
             {
                 new("天气", WeatherCodeHelper.GetText(code)),
@@ -194,16 +394,32 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                 new("紫外线", F(At(hourly.UvIndex, i), "0.0")),
                 new("时段", At(hourly.IsDay, i) == 0 ? "夜间" : "白天")
             };
-            hours.Add(new OmHourItem(time.Value.ToString("HH时"), WeatherCodeHelper.GetEmoji(code),
-                F(temp, "0", "°"), pop is null ? "" : pop + "%", hourDetail));
+
+            var item = new OmHourItem(isNow ? "现在" : time.Value.ToString("HH时"),
+                WeatherCodeHelper.GetEmoji(code),
+                F(temp, "0", "°"),
+                pop is null ? "" : pop + "%",
+                hourDetail);
+
+            var date = time.Value.Date;
+            if (!hoursByDate.TryGetValue(date, out var list))
+            {
+                list = [];
+                hoursByDate[date] = list;
+            }
+
+            list.Add(item);
         }
-        OmHours = hours;
 
         var minutes = new List<OmMinutelyItem>();
         for (var i = 0; i < data.Minutely15.Time.Count; i++)
         {
             var time = ParseTime(data.Minutely15.Time[i]);
-            if (time is null) continue;
+            if (time is null)
+            {
+                continue;
+            }
+
             var precipitation = At(data.Minutely15.Precipitation, i);
             // 15 分钟粒度没有 precipitation_probability（那是 hourly 才有的字段），这里只显示降水量。
             minutes.Add(new OmMinutelyItem(time.Value.ToString("HH:mm"),
@@ -211,11 +427,16 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         }
         OmMinutes = minutes;
 
+        // ---- 天级：带上这一天的 24 小时列表 ----
         var days = new List<OmDayItem>();
         for (var i = 0; i < daily.Time.Count; i++)
         {
             var date = ParseTime(daily.Time[i]);
-            if (date is null) continue;
+            if (date is null)
+            {
+                continue;
+            }
+
             var code = At(daily.WeatherCode, i);
             var max = At(daily.TemperatureMax, i);
             var min = At(daily.TemperatureMin, i);
@@ -245,8 +466,18 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                 new("降水概率", pop is null ? "--" : pop + "%"),
                 new("降水量", F(sum, "0.0", " mm"))
             };
-            days.Add(new OmDayItem(DayLabel(date.Value.Date), WeatherCodeHelper.GetEmoji(code),
-                $"{F(min, "0", "°")} ~ {F(max, "0", "°")}", precipText, windText, F(uvMax, "0.0"), dayDetail));
+
+            hoursByDate.TryGetValue(date.Value.Date, out var dayHours);
+            days.Add(new OmDayItem(DayLabel(date.Value.Date),
+                date.Value.ToString("MM-dd"),
+                WeatherCodeHelper.GetEmoji(code),
+                $"{F(min, "0", "°")} ~ {F(max, "0", "°")}",
+                precipText,
+                windText,
+                F(uvMax, "0.0"),
+                WeatherCodeHelper.GetText(code),
+                dayHours ?? [],
+                dayDetail));
         }
         OmDays = days;
     }

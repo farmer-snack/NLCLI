@@ -25,4 +25,9 @@ public partial class WeatherDetailSettingsPage : SettingsPageBase
     {
         await ViewModel.LoadOpenMeteoAsync();
     }
+
+    private async void ButtonRefresh_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ViewModel.RefreshAsync();
+    }
 }

@@ -38,6 +38,7 @@ using ClassIsland.Services.Management;
 using ClassIsland.Services.Metadata;
 using ClassIsland.Services.NotificationProviders;
 using ClassIsland.Services.SpeechService;
+using ClassIsland.Services.Weather;
 using ClassIsland.ViewModels;
 using ClassIsland.ViewModels.EditMode;
 using ClassIsland.ViewModels.SettingsPages;
@@ -65,6 +66,8 @@ public partial class App
         services.AddSingleton<IThemeService, ThemeService>();
         services.AddSingleton<MiniInfoProviderHostService>();
         services.AddSingleton<IWeatherService, WeatherService>();
+        services.AddSingleton<OpenMeteoCacheService>();
+        services.AddSingleton<OpenMeteoQuotaService>();
         services.AddSingleton<FileFolderService>();
         services.AddSingleton<IAttachedSettingsHostService, AttachedSettingsHostService>();
         services.AddSingleton<IProfileService, ProfileService>();
