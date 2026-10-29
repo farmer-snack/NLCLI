@@ -1,4 +1,48 @@
 ================================================
+[2026-10-29 20:40] [定制] 天气详情：本地缓存 + 请求额度 + 按天三级展开；提醒排版与宽度固定
+================================================
+
+需求：1) 天气详情页和变量调试页都标注「该页面由 farmer-snack/NLCLI 维护」；
+     2) 天气详情把上一次请求结果保存到本地（重启客户端后仍在）：30 分钟内打开直接用本地结果，
+        超过 30 分钟才请求，请求回来之前继续显示本地结果；
+     3) 页面底部显示还剩多少次请求机会；
+     4) 天气详情排版有文字被挡住；逐小时不要平铺 384 小时，改成
+        「一天 → 这一天的 24 小时 → 小时详情」三级；小时数据要从当前时刻开始，不要永远从 0 点；
+     5) 天气提醒（七天 / 逐小时）排版被压扁；
+     6) 提醒播放时宽度会随轮播容器变化而抖动，要把宽度固定下来。
+处理：改动 55 个文件（相对同步点 329bf4b1）；构建 ClassIsland/ClassIsland.csproj → 通过（0 errors）
+
+实现
+----
+1) 维护者标识：天气详情页顶部、变量调试页顶部各加一个徽章「该页面由 farmer-snack/NLCLI 维护」。
+2) 本地缓存：新增 OpenMeteoCacheService，缓存写到 Settings.json 同目录的 OpenMeteoCache.json
+   （主预报 + 空气质量 + 缓存时间 + 经纬度）。换城市后经纬度对不上会自动作废。
+   - 打开页面：先渲染缓存；缓存 < 30 分钟直接返回，不发请求；
+   - 缓存 ≥ 30 分钟：旧数据留在屏幕上，后台刷新，成功后写回缓存；失败只提示，不清空旧数据。
+3) 请求额度：新增 OpenMeteoQuotaService，把每次真实请求的时间戳写到 OpenMeteoQuota.json，
+   按「每分钟 600 / 每小时 5000 / 24 小时 10000」滚动统计，页面底部显示三个窗口里最紧的剩余次数。
+   计数落盘，重启后不会归零。
+4) 排版与三级展开：
+   - 删掉原来 384 小时的横向长条；
+   - 每天一行（日期 + 星期 + 图标 + 温度 + 降水 + 风 + UV），点开显示该日 16 项完整字段
+     + 这一天的小时网格（8 列，第一格是「现在」），再点某个小时显示该小时 14 项完整字段；
+   - 小时数据按「当前整点」裁剪，不再永远从 00:00 开始；
+   - Expander 头去掉固定宽度 436，改成自适应列 + 省略号，窗口缩放 / 高 DPI 下不再挡住文字；
+   - 15 分钟预报从 12 列改成 6 列，窄窗口不再挤成一团。
+5) 提醒排版：七天 / 逐小时改成固定列宽（74 / 50）+ 外层横向滚动兜底，窗口再窄也不会把文字压扁。
+6) 提醒宽度锁定：RectanglesNotificationPanel 在提醒弹出时锁定宽度，600ms 内只允许变宽，
+   之后即使主界面的轮播容器切换、内容长度变化，提醒宽度也不再抖动。
+7) 网络层：Open-Meteo 改用专用 HttpClient（gzip 压缩 + 连接 10s / 整体 25s 超时），
+   重试从 3 次降到 1 次；日志记录每次耗时，方便排查「一直转圈」。
+
+下次同步注意
+------------
+- 新增文件：ClassIsland/Services/Weather/OpenMeteoCacheService.cs、OpenMeteoQuotaService.cs 上游没有，不会冲突。
+- WeatherDetailSettingsViewModel.cs 依赖上面两个服务，App.Services.xaml.cs 里注册了两行，同步时保留。
+- RectanglesNotificationPanel.cs 改了 MeasureOverride 的宽度策略（锁定宽度），上游更新提醒动画时注意合并。
+- 天气提醒两个 axaml 只是布局调整，冲突时取上游重新套用即可。
+
+================================================
 [2026-10-27 22:20] [定制] 修复提醒语音/音效无声 + 新增「变量调试」页
 ================================================
 
@@ -96,8 +140,10 @@
 - 提醒语音/音效：两个总开关默认开启 + 升级时一次性迁移；EdgeTTS 失败自动回退系统 TTS（优先中文语音），
   连续失败 2 次后 10 分钟内直接使用系统 TTS
 - 变量调试：新增独立「变量调试」设置页（Settings 全部属性的可视化编辑，支持搜索 / 类型筛选 / 恢复默认值）
+- 天气详情：本地缓存 30 分钟（重启后仍有效）+ 请求额度统计 + 按天三级展开（天 → 24 小时 → 小时详情）+ 小时从当前整点开始 + 版面自适应；两页标注维护者
+- 提醒：七天/逐小时固定列宽 + 横向滚动兜底；提醒宽度播放期间锁定，不随轮播容器抖动
 
-改动的文件（52 个）
+改动的文件（55 个）
 ----------
 - .all-contributorsrc — 修改
 - .gitignore — 修改
@@ -115,6 +161,7 @@
 - ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml.cs — 修改
 - ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml — 修改
 - ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
+- ClassIsland/Controls/RectanglesNotificationPanel.cs — 修改
 - ClassIsland/Controls/SettingsVariableEditor.cs — 新增
 - ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
 - ClassIsland/Models/ApplicationCommand.cs — 修改
@@ -127,6 +174,8 @@
 - ClassIsland/Services/SpeechService/EdgeTtsPlayInfo.cs — 修改
 - ClassIsland/Services/SpeechService/EdgeTtsService.cs — 修改
 - ClassIsland/Services/SpeechService/SystemSpeechService.cs — 修改
+- ClassIsland/Services/Weather/OpenMeteoCacheService.cs — 新增
+- ClassIsland/Services/Weather/OpenMeteoQuotaService.cs — 新增
 - ClassIsland/Services/WeatherService.cs — 修改
 - ClassIsland/ViewModels/SettingsPages/AboutSettingsViewModel.cs — 删除
 - ClassIsland/ViewModels/SettingsPages/ConfigDebugSettingsViewModel.cs — 新增
