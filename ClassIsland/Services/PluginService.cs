@@ -108,6 +108,97 @@ public class PluginService : IPluginService
     }
 
     /// <summary>
+    /// 兼容层：检查插件声明的 API 版本。
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>低于 2.0.0.0 的插件（ClassIsland 1.x 时代的旧插件）运行时 API 完全不兼容，直接标记为错误；</item>
+    /// <item>高于当前应用版本的插件<strong>不</strong>阻止加载，只提示——市场的插件在 API 上基本是向后兼容的，
+    /// 直接拒载会让用户升级插件后完全用不了；</item>
+    /// <item>没有声明或无法解析 API 版本的插件同样放行，交给实际加载过程检验。</item>
+    /// </list>
+    /// </remarks>
+    private static void CheckApiVersionCompatibility(PluginInfo info)
+    {
+        var manifest = info.Manifest;
+        if (!Version.TryParse(manifest.ApiVersion, out var apiVersion))
+        {
+            Console.WriteLine($"[插件兼容] {manifest.Name}({manifest.Id}) 未声明有效的 API 版本（\"{manifest.ApiVersion}\"），将尝试加载。");
+            return;
+        }
+
+        // 兼容层：把 "2.0" 这类省略段位的写法补齐为 "2.0.0.0"，
+        // 否则 Version 的默认 Build/Revision 是 -1，会被误判成低于 2.0.0.0。
+        apiVersion = NormalizeVersion(apiVersion);
+
+        if (apiVersion < new Version(2, 0, 0, 0))
+        {
+            info.LoadStatus = PluginLoadStatus.Error;
+            info.Exception = new InvalidOperationException(
+                $"不兼容的 API 版本 {apiVersion}。插件的 API 版本需要至少为 2.0.0.0 才能被当前版本的 ClassIsland 加载。");
+            PluginLoadedStatus.Add(info);
+            return;
+        }
+
+        if (Version.TryParse(AppBase.AppVersion, out var hostVersion) &&
+            apiVersion > NormalizeVersion(hostVersion))
+        {
+            Console.WriteLine($"[插件兼容] {manifest.Name}({manifest.Id}) 声明的 API 版本 {apiVersion} 高于当前应用的 {hostVersion}，仍会尝试加载。");
+        }
+    }
+
+    /// <summary>
+    /// 把省略段位的版本号补齐为四段，缺失部分按 0 处理（<see cref="Version"/> 默认是 -1）。
+    /// </summary>
+    private static Version NormalizeVersion(Version version)
+    {
+        return new Version(
+            version.Major,
+            version.Minor,
+            Math.Max(version.Build, 0),
+            Math.Max(version.Revision, 0));
+    }
+
+    /// <summary>
+    /// 兼容层：把插件加载过程中的底层异常翻译成用户能看懂的说明，同时保留原始异常链。
+    /// </summary>
+    private static Exception BuildLoadException(PluginManifest manifest, Exception ex)
+    {
+        string? hint = null;
+        if (ex is ReflectionTypeLoadException reflectionTypeLoadException)
+        {
+            var loaderMessages = reflectionTypeLoadException.LoaderExceptions
+                .Where(x => x != null)
+                .Select(x => x!.Message)
+                .Distinct()
+                .ToArray();
+            if (loaderMessages.Length > 0)
+            {
+                hint = $"插件类型加载失败：{string.Join("；", loaderMessages)}";
+            }
+        }
+
+        hint ??= ex switch
+        {
+            FileNotFoundException or FileLoadException =>
+                "缺少依赖程序集，或依赖的版本与当前应用不匹配。请确认插件包完整；如果插件自带 ClassIsland.Core 等核心程序集，可尝试删除后重试。",
+            TypeLoadException or MissingMethodException or MissingFieldException =>
+                "插件使用了当前版本中不存在的接口。请更新插件，或确认该插件与当前 ClassIsland 版本兼容。",
+            BadImageFormatException =>
+                "插件程序集架构不匹配（例如 32 位插件运行在 64 位进程中）。",
+            _ => null
+        };
+
+        var message = $"插件 {manifest.Name}({manifest.Id}) 加载失败：{ex.Message}";
+        if (!string.IsNullOrEmpty(hint))
+        {
+            message += $"{Environment.NewLine}可能原因：{hint}";
+        }
+
+        return new InvalidOperationException(message, ex);
+    }
+
+    /// <summary>
     /// 初始化插件
     /// </summary>
     public static void InitializePlugins(HostBuilderContext context, IServiceCollection services)
@@ -166,11 +257,9 @@ public class PluginService : IPluginService
                 info.LoadStatus = PluginLoadStatus.Disabled;
                 PluginLoadedStatus.Add(info);
             }
-            if (info.IsEnabled && Version.TryParse(info.Manifest.ApiVersion, out var apiVersion) && apiVersion < new Version(2, 0, 0, 0))
+            if (info.IsEnabled)
             {
-                info.LoadStatus = PluginLoadStatus.Error;
-                info.Exception = new InvalidOperationException($"不兼容的 API 版本 {apiVersion}。插件的 API 版本需要至少为 2.0.0.0 才能被当前版本的 ClassIsland 加载。");
-                PluginLoadedStatus.Add(info);
+                CheckApiVersionCompatibility(info);
             }
         }
         var loadOrder = ResolveLoadOrder(IPluginService.LoadedPluginsInternal.Where(x => x.LoadStatus == PluginLoadStatus.NotLoaded).ToList());
@@ -229,10 +318,10 @@ public class PluginService : IPluginService
             }
             catch (Exception ex)
             {
-                info.Exception = ex;
+                info.Exception = BuildLoadException(manifest, ex);
                 info.LoadStatus = PluginLoadStatus.Error;
                 PluginLoadedStatus.Add(info);
-                // Console.WriteLine($"Failed to initialize plugin {manifest.Name}:"+ex);
+                Console.WriteLine($"[插件加载失败] {manifest.Name}({manifest.Id}) {manifest.Version}：{ex}");
             }
         }
         

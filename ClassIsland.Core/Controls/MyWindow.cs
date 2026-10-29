@@ -42,6 +42,15 @@ public partial class MyWindow : FAAppWindow
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_IsPressed")]
     private static extern void SetButtonIsPressed(Button button, bool value);
 
+    /// <summary>
+    /// 是否显示开源警告水印。
+    /// </summary>
+    /// <remarks>
+    /// 兼容层：本地分支已经不再绘制水印，此属性仅为引用它的插件保留，赋值不会产生任何视觉效果。
+    /// </remarks>
+    [Obsolete("本地分支已移除开发构建水印，此属性仅为兼容旧插件保留，不会有任何效果。")]
+    public static bool ShowOssWatermark { get; internal set; } = false;
+
     private bool _enableMicaWindow;
     
     /// <summary>

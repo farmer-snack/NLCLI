@@ -127,6 +127,33 @@
                                         </TextBlock>
                                     </StackPanel>
                                 </Border>
+
+                                <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                                        CornerRadius="999"
+                                        Padding="10 3"
+                                        VerticalAlignment="Center"
+                                        IsVisible="{Binding HasCompatibilityNotes}">
+                                    <ToolTip.Tip>
+                                        <StackPanel MaxWidth="480" Spacing="4">
+                                            <TextBlock Text="兼容层在加载此插件时做了以下调整："
+                                                       FontWeight="Medium" TextWrapping="Wrap"/>
+                                            <ItemsControl ItemsSource="{Binding CompatibilityNotes}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding}" FontSize="12"
+                                                                   TextWrapping="Wrap" Margin="0 1"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </ToolTip.Tip>
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <ci:FluentIcon Glyph="&#xE73E;" FontSize="14" VerticalAlignment="Center"/>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <Run Text="兼容层已介入"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
                             </WrapPanel>
                         </WrapPanel>
                         <WrapPanel Orientation="Horizontal" 
@@ -261,7 +288,7 @@
                         </Border.IsVisible>
                         <SelectableTextBlock ScrollViewer.VerticalScrollBarVisibility="Auto"
                                              TextAlignment="Left" TextWrapping="Wrap"
-                                             Text="{Binding Exception, Mode=OneWay}"/>
+                                             Text="{Binding Exception.Message, Mode=OneWay}"/>
                     </Border>
                     <Border>
                         <Border.IsVisible>

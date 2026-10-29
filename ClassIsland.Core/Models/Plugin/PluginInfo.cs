@@ -1,5 +1,7 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json.Serialization;
+using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Models.Marketplace;
 using ClassIsland.Core.Enums;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -115,6 +117,57 @@ public class PluginInfo : ObservableRecipient, IMarketplaceItemInfo
     /// </summary>
     [JsonIgnore]
     public Exception? Exception { get; internal set; }
+
+    /// <summary>
+    /// 兼容层在加载此插件时做出的调整记录（程序集重定向、依赖兜底等）。
+    /// </summary>
+    /// <remarks>
+    /// 正常情况下这个列表是空的。只有插件包内自带了旧版 ClassIsland 核心程序集、
+    /// 或缺少 <c>deps.json</c> 等情况才会有内容，用于向用户说明「为什么这个插件本来跑不起来，现在能跑了」。
+    /// </remarks>
+    [JsonIgnore]
+    public ObservableCollection<string> CompatibilityNotes { get; } = [];
+
+    /// <summary>
+    /// 兼容层是否对该插件做过调整。
+    /// </summary>
+    [JsonIgnore]
+    public bool HasCompatibilityNotes => CompatibilityNotes.Count > 0;
+
+    /// <summary>
+    /// 记录一条兼容层调整。重复的记录会被忽略。
+    /// </summary>
+    /// <remarks>
+    /// 程序集是按需加载的，可能在后台线程触发，因此这里统一切回 UI 线程再更新集合，
+    /// 避免绑定到界面的 <see cref="ObservableCollection{T}"/> 被跨线程修改导致崩溃。
+    /// </remarks>
+    public void AddCompatibilityNote(string note)
+    {
+        if (string.IsNullOrWhiteSpace(note))
+        {
+            return;
+        }
+
+        void Append()
+        {
+            if (CompatibilityNotes.Contains(note))
+            {
+                return;
+            }
+
+            CompatibilityNotes.Add(note);
+            OnPropertyChanged(nameof(HasCompatibilityNotes));
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            Append();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(Append);
+        }
+    }
 
     /// <summary>
     /// 插件加载状态
