@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -85,7 +86,24 @@ public class RectanglesNotificationBubble : Panel
         var padding = overlay ? 0 : ContentPadding * 2;
         // Measure natural content width before the bubble applies its cap.
         content.Measure(new Size(double.PositiveInfinity, BodyHeight));
-        return content.DesiredSize.Width + padding;
+        var width = content.DesiredSize.Width;
+
+        // 轮播类容器（上下课提醒的 ListBox 等）一次只显示一项，但窗口宽度应当按最长的那一项算，
+        // 否则切到更长的一项时内容会被裁掉。这里把容器里所有已生成的项都算进来。
+        foreach (var itemsControl in content.GetVisualDescendants().OfType<ItemsControl>())
+        {
+            var count = itemsControl.ItemCount;
+            for (var i = 0; i < count; i++)
+            {
+                if (itemsControl.ContainerFromIndex(i) is { } container
+                    && container.DesiredSize.Width > width)
+                {
+                    width = container.DesiredSize.Width;
+                }
+            }
+        }
+
+        return width + padding;
     }
 
     protected override Size MeasureOverride(Size availableSize)

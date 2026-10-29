@@ -85,8 +85,8 @@ public class RectanglesNotificationPanel : Panel
     private CancellationTokenSource? _widthCancellation;
     private double _targetWidth;
     // 提醒宽度锁定：同一条提醒播放期间宽度不再随内容/轮播容器变化而抖动。
+    // 宽度只增不减：内容变长时跟上（避免被裁切/压扁），内容变短时保持不变（避免来回跳）。
     private double _lockedWidth;
-    private DateTime? _openedAt;
     private bool _isOverlayPresentation;
     private readonly TranslateTransform _inertiaTransform = new();
     private readonly MatrixTransform _revealTransform = new();
@@ -225,23 +225,22 @@ public class RectanglesNotificationPanel : Panel
         var contentWidth = bubble.MeasureContentWidth(_isOverlayPresentation);
         var measuredWidth = Math.Min(maximumBodyWidth, Math.Max(325, contentWidth));
 
-        // 同一条提醒的宽度在播放期间固定下来：只在刚弹出的极短时间内允许增长，
-        // 之后即使主界面的轮播容器等内容变化，也不会再改变提醒宽度。
+        // 同一条提醒的宽度在播放期间固定下来：只在内容确实变宽时跟上一次，
+        // 之后即使主界面的轮播容器、列表切换等内容变化，也不会再缩小或来回抖动。
+        // 这条规则对所有提醒提供方（含第三方插件）统一生效，不依赖各自的布局写法。
         if (!IsOpened)
         {
             _lockedWidth = 0;
-            _openedAt = null;
         }
         else
         {
-            _openedAt ??= DateTime.Now;
             if (_lockedWidth <= 0)
             {
                 _lockedWidth = measuredWidth;
             }
-            else if (DateTime.Now - _openedAt.Value < TimeSpan.FromMilliseconds(600))
+            else if (measuredWidth > _lockedWidth)
             {
-                _lockedWidth = Math.Max(_lockedWidth, measuredWidth);
+                _lockedWidth = measuredWidth;
             }
         }
 
