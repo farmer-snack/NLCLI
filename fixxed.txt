@@ -1,4 +1,85 @@
 ================================================
+[2026-10-29 22:50] [定制] 插件兼容层：让插件市场里的所有 2.x 插件都能直接加载
+================================================
+
+需求：这个分支和官方不一样，不确定能不能装市场里的插件，包括 2.1 的插件；
+     要求「插件市场里出现的所有 2.x 插件都能适配」。
+处理：改动 60 个文件（相对同步点 329bf4b1）；构建 ClassIsland/ClassIsland.csproj → 通过（0 errors）
+
+实测数据（拉取官方插件市场 index.v2.json）
+----------------------------------------
+共 68 个插件，ApiVersion 分布：
+  2.0.0.0 × 60、2.0.0.1 × 2、2.0.0.2 × 1、2.0.2.0 × 1
+  2.1.0.1 × 1、2.1.1.0 × 1、2.1.1.1 × 1
+  空值 × 1（官方示例插件）
+本分支程序集版本 = 2.1.1.1，不低于市场里任何一个插件的 ApiVersion，
+所以「版本号不够」本身不是问题，真正会造成插件装不上或装上不工作的是下面几条。
+
+修复的 5 个问题
+--------------
+1) 插件包自带的 ClassIsland.Core.dll 会被当成真的核心库加载。
+   插件作者常直接 dotnet publish 后整包打包，里面会带上 ClassIsland.Core / ClassIsland.Shared。
+   原逻辑会按 deps.json 解析到插件目录的副本，于是插件里的 PluginBase、组件基类和宿主里的
+   不是同一个类型：插件显示「已加载」，但注册的组件一个都不出现，也没有任何报错。
+   → 加载时把 ClassIsland / ClassIsland.Desktop / ClassIsland.Core / ClassIsland.Shared /
+     ClassIsland.Shared.IPC / ClassIsland.Platforms.Abstractions 一律绑定到宿主已加载的实例，
+     忽略插件要求的版本号和插件包里的副本。
+
+2) 插件包自带 Avalonia.dll 会造成同样的类型分裂。
+   两份 Avalonia 同时存在时，插件创建的控件加入宿主视觉树会抛类型转换异常，或者干脆什么都不显示。
+   → Avalonia* 前缀的程序集同样强制绑定宿主版本。
+
+3) 插件包没有 deps.json（打包不规范，或者手工压缩）时，依赖全部解析失败。
+   → 解析器返回空之后，按「插件目录下同名 dll」兜底加载；入口程序集也能这样找到。
+
+4) 插件没打包某个依赖（多为框架类库），一加载就抛 FileNotFoundException。
+   → 兜底复用宿主已经加载的同名程序集。
+
+5) 插件带原生库（dll / so / dylib）但没有 deps.json，调用到原生依赖时直接闪退。
+   → 在插件目录、runtimes/<平台>/native、runtimes/<平台>-<架构>/native 里按平台命名约定查找：
+     Windows 补 .dll，Linux 试 lib*.so 与 *.so，macOS 试 lib*.dylib 与 *.dylib。
+
+另外两处放宽 / 改进
+------------------
+6) API 版本校验原来只拦「低于 2.0.0.0」，现在：
+   - 低于 2.0.0.0 的旧插件仍然拒绝（1.x 时代的 WPF 插件运行时 API 完全不兼容）；
+   - 高于当前应用版本的不再阻止，只写一条提示，交给实际加载去检验；
+   - 没写或写错 ApiVersion 的放行；
+   - 顺手修了 "2.0" 这种省略段位的写法会被误判成低于 2.0.0.0 的问题（Version 默认段位是 -1）。
+
+7) 插件加载失败时原来只吞掉一个异常对象，界面上看不出原因。现在：
+   - 异常被包装成中文说明（「插件 X 加载失败：… 可能原因：…」），插件详情页直接可读；
+   - 针对缺依赖、类型/方法缺失、架构不匹配（32 位插件跑在 64 位进程）分别给出对应提示；
+   - 完整异常链同时打到控制台日志，方便反馈给插件作者。
+
+可观测
+------
+插件详情页的状态徽章旁边，如果兼容层对这个插件做过调整，会多出一个「兼容层已介入」徽章，
+悬停可以看到具体调整了哪些程序集（例如「ClassIsland.Core 2.0.0.0 已重定向到宿主版本 2.1.1.1」）。
+正常情况下这个徽章不会出现。
+
+验证方式
+--------
+搭了最小复现（两个版本的依赖库 + 引用旧版本的插件 dll + 两种加载策略）：
+- 不做重定向：插件加载了自己那份旧依赖，与宿主那份 ReferenceEquals = False（两份不同类型）；
+- 做重定向：插件直接用到宿主的高版本，插件调用返回的是宿主版本的结果。
+说明「高版本宿主接住低版本引用」这条路是通的，这也是兼容层的核心假设。
+
+下次同步注意
+------------
+- ClassIsland/PluginLoadContext.cs 是本轮核心，上游改插件加载逻辑时务必保留：
+  宿主程序集白名单（HostAssemblyNames）、框架前缀（SharedFrameworkPrefixes）、
+  目录兜底（④）、宿主复用兜底（⑤）、原生库兜底（LoadUnmanagedDllFromFallback）。
+- ClassIsland/Services/PluginService.cs：ApiVersion 校验改成了 CheckApiVersionCompatibility，
+  加载失败改成了 BuildLoadException，上游如果重写这段要注意合并。
+- ClassIsland.Core/Models/Plugin/PluginInfo.cs：新增 CompatibilityNotes / HasCompatibilityNotes /
+  AddCompatibilityNote（内部用 Dispatcher 切 UI 线程，别改成直接 Add）。
+- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs 是重新加回来的兼容垫片（标了 Obsolete），
+  只为让引用过它的插件不崩，不再绘制水印；不要因为「看起来没用到」又删掉。
+- ClassIsland.Core/Controls/MyWindow.cs 的 ShowOssWatermark 同理，是兼容垫片，保留即可。
+- PluginsSettingsPage.axaml：状态徽章加了「兼容层已介入」，异常页改成绑定 Exception.Message。
+
+================================================
 [2026-10-29 21:26] [定制] 提醒宽度统一规则：所有提醒各自定宽、只增不减、不压扁
 ================================================
 
@@ -201,14 +282,16 @@
 - 天气详情：本地缓存 30 分钟（重启后仍有效）+ 请求额度统计 + 按天三级展开（天 → 24 小时 → 小时详情）+ 小时从当前整点开始 + 版面自适应；两页标注维护者
 - 提醒：七天/逐小时固定列宽 + 横向滚动兜底；提醒宽度播放期间锁定，不随轮播容器抖动
 - 提醒宽度统一规则（面板层，所有提醒含插件生效）：只增不减、不缩不抖；测量时纳入轮播容器所有项，取最长项
+- 插件兼容层：ClassIsland.* 与 Avalonia* 强制绑定宿主版本（插件包自带副本一律忽略）、无 deps.json 时按目录兜底、缺依赖复用宿主、原生库按平台约定查找；API 版本校验放宽并给出可读错误；插件详情页显示「兼容层已介入」徽章
 
-改动的文件（55 个）
+改动的文件（60 个）
 ----------
 - .all-contributorsrc — 修改
 - .gitignore — 修改
 - ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml — 删除
-- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs — 删除
+- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs — 修改
 - ClassIsland.Core/Controls/MyWindow.cs — 修改
+- ClassIsland.Core/Models/Plugin/PluginInfo.cs — 修改
 - ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 新增
 - ClassIsland.Core/Themes/Generic.axaml — 修改
 - ClassIsland.Desktop/Properties/launchSettings.json — 修改
@@ -220,15 +303,18 @@
 - ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml.cs — 修改
 - ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml — 修改
 - ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
+- ClassIsland/Controls/RectanglesNotificationBubble.cs — 修改
 - ClassIsland/Controls/RectanglesNotificationPanel.cs — 修改
 - ClassIsland/Controls/SettingsVariableEditor.cs — 新增
 - ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
 - ClassIsland/Models/ApplicationCommand.cs — 修改
 - ClassIsland/Models/Debugging/ConfigVariableItem.cs — 新增
 - ClassIsland/Models/Settings.cs — 修改
+- ClassIsland/PluginLoadContext.cs — 修改
 - ClassIsland/Program.cs — 修改
 - ClassIsland/Services/ActionService.cs — 修改
 - ClassIsland/Services/ExactTimeService.cs — 修改
+- ClassIsland/Services/PluginService.cs — 修改
 - ClassIsland/Services/SettingsService.cs — 修改
 - ClassIsland/Services/SpeechService/EdgeTtsPlayInfo.cs — 修改
 - ClassIsland/Services/SpeechService/EdgeTtsService.cs — 修改
@@ -248,6 +334,7 @@
 - ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml.cs — 新增
 - ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml — 修改
 - ClassIsland/Views/SettingPages/NotificationSettingsPage.axaml — 修改
+- ClassIsland/Views/SettingPages/PluginsSettingsPage.axaml — 修改
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml — 删除
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs — 删除
 - ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
