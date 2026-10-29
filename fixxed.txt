@@ -1,4 +1,32 @@
 ================================================
+[2026-10-29 21:20] [定制] 变量调试页增加「完整改动记录」入口（GitHub 主源 + jsDelivr CDN 备用源）
+================================================
+
+需求：调试页面上要能看到完整改动记录的入口，指向仓库里的 fixxed.txt；
+     同时再给一个 CDN 备用源，两个地址都要显示。
+处理：改动 55 个文件（相对同步点 329bf4b1）；构建 ClassIsland/ClassIsland.csproj → 通过（0 errors）
+
+实现
+----
+1) 页面头部（维护者徽章下方）新增说明行：「完整改动记录：每次改动都写进 fixxed.txt…」；
+2) 显示两个可点击入口：
+   - 主源（GitHub）：https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt
+   - 备用源（jsDelivr）：https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt
+   两个地址内容相同，GitHub 打不开时用 CDN 备用源；
+3) 两个完整 URL 同时以可选文本显示，方便直接复制；
+4) 点击入口按平台调起浏览器：Windows 用 ShellExecute，macOS 用 open，Linux 用 xdg-open。
+
+改动的文件
+----------
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 新增链接区块
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml.cs — 新增 HyperlinkOpenLink_OnClick
+
+下次同步注意
+------------
+- 这两个文件都是本地定制文件，上游没有；同步时直接保留。
+- 链接里的分支名是 develop/v2/misha-alpha，若以后换分支或换仓库，记得同步改这两处 URL。
+
+================================================
 [2026-10-29 20:40] [定制] 天气详情：本地缓存 + 请求额度 + 按天三级展开；提醒排版与宽度固定
 ================================================
 
@@ -140,6 +168,7 @@
 - 提醒语音/音效：两个总开关默认开启 + 升级时一次性迁移；EdgeTTS 失败自动回退系统 TTS（优先中文语音），
   连续失败 2 次后 10 分钟内直接使用系统 TTS
 - 变量调试：新增独立「变量调试」设置页（Settings 全部属性的可视化编辑，支持搜索 / 类型筛选 / 恢复默认值）
+- 变量调试页头部：维护者标识 + 完整改动记录入口（GitHub 主源 / jsDelivr CDN 备用源，两个 URL 均可点击、可复制）
 - 天气详情：本地缓存 30 分钟（重启后仍有效）+ 请求额度统计 + 按天三级展开（天 → 24 小时 → 小时详情）+ 小时从当前整点开始 + 版面自适应；两页标注维护者
 - 提醒：七天/逐小时固定列宽 + 横向滚动兜底；提醒宽度播放期间锁定，不随轮播容器抖动
 

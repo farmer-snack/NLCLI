@@ -23,6 +23,28 @@
                     <TextBlock Text="该页面由 farmer-snack/NLCLI 维护" FontSize="11" Opacity="0.85" />
                 </Border>
             </StackPanel>
+
+            <!-- 完整改动记录：GitHub 主源 + jsDelivr CDN 备用源 -->
+            <StackPanel Spacing="2" Margin="0 0 0 10">
+                <TextBlock Text="完整改动记录：每次改动都写进 fixxed.txt，可点开查看；下面两个地址内容相同，任选其一。"
+                           Classes="l-instructive" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+                <WrapPanel Orientation="Horizontal">
+                    <TextBlock Text="主源：" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                    <HyperlinkButton Content="GitHub · fixxed.txt" FontSize="11"
+                                     Tag="https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt"
+                                     Click="HyperlinkOpenLink_OnClick"
+                                     ToolTip.Tip="打开 GitHub 上的 fixxed.txt" />
+                    <TextBlock Text="备用源：" FontSize="11" Opacity="0.7" VerticalAlignment="Center" Margin="14 0 0 0" />
+                    <HyperlinkButton Content="CDN · jsDelivr" FontSize="11"
+                                     Tag="https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt"
+                                     Click="HyperlinkOpenLink_OnClick"
+                                     ToolTip.Tip="GitHub 打不开时用这个 CDN 备用源" />
+                </WrapPanel>
+                <SelectableTextBlock Text="https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt"
+                                     FontSize="10" Opacity="0.55" TextWrapping="Wrap" />
+                <SelectableTextBlock Text="https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt"
+                                     FontSize="10" Opacity="0.55" TextWrapping="Wrap" />
+            </StackPanel>
             <TextBlock Text="直接读写 Settings.json 中的每一个配置变量。这里的修改会立即写入配置文件，部分设置需要重启应用后才会生效。"
                        Classes="l-instructive" FontSize="12" Opacity="0.75"
                        TextWrapping="Wrap" Margin="0 0 0 12" />

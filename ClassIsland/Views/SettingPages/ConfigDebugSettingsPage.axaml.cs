@@ -1,3 +1,6 @@
+using System;
+using System.Diagnostics;
+
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 
@@ -35,6 +38,37 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
     private void ButtonRestart_OnClick(object? sender, RoutedEventArgs e)
     {
         RequestRestart();
+    }
+
+    /// <summary>
+    /// 打开 fixxed.txt 的 GitHub 主源或 jsDelivr CDN 备用源。
+    /// </summary>
+    private void HyperlinkOpenLink_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { Tag: string url } || string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                Process.Start("open", url);
+            }
+            else
+            {
+                Process.Start("xdg-open", url);
+            }
+        }
+        catch
+        {
+            // 打不开浏览器时忽略；页面上的完整地址可以直接复制。
+        }
     }
 
     private void ConfigDebugSettingsPage_OnLoaded(object? sender, RoutedEventArgs e)
