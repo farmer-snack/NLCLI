@@ -1,4 +1,24 @@
 ================================================
+[2026-10-30 21:28] [定制] 补丁新增 update-from-sync.txt：适配只同步到 329bf4b 的仓库
+================================================
+
+问题：用户本地 HEAD = b1dbee5f，提交标题「chore(sync): 同步 develop/v2/misha-alpha 至 329bf4b」，
+      内容等价于本仓库 009e38eb，但历史重建过、SHA 不同。直接 git am update.txt 会在 0001 就冲突：
+      action.txt / out.txt / RectanglesTheme/Styles.axaml 报「already exists in index」。
+
+处理：
+- 以 009e38eb 为基点重出 patches/update-from-sync.txt（27 个提交，394 KB），覆盖之后的全部定制提交；
+- 校验：临时 worktree 从 009e38eb 应用 27 个补丁 → 全部成功，
+  HEAD^{tree} = 2ebd78ed，与主仓库 HEAD 一致；
+- apply.txt 判定表加一档：HEAD 标题带「至 329bf4b」→ 用 update-from-sync.txt。
+
+产物
+------
+- https://filebin.net/classisland1029/patches.zip
+  799,091 字节，SHA-256 e1ef91780644efe785108391763a0f83c0177f526c8c6865dbcb7174f5a94ea5
+  内含 update.txt / update-last.txt / update-from-sync.txt / apply.txt
+
+================================================
 [2026-10-30 21:18] [定制] 补丁重出至 8430f933（30 个提交）并上传；Windows 包重发
 ================================================
 
