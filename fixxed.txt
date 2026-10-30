@@ -1,4 +1,37 @@
 ================================================
+[2026-10-30 19:05] [定制] 变量调试页默认显示：不用先开「启用调试菜单」
+================================================
+
+需求：Debug 调试模式（变量调试页）一般情况下也要显示。
+
+原因：变量调试页注册在 SettingsPageCategory.Debug 分类下，而设置窗口构建导航时有这条过滤：
+      !IsDebugOptionsEnabled && Category == Debug → 隐藏。
+      该开关默认 false（Settings._isDebugOptionsEnabled = false），所以全新安装、没动过开关的用户
+      打开设置窗口根本看不到「变量调试」，必须先手动开「启用调试菜单」才会冒出来。
+
+处理：
+- ConfigDebugSettingsPage 增加公开常量 PageId = "config-debug"，页面特性改用这个常量；
+- SettingsWindowNew.BuildNavigationMenuItems() 的过滤对 config-debug 开例外：只受集控策略
+  DisableDebugMenu 约束，不再受 IsDebugOptionsEnabled 影响，开关关着也照常显示；
+- 页内开关改名「显示其他调试页面」，说明它只控制官方「调试」「测试页面」等入口，本页始终显示。
+
+改动的文件（3 个，均为修改）
+----------
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 开关标题 / 说明改写
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml.cs — 新增 PageId 常量
+- ClassIsland/Views/SettingsWindowNew.axaml.cs — 导航过滤加 config-debug 例外
+
+验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 通过（0 errors）。
+
+下次同步注意
+----------
+- SettingsWindowNew.axaml.cs 从本次起进入定制清单。上游改这个文件时，保留过滤里的
+  `x.Id != SettingPages.ConfigDebugSettingsPage.PageId` 这一条。
+- 不要图省事把 IsDebugOptionsEnabled 默认值改成 true：那会连带把官方「调试」页和「测试页面」
+  也默认暴露出来，而且集控端可能依赖「默认关闭」的语义。
+- 管理策略 DisableDebugMenu 仍然优先：被集控禁用调试菜单时本页同样隐藏，这是有意为之。
+
+================================================
 [2026-10-29 22:50] [定制] 插件兼容层：让插件市场里的所有 2.x 插件都能直接加载
 ================================================
 
@@ -278,13 +311,14 @@
 - 提醒语音/音效：两个总开关默认开启 + 升级时一次性迁移；EdgeTTS 失败自动回退系统 TTS（优先中文语音），
   连续失败 2 次后 10 分钟内直接使用系统 TTS
 - 变量调试：新增独立「变量调试」设置页（Settings 全部属性的可视化编辑，支持搜索 / 类型筛选 / 恢复默认值）
+- 变量调试默认可见：该页不受「启用调试菜单」开关影响，装好就能在设置窗口看到（仅集控策略可禁用）
 - 变量调试页头部：维护者标识 + 完整改动记录入口（GitHub 主源 / jsDelivr CDN 备用源，两个 URL 均可点击、可复制）
 - 天气详情：本地缓存 30 分钟（重启后仍有效）+ 请求额度统计 + 按天三级展开（天 → 24 小时 → 小时详情）+ 小时从当前整点开始 + 版面自适应；两页标注维护者
 - 提醒：七天/逐小时固定列宽 + 横向滚动兜底；提醒宽度播放期间锁定，不随轮播容器抖动
 - 提醒宽度统一规则（面板层，所有提醒含插件生效）：只增不减、不缩不抖；测量时纳入轮播容器所有项，取最长项
 - 插件兼容层：ClassIsland.* 与 Avalonia* 强制绑定宿主版本（插件包自带副本一律忽略）、无 deps.json 时按目录兜底、缺依赖复用宿主、原生库按平台约定查找；API 版本校验放宽并给出可读错误；插件详情页显示「兼容层已介入」徽章
 
-改动的文件（60 个）
+改动的文件（61 个）
 ----------
 - .all-contributorsrc — 修改
 - .gitignore — 修改
@@ -339,6 +373,7 @@
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs — 删除
 - ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
 - ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml.cs — 新增
+- ClassIsland/Views/SettingsWindowNew.axaml.cs — 修改
 - ClassIsland/Views/WelcomePages/LicensePage.axaml — 修改
 - ClassIsland/Views/WelcomePages/LicensePage.axaml.cs — 修改
 - ClassIsland/Views/WelcomePages/WelcomePage.axaml.cs — 修改
