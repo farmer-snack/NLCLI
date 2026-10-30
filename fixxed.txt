@@ -1,4 +1,27 @@
 ================================================
+[2026-10-30 22:05] [修复] 打开「显示其他调试页面」后点「测试页面」必报导航错误
+================================================
+
+问题：在「变量调试」页打开「显示其他调试页面」开关后，左侧「调试」分类里多出一个
+      「测试页面」入口，点进去直接跳到「欧呦，出错啦！」错误页。
+
+原因：上游 TestSettingsPage 的构造函数里无条件 throw new Exception()（原本用来测试
+      设置页的错误处理），但 App.Services.xaml.cs 仍然把它注册进了设置页导航
+      （services.AddSettingsPage<TestSettingsPage>()）。默认开关关闭时该入口不显示，
+      一旦打开就必然踩到，属于上游遗留坑。
+
+处理：
+- App.Services.xaml.cs：不再注册 TestSettingsPage，导航里不再出现这个「点了必错」的入口；
+- TestSettingsPage.axaml.cs：把 throw 包进 #if DEBUG，避免以后有人重新注册时在 Release 崩溃；
+- ConfigDebugSettingsPage.axaml：开关说明改为「控制官方的「调试」入口」，不再提「测试页面」。
+
+改动的文件
+----------
+- ClassIsland/App.Services.xaml.cs — 修改
+- ClassIsland/Views/SettingPages/TestSettingsPage.axaml.cs — 修改
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 修改
+
+================================================
 [2026-10-30 21:28] [定制] 补丁新增 update-from-sync.txt：适配只同步到 329bf4b 的仓库
 ================================================
 
@@ -408,7 +431,7 @@
 - 提醒宽度统一规则（面板层，所有提醒含插件生效）：只增不减、不缩不抖；测量时纳入轮播容器所有项，取最长项
 - 插件兼容层：ClassIsland.* 与 Avalonia* 强制绑定宿主版本（插件包自带副本一律忽略）、无 deps.json 时按目录兜底、缺依赖复用宿主、原生库按平台约定查找；API 版本校验放宽并给出可读错误；插件详情页显示「兼容层已介入」徽章
 
-改动的文件（61 个）
+改动的文件（62 个）
 ----------
 - .all-contributorsrc — 修改
 - .gitignore — 修改
@@ -459,6 +482,7 @@
 - ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml — 修改
 - ClassIsland/Views/SettingPages/NotificationSettingsPage.axaml — 修改
 - ClassIsland/Views/SettingPages/PluginsSettingsPage.axaml — 修改
+- ClassIsland/Views/SettingPages/TestSettingsPage.axaml.cs — 修改
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml — 删除
 - ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs — 删除
 - ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
