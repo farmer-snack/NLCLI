@@ -1,4 +1,29 @@
 ================================================
+[2026-10-30 21:15] [定制] 去掉 Release 构建的「欢迎使用 2.2-Misha Developer Preview」对话框
+================================================
+
+需求：Release 构建启动时会弹「欢迎使用 2.2-Misha Developer Preview」，把这个窗口去掉。
+
+处理：删掉 App.axaml.cs 里 `#if RELEASE` 包住的整块 FATaskDialog（标题、正文、米沙图标、确定按钮）。
+      只影响 Release 构建；Debug 构建原本就没有这段。
+
+验证：dotnet build ClassIsland.Desktop -c Release → 0 errors；
+      dotnet publish -r win-x64 --self-contained（PublishBuilding=true）→ 成功，产物 391 MB。
+
+改动的文件（1 个，修改）
+----------
+- ClassIsland/App.axaml.cs — 删除 Release 预览提示对话框
+
+构建产物
+----------
+- /workspace/ci-win-x64.zip：161,032,891 字节
+  SHA-256 c65618790f0b221af65dd4240b1e267af17c98a84062dee42fd7d3ad9742a53f
+
+下次同步注意
+----------
+- 上游如果又往这段加内容（搜索 `#if RELEASE` + `FATaskDialog`），继续删除，别恢复。
+
+================================================
 [2026-10-30 19:18] [定制] 补丁重出：28 个提交，打包上传 Filebin
 ================================================
 
