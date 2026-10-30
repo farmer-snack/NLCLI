@@ -182,7 +182,10 @@ public partial class App
         services.AddSettingsPage<AutomationSettingsPage>();
         services.AddSettingsPage<PluginsSettingsPage>();
         services.AddSettingsPage<ThemesSettingsPage>();
-        services.AddSettingsPage<TestSettingsPage>();
+        // 上游的「测试页面」构造函数里无条件 throw new Exception()，注册进导航后只要点进去
+        // 就必然跳「出错啦」错误页。这里不再注册，避免「显示其他调试页面」开关打开后出现
+        // 一个点了必报错的入口。（类本身保留，[SettingsPageInfo] 只有注册后才会进导航。）
+        // services.AddSettingsPage<TestSettingsPage>();
         services.AddSettingsPage<DebugPage>();
         services.AddSettingsPage<ConfigDebugSettingsPage>();
         // services.AddSettingsPage<DebugBrushesSettingsPage>();

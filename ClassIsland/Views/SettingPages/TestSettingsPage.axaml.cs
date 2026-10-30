@@ -29,7 +29,11 @@ public partial class TestSettingsPage : SettingsPageBase
     {
         DataContext = this;
         InitializeComponent();
+        // 这个页面原本用于测试设置页的错误处理，构造时就故意抛异常。
+        // 限定只在 Debug 构建里抛，避免误注册到 Release 后变成「点进去必报导航错误」。
+#if DEBUG
         throw new Exception();
+#endif
     }
 
     // private void OnLoaded(object sender, RoutedEventArgs e)

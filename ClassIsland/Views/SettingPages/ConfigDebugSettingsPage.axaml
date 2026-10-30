@@ -56,7 +56,7 @@
 
             <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE2C8;}"
                                           Header="显示其他调试页面"
-                                          Description="只控制官方「调试」「测试页面」等其他调试入口。本页不受此开关影响，始终显示。">
+                                          Description="控制官方的「调试」入口。本页不受此开关影响，始终显示。">
                 <controls3:FASettingsExpander.Footer>
                     <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsDebugOptionsEnabled, Mode=TwoWay}" />
                 </controls3:FASettingsExpander.Footer>
