@@ -55,8 +55,8 @@
                                  Message="这是调试工具。修改不熟悉的变量可能导致应用行为异常，请谨慎操作。" />
 
             <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE2C8;}"
-                                          Header="启用调试菜单"
-                                          Description="启用后，设置窗口中会显示「调试」分类下的页面。">
+                                          Header="显示其他调试页面"
+                                          Description="只控制官方「调试」「测试页面」等其他调试入口。本页不受此开关影响，始终显示。">
                 <controls3:FASettingsExpander.Footer>
                     <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsDebugOptionsEnabled, Mode=TwoWay}" />
                 </controls3:FASettingsExpander.Footer>

@@ -16,9 +16,14 @@ namespace ClassIsland.Views.SettingPages;
 /// <summary>
 /// 「变量调试」设置页：列出并编辑 Settings.json 中的全部配置变量。
 /// </summary>
-[SettingsPageInfo("config-debug", "变量调试", "\ue943", "\ue942", SettingsPageCategory.Debug)]
+[SettingsPageInfo(PageId, "变量调试", "\ue943", "\ue942", SettingsPageCategory.Debug)]
 public partial class ConfigDebugSettingsPage : SettingsPageBase
 {
+    /// <summary>
+    /// 本页面的注册 ID。设置窗口会用它做例外处理：本页不受「启用调试菜单」开关影响，始终显示。
+    /// </summary>
+    public const string PageId = "config-debug";
+
     public ConfigDebugSettingsViewModel ViewModel { get; } = IAppHost.GetService<ConfigDebugSettingsViewModel>();
 
     public ConfigDebugSettingsPage()

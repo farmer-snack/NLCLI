@@ -149,7 +149,10 @@ public partial class SettingsWindowNew : ViewBase, IFANavigationPageFactory
             .Where(x => !(ManagementService.Policy.DisableSettingsEditing && x.Category == SettingsPageCategory.External))
             .Where(x => !(ManagementService.Policy.DisableSettingsEditing && x.Category == SettingsPageCategory.External))
             .Where(x => !(ManagementService.Policy.DisableDebugMenu && x.Category == SettingsPageCategory.Debug))
-            .Where(x => !(!SettingsService.Settings.IsDebugOptionsEnabled && x.Category == SettingsPageCategory.Debug))
+            // 「变量调试」页不受「启用调试菜单」开关影响，默认就显示；集控策略禁用调试菜单时仍然隐藏。
+            .Where(x => !(!SettingsService.Settings.IsDebugOptionsEnabled
+                          && x.Category == SettingsPageCategory.Debug
+                          && x.Id != SettingPages.ConfigDebugSettingsPage.PageId))
             .OrderBy(x => x.Category)
             .ToList();
         var infos = infosBase
