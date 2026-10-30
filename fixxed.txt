@@ -24,9 +24,9 @@
 产物
 ------
 - https://filebin.net/classisland1029/patches.zip
-  804,193 字节，SHA-256 f268d2057d0f7f27e7f151ab3d99887f161aa618038e8f51146b666e52976b20
-  内含 update.txt（34 个）/ update-from-sync.txt（30 个）/ update-last.txt（2 个）/ apply.txt
-  三份补丁均已用临时工作树验证：应用后树哈希 a5b7db76，与主仓库 HEAD 一致。
+  （字节数与 SHA-256 以 Filebin 页面显示的为准，每次重出都会变）
+  内含 update.txt（34 个）/ update-from-sync.txt（30 个）/ update-last.txt（3 个）/ apply.txt
+  三份补丁均已用临时工作树验证：应用后树哈希与主仓库 HEAD 一致。
 - apply.txt 改为按 HEAD^{tree} 判断该用哪份补丁（git am 会重写提交号，靠提交号对不上）。
 - https://filebin.net/classisland1029/ci-win-x64.zip
   161,032,768 字节，SHA-256 ecc1ad3a41020840ec75f9b41e9ed163c9d9aba890c382db000213c8c62dd7df
