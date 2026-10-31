@@ -213,14 +213,17 @@ public partial class ScheduleComponent : ComponentBase<LessonControlSettings>, I
                 LessonsService.CurrentClassPlan?.TimeLayout) ??
             Settings;
         ShowCurrentLessonOnlyOnClass = settingsSource.ShowCurrentLessonOnlyOnClass;
-        TomorrowClassPlan = LessonsService.GetClassPlanByDate(ExactTimeService.GetCurrentLocalDateTime() + TimeSpan.FromDays(1));
+        // 关闭「加载课表」后不应该再显示明日课表。
+        TomorrowClassPlan = LessonsService.IsClassPlanEnabled
+            ? LessonsService.GetClassPlanByDate(ExactTimeService.GetCurrentLocalDateTime() + TimeSpan.FromDays(1))
+            : null;
         MainLessonsListBox.SelectedIndex = LessonsListBoxSelectedIndex;
         UpdateTomorrowVisibility();
     }
 
     private void UpdateTomorrowVisibility()
     {
-        var showOnEmpty = Settings.TomorrowScheduleShowMode == 3;
+        var showOnEmpty = Settings.TomorrowScheduleShowMode == 3 && LessonsService.IsClassPlanEnabled;
         if (!showOnEmpty)
         {
             PseudoClasses.Set(":show-tomorrow-schedule-on-empty", false);

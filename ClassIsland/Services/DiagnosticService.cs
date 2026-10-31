@@ -140,8 +140,8 @@ public class DiagnosticService(SettingsService settingsService, FileFolderServic
         try
         {
             var temp = Directory.CreateTempSubdirectory("ClassIslandDiagnosticExport").FullName;
-            var logs = string.Join(Environment.NewLine, AppLogService.Logs);
-            //await File.WriteAllTextAsync(Path.Combine(temp, "Logs.log"), logs);
+            // 旧实现在这里把所有日志拼成一个大字符串（然后又没写入文件），
+            // 日志量大时会直接把内存吃满，导致「复制诊断信息」时崩溃（#1423）。
             await File.WriteAllTextAsync(Path.Combine(temp, "DiagnosticInfo.txt"), GetDiagnosticInfo());
             File.Copy(Path.Combine(CommonDirectories.AppRootFolderPath, "Settings.json"), Path.Combine(temp, "Settings.json"));
             var profile = App.GetService<IProfileService>().CurrentProfilePath;

@@ -116,9 +116,21 @@ public class LessonsService : ObservableRecipient, ILessonsService
 
     public bool IsClassPlanEnabled
     {
-        get;
-        set => SetProperty(ref field, value);
-    } = true;
+        get => Settings.IsClassPlanEnabled;
+        set
+        {
+            if (Settings.IsClassPlanEnabled == value)
+            {
+                return;
+            }
+
+            Settings.IsClassPlanEnabled = value;
+            OnPropertyChanged();
+
+            // 立即生效，不用等下一次主计时器 tick。
+            LoadCurrentClassPlan();
+        }
+    }
 
     public bool IsClassPlanLoaded
     {

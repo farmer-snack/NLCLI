@@ -1023,8 +1023,14 @@ public partial class ProfileSettingsWindow : ViewBase
     
     private async void ButtonDeleteTimeLayout_OnClick(object sender, RoutedEventArgs e)
     {
+        var timeLayout = ViewModel.SelectedTimeLayout;
+        if (timeLayout == null)
+        {
+            return;
+        }
+
         var key = ViewModel.ProfileService.Profile.TimeLayouts
-            .FirstOrDefault(x => x.Value == ViewModel.SelectedTimeLayout).Key;
+            .FirstOrDefault(x => x.Value == timeLayout).Key;
         var c = ViewModel.ProfileService.Profile.ClassPlans.Any(x => x.Value.TimeLayoutId == key);
         const string eventName = "views.ProfileSettingsWindow.timeLayout.remove";
         if (c)
@@ -1036,6 +1042,14 @@ public partial class ProfileSettingsWindow : ViewBase
                 new KeyValuePair<string, object>("Reason", "仍有课表在使用该时间表。")
             ]
             );
+            return;
+        }
+
+        // 用内容对话框确认，而不是按钮上的 Flyout：命令栏里的按钮弹出 Flyout 时
+        // 有时不会显示，导致点「删除时间表」看起来毫无反应（#2046、#1896）。
+        if (!await ContentDialogHelper.ShowConfirmationDialog("删除时间表",
+                $"要删除时间表「{timeLayout.Name}」吗？此操作无法撤销。", root: TopLevel.GetTopLevel(this)))
+        {
             return;
         }
 

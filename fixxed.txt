@@ -1,4 +1,69 @@
 ================================================
+[2026-10-31 16:35] [修复] 跟进上游 Issues：修 6 个 Bug（cron 重复触发、课表开关、删除时间表、诊断导出等）
+================================================
+
+需求：去上游仓库（ClassIsland/ClassIsland）的 Issues 里找 bug 修掉，并把修过的都记在账本里。
+
+排查范围：抓取了上游 384 个 open issue（其中 118 个带 Bug 标签，按更新时间倒序），
+逐条对照本仓库代码定位。
+
+已修复（6 项，对应 7 个 issue）：
+
+1. #2039 更改时间偏移后，以 cron 为触发器的自动化执行两次
+   - 原因：CronWorker 的循环条件读的是字段 _stopCancellationTokenSource，LoadCron 换新 CTS
+     后旧 worker 会「复活」继续跑；表达式解析失败时还会 continue 忙等烧 CPU。
+   - 处理：worker 改为持有自己的 token 和 crontab 局部变量；等待分段（最多 30 秒），醒来后
+     确认真的越过触发时刻才触发；订阅 Settings.TimeOffsetSeconds / DebugTimeOffsetSeconds，
+     时间偏移一变就重建 worker；解析失败不再启动 worker。
+   - 文件：ClassIsland/Services/Automation/Triggers/CronTrigger.cs
+
+2. #663 禁用课表后重启应用又会加载课表
+   - 原因：LessonsService.IsClassPlanEnabled 只是内存属性，没有写进配置。
+   - 处理：状态迁到 Settings.IsClassPlanEnabled（持久化），LessonsService 代理读写，
+     切换后立即刷新课表，不用等下一次计时器 tick。
+   - 文件：ClassIsland/Models/Settings.cs、ClassIsland/Services/LessonsService.cs
+
+3. #828 关闭「加载课表」后仍然显示明日课表
+   - 处理：课表组件在开关关闭时不再计算明日课表，并跳过「无课程时显示明日」的判定。
+   - 文件：ClassIsland/Controls/Components/ScheduleComponent.axaml.cs
+
+4. #2046 / #1896 点「删除时间表」没有任何反应
+   - 原因：删除确认挂在命令栏按钮的 Flyout 上，这个 Flyout 在 PrimaryCommands 里弹不出来，
+     所以看起来像点了没反应。
+   - 处理：按钮改成直接 Click，用 ContentDialogHelper 弹确认框，确认后才删除。
+   - 文件：ClassIsland/Views/ProfileSettingsWindow.axaml(.cs)
+
+5. #1423 复制诊断信息时崩溃（内存超限）
+   - 原因：导出前把所有日志拼成一个巨型字符串，拼完又没写进文件。
+   - 处理：删掉这段无用拼接，日志目录仍按原逻辑随包复制。
+   - 文件：ClassIsland/Services/DiagnosticService.cs
+
+6. #2032 / #1713 切换深/浅色后天气文字消失
+   - 部分是同一根因：主题切换后 Run 的前景色不跟随。
+   - 处理：天气组件根节点显式指定 TextElement.Foreground 为主题色。
+   - 文件：ClassIsland/Controls/Components/WeatherComponent.axaml
+   - 未覆盖：课表组件的时间文字（LessonsListBox 内部模板）仍有同样风险。
+
+已排查但没改的（缺复现条件或语义不明确，不瞎改）：
+- #2044 #865 #1020 多行组件的行距/行数/启动时自动隐藏后不恢复：需要 GUI 复现，
+  涉及 StackPanel spacing 与隐藏行的交互，盲改容易把布局搞乱。
+- #1949 市级气象局预警覆盖区级：Alerts 的 LocationKey 语义要用真实接口数据验证，
+  贸然按城市过滤会漏报。
+- #1090 禁用时间点后课间与分割线异常：ValidTimeLayoutItems 正反向搜索的语义需要确认。
+- #780 课间小于 2 秒时显示错误：1.6/1.7 的老问题，当前课表实现已重写，没能复现。
+- #2037 EdgeTTS 接口变更：依赖 vendors/EdgeTtsSharp 子模块，要等上游库适配。
+- #1685 日期选择器从月切到日时崩溃：FluentAvalonia 控件内部实现。
+- #606 改注册表字体后托盘图标崩溃：H.NotifyIcon + System.Drawing 找不到字体。
+- #2031 #1973 天气温度运行一段时间后丢失：数据链路问题，要按真实接口和缓存复现。
+
+验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 0 Error。
+
+下次同步注意
+- Settings 新增 IsClassPlanEnabled 字段，旧 Settings.json 缺这个字段时默认 true，和以前行为一致。
+- 删除时间表的确认 Flyout 已从 ProfileSettingsWindow.axaml 移除，同步上游同文件时注意冲突。
+- CronTrigger 现在监听 Settings.TimeOffsetSeconds，上游要是改了时间偏移的属性名，这里要跟着改。
+
+================================================
 [2026-10-31 15:40] [修复] 插件兼容层通用化：按旧版 Avalonia 编译的插件在 12 宿主上可加载
 ================================================
 

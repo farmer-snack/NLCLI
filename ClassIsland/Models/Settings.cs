@@ -34,6 +34,7 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private bool _iscustomBackgroundColorEnabled = false;
     private Color _backgroundColor = Colors.Black;
     private bool _isMainWindowBackgroundMaterialEnabled;
+    private bool _isClassPlanEnabled = true;
     private MainWindowBackgroundMaterialType _mainWindowBackgroundMaterialType = MainWindowBackgroundMaterialType.Acrylic;
     private Color _primaryColor = Colors.DeepSkyBlue;
     private Color _secondaryColor = Colors.Aquamarine;
@@ -732,6 +733,20 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
         {
             if (value == _isExactTimeEnabled) return;
             _isExactTimeEnabled = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 是否加载课表。持久化到配置文件，重启应用后保持上次的选择。
+    /// </summary>
+    public bool IsClassPlanEnabled
+    {
+        get => _isClassPlanEnabled;
+        set
+        {
+            if (value == _isClassPlanEnabled) return;
+            _isClassPlanEnabled = value;
             OnPropertyChanged();
         }
     }
