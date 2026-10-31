@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -29,6 +30,17 @@ public class ComponentsService : ObservableRecipient, IComponentsService
 
     private ComponentProfile _currentComponents = new();
     private IReadOnlyList<string> _componentConfigs = new List<string>();
+
+    /// <summary>
+    /// 当前组件配置对应的文件路径。切换配置方案时固定下来，避免旧方案的集合变更事件
+    /// 把内容写进新方案的文件里（集控模式下所有方案互相覆盖就是由此引起的）。
+    /// </summary>
+    private string? _currentConfigPath;
+
+    /// <summary>
+    /// 当前组件配置集合的变更处理器。切换方案时需要解绑，否则每切换一次就多一个订阅。
+    /// </summary>
+    private NotifyCollectionChangedEventHandler? _currentConfigChangedHandler;
 
     public static ComponentProfile DefaultComponentProfile { get; } = new()
     {
@@ -95,7 +107,10 @@ public class ComponentsService : ObservableRecipient, IComponentsService
             return;
         }
         
-        IsManagementMode = true;
+        // 只有集控清单真的下发了组件配置时才算「集控模式」。
+        // 清单里没有 ComponentsSource（很多学校只用集控同步课表/科目）时，如果把本地也锁成集控模式，
+        // 切换配置方案就不会重新加载本地文件，所有方案会被写成一模一样的内容（#2034）。
+        IsManagementMode = !string.IsNullOrWhiteSpace(ManagementService.Manifest.ComponentsSource.Value);
         try
         {
             if (!ManagementService.Manifest.ComponentsSource.IsNewerAndNotNull(ManagementService.Versions
@@ -121,12 +136,22 @@ public class ComponentsService : ObservableRecipient, IComponentsService
 
     private void LoadConfig()
     {
+        // 解除上一次配置方案的集合变更订阅，避免切换方案后旧的集合仍然把内容写进新方案。
+        if (_currentComponents is { } previousComponents && _currentConfigChangedHandler is { } previousHandler)
+        {
+            previousComponents.Lines.CollectionChanged -= previousHandler;
+        }
+        _currentConfigChangedHandler = null;
+        _currentConfigPath = null;
+
         if (!IsManagementMode)
         {
             if (!File.Exists(SelectedConfigFullPath))
             {
                 CurrentComponents = ConfigureFileHelper.CopyObject(DefaultComponentProfile);
-                SaveConfig();
+                // 此时 CurrentConfigName 还没更新，直接保存会把默认配置写进上一个方案，
+                // 必须显式指定目标文件。
+                ConfigureFileHelper.SaveConfig(SelectedConfigFullPath, CurrentComponents);
             }
             else
             {
@@ -135,7 +160,18 @@ public class ComponentsService : ObservableRecipient, IComponentsService
         }
         
         CurrentConfigName = SettingsService.Settings.CurrentComponentConfig;
-        CurrentComponents.Lines.CollectionChanged += (s, e) => ConfigureFileHelper.SaveConfig(CurrentConfigFullPath, CurrentComponents);
+        _currentConfigPath = CurrentConfigFullPath;
+        var currentProfile = CurrentComponents;
+        _currentConfigChangedHandler = (_, _) =>
+        {
+            if (IsManagementMode || _currentConfigPath is null)
+            {
+                return;
+            }
+
+            ConfigureFileHelper.SaveConfig(_currentConfigPath, currentProfile);
+        };
+        currentProfile.Lines.CollectionChanged += _currentConfigChangedHandler;
 
         var migrated = false;
         foreach (var i in CurrentComponents.Lines.SelectMany(x => x.Children))
@@ -162,7 +198,13 @@ public class ComponentsService : ObservableRecipient, IComponentsService
 
     public void SaveConfig()
     {
-        ConfigureFileHelper.SaveConfig(CurrentConfigFullPath, CurrentComponents);
+        // 集控模式下的组件配置由集控下发，写回本地方案会把集控内容污染到本地配置里。
+        if (IsManagementMode)
+        {
+            return;
+        }
+
+        ConfigureFileHelper.SaveConfig(_currentConfigPath ?? CurrentConfigFullPath, CurrentComponents);
     }
 
     public IReadOnlyList<string> ComponentConfigs

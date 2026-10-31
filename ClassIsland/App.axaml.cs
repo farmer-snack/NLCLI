@@ -265,6 +265,9 @@ public partial class App : AppBase, IAppHost
         if (DesktopLifetime != null)
         {
             DesktopLifetime.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            // 系统关机/注销留给应用的时间很短，Stop() 里通过 Dispatcher 投递的保存可能来不及执行，
+            // 所以在关机请求阶段同步保存一次。保存方法本身是幂等的。
+            DesktopLifetime.ShutdownRequested += (_, _) => SaveAllConfigs("系统正在关机。");
         }
         IconExpressionHelper.RegisterHandler("fluent", args => new FluentIconSource(args[0]));
         IconExpressionHelper.RegisterHandler("lucide", args => new LucideIconSource(args[0]));
@@ -1186,6 +1189,27 @@ public partial class App : AppBase, IAppHost
     }
 
     /// <summary>
+    /// 把所有配置同步写入磁盘。
+    /// </summary>
+    /// <remarks>
+    /// 关机、注销等场景下进程随时可能被系统结束，不能依赖 UI 线程的异步投递。
+    /// </remarks>
+    private void SaveAllConfigs(string note)
+    {
+        try
+        {
+            IAppHost.Host?.Services.GetService<SettingsService>()?.SaveSettings(note);
+            IAppHost.Host?.Services.GetService<IAutomationService>()?.SaveConfig(note);
+            IAppHost.Host?.Services.GetService<IProfileService>()?.SaveProfile();
+            IAppHost.Host?.Services.GetService<IComponentsService>()?.SaveConfig();
+        }
+        catch (Exception exception)
+        {
+            Logger?.LogError(exception, "保存配置失败");
+        }
+    }
+
+    /// <summary>
     /// 停止主应用程序并进行必要的清理。
     /// </summary>
     public override void Stop()
@@ -1211,10 +1235,7 @@ public partial class App : AppBase, IAppHost
                 {
                     IAppHost.Host?.Services.GetService<ILessonsService>()?.StopMainTimer();
                     IAppHost.Host?.StopAsync(TimeSpan.FromSeconds(5));
-                    IAppHost.Host?.Services.GetService<SettingsService>()?.SaveSettings("停止当前应用程序。");
-                    IAppHost.Host?.Services.GetService<IAutomationService>()?.SaveConfig("停止当前应用程序。");
-                    IAppHost.Host?.Services.GetService<IProfileService>()?.SaveProfile();
-                    IAppHost.Host?.Services.GetService<IComponentsService>()?.SaveConfig();
+                    SaveAllConfigs("停止当前应用程序。");
                 }
                 if (PlatformServices.WindowPlatformService is IDisposable d)
                 {

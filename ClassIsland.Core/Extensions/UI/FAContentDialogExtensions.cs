@@ -33,13 +33,19 @@ public static class FAContentDialogExtensions
                         break;
                     }
 
+                    // 没有窗口处于激活状态时（例如刚点完设置窗口里的按钮，弹窗请求晚于窗口失活到达），
+                    // 不要直接退回主窗口：主界面贴着屏幕顶部，对话框会跑到课表上面去。
+                    // 改为选择最后打开且仍然可见的普通窗口，通常就是用户正在操作的那个。
+                    tl ??= windows.LastOrDefault(w =>
+                        w is { IsVisible: true } &&
+                        w.WindowState != WindowState.Minimized &&
+                        w.GetType().Name != "TrayPopupRoot");
                     tl ??= al.MainWindow ?? throw new NotSupportedException("No TopLevel root found to parent ContentDialog");
                     break;
                 }
                 case IActivityApplicationLifetime:
                 {
                     var viewHost = IViewHostProvider.Instance.GetViewHost(ViewActivationPreference.Default);
-                    Console.WriteLine($"[ELYSIADBG] VH={viewHost}");
                     if (viewHost is Visual v)
                     {
                         tl = TopLevel.GetTopLevel(v);
@@ -56,7 +62,6 @@ public static class FAContentDialogExtensions
             }
         }
         
-        Console.WriteLine($"[ELYSIADBG] TopLevel={tl}");
         return await dialog.ShowAsync(tl);
     }
 }

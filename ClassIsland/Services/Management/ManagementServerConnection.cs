@@ -3,6 +3,7 @@ using System.Buffers.Text;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -114,7 +115,7 @@ public class ManagementServerConnection : IManagementServerConnection
         Logger.LogInformation("初始化管理服务器连接。");
         if (lightConnect)
         {
-            Channel = GrpcChannel.ForAddress(ManagementSettings.ManagementServerGrpc);
+            Channel = CreateGrpcChannel(ManagementSettings.ManagementServerGrpc);
             return;
         }
         AppBase.Current.AppStarted += (sender, args) => InstallAuditHooks();
@@ -122,6 +123,23 @@ public class ManagementServerConnection : IManagementServerConnection
         CommandReceived += OnCommandReceived;
         Task.Run(ListenCommands);
     }
+
+    /// <summary>
+    /// 创建与集控服务器的 gRPC 通道。
+    /// </summary>
+    /// <remarks>
+    /// 集控服务器一般部署在校园内网。系统代理（尤其是需要认证或者已经失效的代理）
+    /// 会让 gRPC 连接直接失败，因此这里固定不走代理。
+    /// </remarks>
+    private static GrpcChannel CreateGrpcChannel(string address) =>
+        GrpcChannel.ForAddress(address, new GrpcChannelOptions
+        {
+            HttpHandler = new SocketsHttpHandler
+            {
+                UseProxy = false,
+                ConnectTimeout = TimeSpan.FromSeconds(10)
+            }
+        });
 
     private void OnCommandReceived(object? sender, ClientCommandEventArgs e)
     {
@@ -267,7 +285,7 @@ public class ManagementServerConnection : IManagementServerConnection
         try
         {
             Logger.LogInformation("正在连接到命令流");
-            Channel = GrpcChannel.ForAddress(ManagementSettings.ManagementServerGrpc);
+            Channel = CreateGrpcChannel(ManagementSettings.ManagementServerGrpc);
             var handshakeState = await BeginHandshake(CommandListeningCallCancellationTokenSource.Token);
             if (!handshakeState)
             {

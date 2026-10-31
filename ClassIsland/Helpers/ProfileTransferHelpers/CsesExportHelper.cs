@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
 using ClassIsland.Core.Abstractions.Services;
@@ -60,7 +61,7 @@ public class CsesExportHelper
 
         var filePath = await PlatformServices.FilePickerService.SaveFilePickerAsync(new FilePickerSaveOptions()
         {
-            DefaultExtension = ".json",
+            DefaultExtension = "yml",
             FileTypeChoices =
             [
                 new FilePickerFileType("CSES 课表文件")
@@ -85,11 +86,12 @@ public class CsesExportHelper
                 stream.SetLength(0);
                 stream.Position = 0;
             }
-            await using (var writer = new StreamWriter(stream, leaveOpen: true))
-            {
-                await writer.WriteAsync(CsesLoader.SaveToYamlString(csesProfile));
-                await writer.FlushAsync();
-            }
+            // 先把内容整体序列化成字节再写入。部分平台的存储流不支持 Seek，
+            // 直接覆盖写会留下上一次文件的尾部内容，导出的课表会变成两份拼在一起。
+            var yaml = CsesLoader.SaveToYamlString(csesProfile);
+            var bytes = new UTF8Encoding(false).GetBytes(yaml);
+            await stream.WriteAsync(bytes);
+            await stream.FlushAsync();
             var launchPath = PlatformServices.FilePickerService.IsBookmark(filePath)
                 ? filePath
                 : Path.GetDirectoryName(Path.GetFullPath(filePath)) ?? filePath;

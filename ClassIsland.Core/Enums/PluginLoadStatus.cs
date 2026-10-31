@@ -21,4 +21,8 @@ public enum PluginLoadStatus
     /// 插件加载时出现错误。
     /// </summary>
     Error,
+    /// <summary>
+    /// 安全模式下跳过了插件加载（插件本身是启用状态，只是本次启动没有加载）。
+    /// </summary>
+    Skipped,
 }

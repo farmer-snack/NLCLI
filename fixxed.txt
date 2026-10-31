@@ -1,4 +1,88 @@
 ================================================
+[2026-10-31 17:15] [修复] 上游 Issues 第二批：再修 6 个 Bug（组件方案互覆盖、安全模式插件、音频设备、集控代理、关机保存、全屏判定）
+================================================
+
+需求：「其他那些你没排查的呢？」——第一段只覆盖了 9 个 issue，剩下的按 Bug 标签继续往下过。
+
+排查范围：接着第一段的 118 个 Bug issue 继续（按更新时间倒序），重点看能直接对着代码定位的：
+数据丢失类、集控类、系统集成类。能用代码证明根因的都改掉了。
+
+已修复（6 个 issue + 4 处顺手加固）：
+
+1. #2034 集控模式下切换「组件配置方案」，所有方案被覆盖成同一份内容（不可逆数据丢失）
+   - 原因有两层：
+     a) ComponentsService.LoadManagementConfig 一进来就 IsManagementMode = true，只要加入了集控就成立，
+        哪怕集控清单里根本没有 ComponentsSource（很多学校只用集控同步课表/科目）。集控模式下
+        LoadConfig 不读本地文件，切方案时内存里还是上一份配置；
+     b) 集合变更的保存目标是「当前」CurrentConfigFullPath，切换时先写回旧方案、再加载新方案，
+        加上配置名写盘有延迟，最终每个方案都被写成同一份。
+   - 处理：IsManagementMode 改为「清单真的下发了组件配置」才为 true；保存路径在加载时固定为
+     _currentConfigPath（不再随切换漂移）；切方案前解绑上一份集合的 CollectionChanged，
+     避免重复订阅；集控模式下 SaveConfig 直接返回，不把集控内容写进本地方案。
+   - 文件：ClassIsland/Services/ComponentsService.cs
+
+2. #1923 安全模式下无法管理插件（插件页空白，出问题的插件卸不掉）
+   - 原因：App.Services 里 `!ApplicationCommand.Safe` 时干脆不调用 InitializePlugins，插件页没有任何条目。
+   - 处理：安全模式照常扫描插件清单，只是不加载程序集；新增 PluginLoadStatus.Skipped 与对应徽章
+     「安全模式未加载」，插件详情页给出说明。插件仍可查看、可卸载，只是本次启动不运行。
+   - 文件：ClassIsland/App.Services.xaml.cs、ClassIsland/Services/PluginService.cs、
+     ClassIsland.Core/Enums/PluginLoadStatus.cs、ClassIsland/Views/SettingPages/PluginsSettingsPage.axaml
+
+3. #1546 切换播放设备后，ClassIsland 仍在上一个设备上出声，直到重启
+   - 原因：AudioService 缓存了 AudioPlaybackDevice，只判断「有没有被释放」，从不核对系统默认设备有没有变。
+   - 处理：每次取用前 Rent 出设备并与 AudioEngine.PlaybackDevices 里的默认设备比对 Id，
+     变了就归还租约、释放缓存并重新初始化。先租再比，租约期间设备不会被回收。
+   - 文件：ClassIsland/Services/AudioService.cs
+
+4. #2028 gRPC 模式的集控在开了系统代理的电脑上连不上
+   - 原因：GrpcChannel.ForAddress 默认走系统代理，校园网里常见的失效代理/需认证代理会直接让连接失败。
+   - 处理：统一的 CreateGrpcChannel，用 SocketsHttpHandler 关闭代理并把连接超时压到 10 秒，
+     两处建通道的地方（lightConnect 与命令流）都改用它。
+   - 文件：ClassIsland/Services/Management/ManagementServerConnection.cs
+
+5. #671 没关设置窗口就关机，配置丢失
+   - 原因：退出时靠 Stop() 里往 UI 线程投递保存任务，系统关机/注销时进程直接被结束，投递的任务来不及跑。
+   - 处理：订阅 DesktopLifetime.ShutdownRequested，在关机请求阶段同步保存一次（设置、自动化、档案、组件），
+     SaveAllConfigs 抽成方法，Stop() 复用同一份逻辑；保存本身幂等。
+   - 文件：ClassIsland/App.axaml.cs
+
+6. #569 开了「全屏时隐藏」，某些全屏程序仍然不隐藏
+   - 原因：全屏判定要求窗口矩形严格包含整个屏幕。部分游戏（启动器拉起的无边框全屏）窗口比屏幕小几个像素，
+     严格包含判定失败。
+   - 处理：严格包含仍然优先；不满足时按覆盖率兜底，覆盖屏幕 99% 以上视为全屏
+     （最大化窗口只覆盖工作区，达不到这个比例，不会误判）。
+   - 文件：platforms/ClassIsland.Platforms.Windows/Services/WindowPlatformService.cs
+
+顺手加固（没有对应 issue，改到的文件都在本批里）：
+- 弹窗宿主窗口：没有窗口处于激活状态时，原来直接退回主窗口（主界面贴屏幕顶部，对话框会压到课表上）。
+  改为选最后打开且可见、非最小化的普通窗口；顺手删掉两处 ELYSIADBG 调试打屏。
+  文件：ClassIsland.Core/Extensions/UI/FAContentDialogExtensions.cs
+- 提醒音效：自定义音效文件被删/路径失效时原来静默失败（提醒直接没声音），现在回退内置音效并记 warning；
+  播放异常也从「丢弃 Task 吞掉」改成写日志。
+  文件：ClassIsland/Services/NotificationWorkerService.cs
+- CSES 导出：保存对话框默认扩展名从 .json 改成 yml；内容先整体序列化成字节再写入，
+  避免存储流不支持 Seek 时覆盖写留下上一份文件的尾部（导出的课表变成两份拼在一起）。
+  文件：ClassIsland/Helpers/ProfileTransferHelpers/CsesExportHelper.cs
+
+已排查但没改的：
+- #1460 导出的 CSES 字符串没带引号，被部分程序误识别：序列化在第三方 CSES 库（CsesLoader.SaveToYamlString），
+  要等上游库加引号策略，本地改不了。
+- #2000 部分条件无法触发自动化：#2039 修完后仍有一批条件（窗口/进程类）需要实机验证触发时机，
+  没有可靠复现路径，先不动。
+- 其余仍按第一段的口径：需要 GUI 复现、语义不明、或卡在外部依赖的，一律不瞎改。
+
+验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 0 Error；
+      dotnet build platforms/ClassIsland.Platforms.Windows/ClassIsland.Platforms.Windows.csproj -c Release → 0 Error。
+
+下次同步注意
+- ComponentsService 的 IsManagementMode 语义变了：只有清单下发 ComponentsSource 才为 true。
+  上游如果改了集控清单结构，这里要跟着改；不要再改回「加入集控就 true」。
+- 插件加载状态多了 Skipped（安全模式专用）。上游新增状态处理分支时记得带上它，
+  尤其是「是否加载成功」这类统计。
+- AudioService 取缓存设备前会扫一次默认设备，属于每次播放都执行的路径，上游若把它挪进热循环要注意开销。
+- App.axaml.cs 的 ShutdownRequested 是关机保存的唯一入口，删了 #671 会复发。
+
+================================================
 [2026-10-31 16:35] [修复] 跟进上游 Issues：修 6 个 Bug（cron 重复触发、课表开关、删除时间表、诊断导出等）
 ================================================
 

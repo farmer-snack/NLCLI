@@ -282,8 +282,23 @@ public class WindowPlatformService : IWindowPlatformService, IDisposable
         {
             Marshal.FreeHGlobal(nClassName);
         }
-        return new PixelRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top).Contains(screen.Bounds);
+        var windowRect = new PixelRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+        if (windowRect.Contains(screen.Bounds))
+        {
+            return true;
+        }
 
+        // 有些游戏（例如通过启动器启动的原神）用的是无边框全屏，窗口矩形会比屏幕小几个像素，
+        // 严格包含判定会失败，导致「全屏时隐藏」等规则不生效。这里按覆盖率兜底：
+        // 覆盖屏幕 99% 以上视为全屏。最大化窗口只覆盖工作区，达不到这个比例。
+        var left = Math.Max(windowRect.X, screen.Bounds.X);
+        var top = Math.Max(windowRect.Y, screen.Bounds.Y);
+        var right = Math.Min(windowRect.X + windowRect.Width, screen.Bounds.X + screen.Bounds.Width);
+        var bottom = Math.Min(windowRect.Y + windowRect.Height, screen.Bounds.Y + screen.Bounds.Height);
+        var coveredWidth = Math.Max(0, right - left);
+        var coveredHeight = Math.Max(0, bottom - top);
+        var screenArea = (double)screen.Bounds.Width * screen.Bounds.Height;
+        return screenArea > 0 && coveredWidth * (double)coveredHeight >= screenArea * 0.99;
     }
 
     public bool IsForegroundWindowMaximized(Screen screen)

@@ -158,6 +158,42 @@ public class NotificationWorkerService : INotificationWorkerService
         await ProcessNotificationSessionCore(request, request.OverlayContent, request.OverlaySession, false, cancellationToken, settings, cancellationCompletedSource, soundsCts);
     };
 
+    /// <summary>
+    /// 播放提醒音效。自定义音效文件缺失或损坏时回退到内置音效，避免提醒直接变成静音。
+    /// </summary>
+    private void PlayNotificationSound(string? soundPath, CancellationToken cancellationToken)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(soundPath))
+                {
+                    if (File.Exists(soundPath))
+                    {
+                        await AudioService.PlayAudioAsync(soundPath,
+                            (float)SettingsService.Settings.NotificationSoundVolume, cancellationToken);
+                        return;
+                    }
+
+                    Logger.LogWarning("提醒音效文件不存在，已回退到内置音效：{}", soundPath);
+                }
+
+                using var stream = AssetLoader.Open(INotificationProvider.DefaultNotificationSoundUri);
+                await AudioService.PlayAudioAsync(stream,
+                    (float)SettingsService.Settings.NotificationSoundVolume, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception e)
+            {
+                // 之前这里用丢弃的 Task 直接播放，异常被吞掉，音效失效时看不出任何原因。
+                Logger.LogError(e, "无法播放提醒音效：{}", soundPath);
+            }
+        }, CancellationToken.None);
+    }
+
     private async Task ProcessNotificationSessionCore(NotificationRequest request,
         NotificationContent content,
         NotificationPlayingSessionInfo session,
@@ -183,28 +219,8 @@ public class NotificationWorkerService : INotificationWorkerService
             
             if (!session.HasSoundsPlayed && isMask && settings.IsNotificationSoundEnabled && SettingsService.Settings.AllowNotificationSound)
             {
-                try
-                {
-                    Logger.LogInformation("即将播放提醒音效：{}", settings.NotificationSoundPath);
-                    if (string.IsNullOrWhiteSpace(settings.NotificationSoundPath))
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            using var stream = AssetLoader.Open(INotificationProvider.DefaultNotificationSoundUri);
-                            await AudioService.PlayAudioAsync(stream,
-                                (float)SettingsService.Settings.NotificationSoundVolume, soundsCts.Token);
-                        }, soundsCts.Token);
-                    }
-                    else
-                    {
-                        _ = AudioService.PlayAudioAsync(settings.NotificationSoundPath,
-                            (float)SettingsService.Settings.NotificationSoundVolume, soundsCts.Token);
-                    }
-                }
-                catch (Exception e)
-                {
-                    Logger.LogError(e, "无法播放提醒音效：{}", settings.NotificationSoundPath);
-                }
+                Logger.LogInformation("即将播放提醒音效：{}", settings.NotificationSoundPath);
+                PlayNotificationSound(settings.NotificationSoundPath, soundsCts.Token);
             }
             
             session.HasSoundsPlayed = true;

@@ -350,9 +350,10 @@ public partial class App
             services.AddTutorialGroupByUri(new Uri("avares://ClassIsland/Assets/Tutorials/classisland.getStarted.json"));
         }
         // Plugins
-        if (!ApplicationCommand.Safe && string.IsNullOrWhiteSpace(ApplicationCommand.ImportV1) && string.IsNullOrWhiteSpace(ApplicationCommand.ImportV2))
+        // 安全模式下仍然扫描插件清单，否则插件页面会是空的，用户无法禁用或卸载出问题的插件。
+        if (string.IsNullOrWhiteSpace(ApplicationCommand.ImportV1) && string.IsNullOrWhiteSpace(ApplicationCommand.ImportV2))
         {
-            PluginService.InitializePlugins(context, services);
+            PluginService.InitializePlugins(context, services, loadPluginAssemblies: !ApplicationCommand.Safe);
         }
     }
 }

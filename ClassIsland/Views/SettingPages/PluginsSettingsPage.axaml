@@ -131,6 +131,25 @@
                                 <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
                                         CornerRadius="999"
                                         Padding="10 3"
+                                        VerticalAlignment="Center">
+                                    <Border.IsVisible>
+                                        <Binding Path="LoadStatus" Converter="{x:Static ObjectConverters.Equal}">
+                                            <Binding.ConverterParameter>
+                                                <enums:PluginLoadStatus>Skipped</enums:PluginLoadStatus>
+                                            </Binding.ConverterParameter>
+                                        </Binding>
+                                    </Border.IsVisible>
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <ci:FluentIcon Glyph="&#xE7BA;" FontSize="14" VerticalAlignment="Center"/>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <Run Text="安全模式未加载"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                                        CornerRadius="999"
+                                        Padding="10 3"
                                         VerticalAlignment="Center"
                                         IsVisible="{Binding HasCompatibilityNotes}">
                                     <ToolTip.Tip>

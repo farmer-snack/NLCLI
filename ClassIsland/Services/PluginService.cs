@@ -243,7 +243,7 @@ public class PluginService : IPluginService
     /// <summary>
     /// 初始化插件
     /// </summary>
-    public static void InitializePlugins(HostBuilderContext context, IServiceCollection services)
+    public static void InitializePlugins(HostBuilderContext context, IServiceCollection services, bool loadPluginAssemblies = true)
     {
         if (!Directory.Exists(PluginsRootPath))
         {
@@ -299,10 +299,23 @@ public class PluginService : IPluginService
                 info.LoadStatus = PluginLoadStatus.Disabled;
                 PluginLoadedStatus.Add(info);
             }
-            if (info.IsEnabled)
+            if (loadPluginAssemblies && info.IsEnabled)
             {
                 CheckApiVersionCompatibility(info);
             }
+        }
+
+        // 安全模式：只扫描清单，让插件页面能列出、并卸载插件，但不加载任何程序集。
+        if (!loadPluginAssemblies)
+        {
+            foreach (var info in IPluginService.LoadedPluginsInternal.Where(x => x.LoadStatus == PluginLoadStatus.NotLoaded))
+            {
+                info.LoadStatus = PluginLoadStatus.Skipped;
+                info.AddCompatibilityNote("安全模式：本次启动未加载任何插件，可以在此页面查看或卸载插件。");
+            }
+
+            Console.WriteLine("安全模式：已跳过插件程序集加载。");
+            return;
         }
         var loadOrder = ResolveLoadOrder(IPluginService.LoadedPluginsInternal.Where(x => x.LoadStatus == PluginLoadStatus.NotLoaded).ToList());
         Console.WriteLine($"Resolved load order: {string.Join(", ", loadOrder)}");

@@ -51,9 +51,25 @@ public class AudioService(ILogger<AudioService> logger) : IAudioService
         {
             if (_sharedAudioPlaybackDevice?.IsValueDisposed == false)
             {
-                var lease = _sharedAudioPlaybackDevice.Rent();
-                Logger.LogDebug("使用了缓存的音频设备 {} (Id={})", lease.Value.Info?.Name, lease.Value.Info?.Id);
-                return lease;
+                // 先租再比：RefCounted 不暴露裸值，租约期间设备不会被释放。
+                var cachedLease = _sharedAudioPlaybackDevice.Rent();
+                var cachedDeviceInfo = cachedLease.Value.Info;
+                var defaultDeviceInfo = AudioEngine.PlaybackDevices.FirstOrDefault(x => x.IsDefault);
+
+                // 系统默认播放设备会被切换（插拔耳机、接上显示器音响等），但缓存的设备实例
+                // 仍然绑定在旧设备上，会继续从旧设备出声，直到重启应用。
+                // 这里在每次取用前核对一次默认设备，变化了就重新初始化。
+                if (defaultDeviceInfo == default || IsSameDevice(cachedDeviceInfo, defaultDeviceInfo))
+                {
+                    Logger.LogDebug("使用了缓存的音频设备 {} (Id={})", cachedDeviceInfo?.Name, cachedDeviceInfo?.Id);
+                    return cachedLease;
+                }
+
+                Logger.LogInformation("默认播放设备已切换为 {} (Id={})，重新初始化音频设备",
+                    defaultDeviceInfo.Name, defaultDeviceInfo.Id);
+                cachedLease.Dispose();
+                _sharedAudioPlaybackDevice.Dispose();
+                _sharedAudioPlaybackDevice = null;
             }
 
             if (TryInitializeDefaultPlaybackDeviceInternal() is not { } device)
@@ -66,6 +82,9 @@ public class AudioService(ILogger<AudioService> logger) : IAudioService
             return lease2;
         }
     });
+
+    private static bool IsSameDevice(DeviceInfo? cached, DeviceInfo current) =>
+        cached is { } info && Equals(info.Id, current.Id);
 
     private AudioPlaybackDevice? TryInitializeDefaultPlaybackDeviceInternal()
     {
