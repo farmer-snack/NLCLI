@@ -7,7 +7,7 @@
 排查范围：抓取了上游 384 个 open issue（其中 118 个带 Bug 标签，按更新时间倒序），
 逐条对照本仓库代码定位。
 
-已修复（6 项，对应 7 个 issue）：
+已修复（7 项，对应 9 个 issue）：
 
 1. #2039 更改时间偏移后，以 cron 为触发器的自动化执行两次
    - 原因：CronWorker 的循环条件读的是字段 _stopCancellationTokenSource，LoadCron 换新 CTS
@@ -44,6 +44,12 @@
    - 文件：ClassIsland/Controls/Components/WeatherComponent.axaml
    - 未覆盖：课表组件的时间文字（LessonsListBox 内部模板）仍有同样风险。
 
+7. #2031 / #1973 天气温度运行一段时间后丢失
+   - 原因：小米天气接口偶发返回 HTTP 200 的空 JSON（{}），反序列化出全默认对象，
+     代码无条件整体覆盖 LastWeatherInfo，把上一次的有效温度和天气类型一起清空。
+   - 处理：写回前校验，温度和天气类型为空时沿用上一次的有效值，并记一条 warning 日志。
+   - 文件：ClassIsland/Services/WeatherService.cs
+
 已排查但没改的（缺复现条件或语义不明确，不瞎改）：
 - #2044 #865 #1020 多行组件的行距/行数/启动时自动隐藏后不恢复：需要 GUI 复现，
   涉及 StackPanel spacing 与隐藏行的交互，盲改容易把布局搞乱。
@@ -54,7 +60,6 @@
 - #2037 EdgeTTS 接口变更：依赖 vendors/EdgeTtsSharp 子模块，要等上游库适配。
 - #1685 日期选择器从月切到日时崩溃：FluentAvalonia 控件内部实现。
 - #606 改注册表字体后托盘图标崩溃：H.NotifyIcon + System.Drawing 找不到字体。
-- #2031 #1973 天气温度运行一段时间后丢失：数据链路问题，要按真实接口和缓存复现。
 
 验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 0 Error。
 

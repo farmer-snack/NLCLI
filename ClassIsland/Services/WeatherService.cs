@@ -421,6 +421,28 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 }
             }
 
+            // 小米天气接口偶尔会返回 HTTP 200 的空 JSON（{}），反序列化后是一个全默认对象。
+            // 直接覆盖会把上一次的有效温度和天气类型清空，表现为温度突然消失（#2031、#1973）。
+            info.Current ??= new CurrentWeather();
+            var previous = Settings.LastWeatherInfo;
+            if (previous?.Current != null)
+            {
+                if (string.IsNullOrWhiteSpace(info.Current.Temperature.Value) &&
+                    !string.IsNullOrWhiteSpace(previous.Current.Temperature.Value))
+                {
+                    info.Current.Temperature = previous.Current.Temperature;
+                    Logger.LogWarning("天气接口返回的数据缺少温度，沿用上一次的有效温度。");
+                }
+
+                if ((string.IsNullOrWhiteSpace(info.Current.Weather) || info.Current.Weather == "99") &&
+                    !string.IsNullOrWhiteSpace(previous.Current.Weather) &&
+                    previous.Current.Weather != "99")
+                {
+                    info.Current.Weather = previous.Current.Weather;
+                    Logger.LogWarning("天气接口返回的数据缺少天气类型，沿用上一次的有效天气类型。");
+                }
+            }
+
             Settings.LastWeatherInfo = info;
             IsWeatherRefreshed = true;
             result.IsSuccess = true;
