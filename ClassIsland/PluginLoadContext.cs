@@ -7,6 +7,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using ClassIsland.Core.Models.Plugin;
 using ClassIsland.Services;
+using ClassIsland.Services.PluginCompatibility;
 
 namespace ClassIsland;
 
@@ -189,7 +190,7 @@ public class PluginLoadContext : AssemblyLoadContext
         
         if (assemblyPath != null)
         {
-            return LoadFromAssemblyPath(assemblyPath);
+            return LoadPluginAssembly(assemblyPath);
         }
 
         // ④ 兼容层：没有 deps.json 或解析器失效时，直接按文件名在插件目录里找。
@@ -200,7 +201,7 @@ public class PluginLoadContext : AssemblyLoadContext
             {
                 Info.AddCompatibilityNote(
                     $"程序集 {assemblyName.Name} 未在 deps.json 中声明，已从插件目录直接加载。");
-                return LoadFromAssemblyPath(fallbackPath);
+                return LoadPluginAssembly(fallbackPath);
             }
         }
 
@@ -213,6 +214,20 @@ public class PluginLoadContext : AssemblyLoadContext
         }
 
         return loadedAssembly;
+    }
+
+    /// <summary>
+    /// 加载插件程序集。若插件是按旧版 Avalonia 编译的，会先经过类型重定向兼容层再加载。
+    /// </summary>
+    private Assembly LoadPluginAssembly(string assemblyPath)
+    {
+        var result = PluginTypeCompatibility.Prepare(assemblyPath);
+        foreach (var note in result.Notes)
+        {
+            Info.AddCompatibilityNote(note);
+        }
+
+        return LoadFromAssemblyPath(result.AssemblyPath ?? assemblyPath);
     }
 
     /// <summary>

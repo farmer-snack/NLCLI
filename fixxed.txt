@@ -1,4 +1,45 @@
 ================================================
+[2026-10-31 15:40] [修复] 插件兼容层通用化：按旧版 Avalonia 编译的插件在 12 宿主上可加载
+================================================
+
+需求：System Tools 加载失败只是一个表现，兼容逻辑要对所有按旧版 Avalonia 编译的插件生效，
+      不能针对某个插件名做特判；同为 Avalonia 12 编译的插件必须原样加载、不做任何改写。
+
+处理：
+- 新增 PluginTypeCompatibility：加载前用 Mono.Cecil 重写插件程序集的类型引用。
+  判定条件只有一条 —— 插件引用的 Avalonia 主版本 < 宿主主版本（当前 11 → 12）；
+  同主版本（12 → 12）直接跳过，不改写、不缓存、不加提示。
+- 映射关系完全由宿主发布目录的实际类型表推导（PEReader 扫全部 dll），不含任何插件名特判：
+  · 规则 A：类型换到了宿主里的另一个程序集（Avalonia.Markup → Avalonia.Base 等）；
+  · 规则 A2：原本独立的类型被收进外层类型（ClassIsland.Core.Controls.DrawerPlacementEnum
+    → DrawerHost/DrawerPlacementEnum），按「简单名唯一 + 命名空间同源」推断；
+  · 规则 B：FluentAvalonia 3 给控件统一加 FA 前缀（ContentDialog → FAContentDialog 等）；
+  · 规则 C：宿主自身 API 的命名空间迁移（同名类型唯一时才生效）；
+  · 嵌套类型的全名（Outer/Inner）也进索引，避免合法的嵌套引用被误判为缺失。
+- 强名称程序集不再一刀切跳过：.NET 运行时不校验强名称签名，改写时摘掉签名标记继续处理。
+- 改写结果按「源文件 SHA256 + 宿主主版本」缓存，插件或宿主更新自动失效；
+  任何异常都退回原文件加载，不会因为兼容层本身让插件更糟。
+- PluginLoadContext：插件目录里的每个程序集（不只入口）都走兼容层；
+  宿主自身程序集 / Avalonia 优先绑定宿主实例，缺 deps.json 时按文件名兜底。
+- PluginService：入口程序集按清单找不到时，做一次不区分大小写的全目录搜索
+  （清单大小写不一致、入口放在子目录的包都能加载）；加载失败提示区分「缺依赖」与「API 不兼容」。
+- PluginInfo 增加兼容说明列表，插件详情页能看到兼容层做了什么、还有哪些类型无法映射。
+
+改动的文件
+- ClassIsland/Services/PluginCompatibility/PluginTypeCompatibility.cs — 新增
+- ClassIsland/PluginLoadContext.cs — 每个插件程序集加载前走兼容层
+- ClassIsland/Services/PluginService.cs — 入口兜底 + 失败提示
+- ClassIsland.Core/Models/Plugin/PluginInfo.cs — 兼容说明
+- ClassIsland/ClassIsland.csproj — 引用 Mono.Cecil 0.11.6
+
+验证：SystemTools.cipx（Avalonia 11.3.6 / FluentAvalonia 2.4.1 编译）改写 13 处类型引用，
+      516 个类型全部可解析、成员签名 0 错误；剩余未解析类型只有插件自身缺失的 WinRT 依赖。
+
+下次同步注意
+- 兼容层依赖宿主发布目录里的完整 dll 集合（含 Avalonia 12、FluentAvalonia 3），
+  同步上游后若 Avalonia 大版本再变，只需改判定条件（主版本比较），映射表会自动跟着宿主走。
+
+================================================
 [2026-10-31 14:50] [定制] 天气详情接入 Open-Meteo 全量数据（15 分钟逐条详情、当天默认展开）
 ================================================
 

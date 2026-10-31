@@ -155,6 +155,12 @@ public class PluginInfo : ObservableRecipient, IMarketplaceItemInfo
                 return;
             }
 
+            // 兼容层可能产生较多条目，限制总量避免把插件详情页刷满。
+            if (CompatibilityNotes.Count >= 40)
+            {
+                return;
+            }
+
             CompatibilityNotes.Add(note);
             OnPropertyChanged(nameof(HasCompatibilityNotes));
         }

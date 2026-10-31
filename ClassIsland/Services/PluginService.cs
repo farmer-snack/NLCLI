@@ -167,20 +167,31 @@ public class PluginService : IPluginService
         string? hint = null;
         if (ex is ReflectionTypeLoadException reflectionTypeLoadException)
         {
-            var loaderMessages = reflectionTypeLoadException.LoaderExceptions
+            var loaders = reflectionTypeLoadException.LoaderExceptions
                 .Where(x => x != null)
-                .Select(x => x!.Message)
+                .Select(x => x!)
+                .ToArray();
+            var loaderMessages = loaders
+                .Select(x => x.Message)
                 .Distinct()
                 .ToArray();
             if (loaderMessages.Length > 0)
             {
                 hint = $"插件类型加载失败：{string.Join("；", loaderMessages)}";
             }
+
+            // 缺依赖的情况优先给出可操作的提示，覆盖上面那段英文异常。
+            var missingHint = loaders.Select(MissingAssemblyHint).FirstOrDefault(x => x != null);
+            if (missingHint != null)
+            {
+                hint = missingHint;
+            }
         }
 
         hint ??= ex switch
         {
             FileNotFoundException or FileLoadException =>
+                MissingAssemblyHint(ex) ??
                 "缺少依赖程序集，或依赖的版本与当前应用不匹配。请确认插件包完整；如果插件自带 ClassIsland.Core 等核心程序集，可尝试删除后重试。",
             TypeLoadException or MissingMethodException or MissingFieldException =>
                 "插件使用了当前版本中不存在的接口。请更新插件，或确认该插件与当前 ClassIsland 版本兼容。",
@@ -196,6 +207,37 @@ public class PluginService : IPluginService
         }
 
         return new InvalidOperationException(message, ex);
+    }
+
+    /// <summary>
+    /// 兼容层：把「缺少某个依赖程序集」翻译成可直接照做的建议。
+    /// </summary>
+    /// <remarks>
+    /// 不少插件把自己的第三方依赖（如 OpenCV、Dlib 这类带原生库的包）误当作宿主会提供的框架库，
+    /// 打包时没有带上。这类缺失宿主无法代为补齐，只能给出明确的处理方式，避免用户只看到一串英文异常。
+    /// </remarks>
+    private static string? MissingAssemblyHint(Exception ex)
+    {
+        var name = ex switch
+        {
+            FileNotFoundException fileNotFound => fileNotFound.FileName,
+            FileLoadException fileLoad => fileLoad.FileName,
+            _ => null
+        };
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        name = name.Split(',')[0].Trim();
+        if (name.Length == 0)
+        {
+            return null;
+        }
+
+        return $"缺少依赖程序集「{name}」。这个库不属于运行环境内置范围，需要由插件自己提供：" +
+               $"可以把 {name}.dll（以及配套的原生库）放进插件目录后重试，或联系插件作者更新打包方式。";
     }
 
     /// <summary>
@@ -276,7 +318,7 @@ public class PluginService : IPluginService
             var pluginDir = info.PluginFolderPath;
             try
             {
-                var fullPath = Path.GetFullPath(Path.Combine(pluginDir, manifest.EntranceAssembly));
+                var fullPath = ResolveEntranceAssemblyPath(pluginDir, manifest.EntranceAssembly);
                 var loadContext = new PluginLoadContext(info, fullPath, forceMonoPluginLoadBehavior);
                 PluginLoadContexts[info.Manifest.Id] = loadContext;
                 var asm = loadContext.LoadFromAssemblyName(
@@ -385,6 +427,46 @@ public class PluginService : IPluginService
         {
             ZipFile.CreateFromDirectory(plugin.PluginFolderPath, outputStream);
         });
+    }
+
+    /// <summary>
+    /// 解析插件入口程序集的实际路径。
+    /// </summary>
+    /// <remarks>
+    /// 兼容层：清单里的程序集名大小写与实际文件不一致时，Windows 上碰巧能加载，Linux / macOS 上会直接找不到；
+    /// 另外有些插件包把入口程序集放在子目录里，清单却只写了文件名。
+    /// 这里在直接拼路径失败后做一次不区分大小写的兜底搜索，避免这类打包问题让整个插件加载失败。
+    /// </remarks>
+    private static string ResolveEntranceAssemblyPath(string pluginDir, string entranceAssembly)
+    {
+        var fullPath = Path.GetFullPath(Path.Combine(pluginDir, entranceAssembly));
+        if (File.Exists(fullPath))
+        {
+            return fullPath;
+        }
+
+        var fileName = Path.GetFileName(entranceAssembly.Replace('\\', '/'));
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return fullPath;
+        }
+
+        try
+        {
+            var match = Directory
+                .EnumerateFiles(pluginDir, "*.dll", SearchOption.AllDirectories)
+                .FirstOrDefault(x => Path.GetFileName(x).Equals(fileName, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                return Path.GetFullPath(match);
+            }
+        }
+        catch
+        {
+            // 目录不可读时保持原路径，让上层给出原始异常。
+        }
+
+        return fullPath;
     }
 
     private static List<string> ResolveLoadOrder(List<PluginInfo> plugins)
