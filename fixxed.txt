@@ -35,6 +35,13 @@
 验证：SystemTools.cipx（Avalonia 11.3.6 / FluentAvalonia 2.4.1 编译）改写 13 处类型引用，
       516 个类型全部可解析、成员签名 0 错误；剩余未解析类型只有插件自身缺失的 WinRT 依赖。
 
+产物（Filebin，2026-10-31 15:45）
+- patches.zip（875,970 字节）  https://filebin.net/classisland1029/patches.zip
+  含 apply.txt、update-918.txt（9 个提交）、update-last.txt、update-from-sync.txt、update.txt；
+  补丁文件本身以 Filebin 页面显示的大小为准。
+- ci-win-x64.zip（121,996,438 字节）  https://filebin.net/classisland1029/ci-win-x64.zip
+  交叉发布 win-x64 自包含，包内已带 Mono.Cecil（兼容层运行时依赖）。
+
 下次同步注意
 - 兼容层依赖宿主发布目录里的完整 dll 集合（含 Avalonia 12、FluentAvalonia 3），
   同步上游后若 Avalonia 大版本再变，只需改判定条件（主版本比较），映射表会自动跟着宿主走。
