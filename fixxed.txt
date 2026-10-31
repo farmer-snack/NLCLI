@@ -74,6 +74,13 @@
 验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 0 Error；
       dotnet build platforms/ClassIsland.Platforms.Windows/ClassIsland.Platforms.Windows.csproj -c Release → 0 Error。
 
+产物（Filebin，2026-10-31 17:20）
+- patches.zip（大小以 Filebin 页面为准）  https://filebin.net/classisland1029/patches.zip
+  含 apply.txt、update-918.txt（15 个提交，9:18 那版起全量）、
+  update-918-last.txt（2 个提交，给「上一版补丁已打完」的仓库用）。
+- ci-win-x64.zip  https://filebin.net/classisland1029/ci-win-x64.zip
+  交叉发布 win-x64 自包含（PublishBuilding），包内已带 Mono.Cecil。
+
 下次同步注意
 - ComponentsService 的 IsManagementMode 语义变了：只有清单下发 ComponentsSource 才为 true。
   上游如果改了集控清单结构，这里要跟着改；不要再改回「加入集控就 true」。
