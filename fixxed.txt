@@ -1,4 +1,42 @@
 ================================================
+[2026-10-31 14:50] [定制] 天气详情接入 Open-Meteo 全量数据（15 分钟逐条详情、当天默认展开）
+================================================
+
+问题：页面只展示了接口能给的很少一部分字段；15 分钟只有时间和降水量，
+      每天要手动展开才看到少量日数据，点小时看到的字段也不全。
+
+处理：
+- 请求变量扩到接口上限：current 15 项 / hourly 53 项 / daily 22 项 / minutely_15 31 项，
+  空气质量 30 项；minutely_15 取 forecast_minutely_15=96（未来 24 小时）。
+- 模型改成「time + 全部字段」的通用结构（OmBlock + 自定义 JSON 转换器），
+  页面按接口实际返回的字段自动生成条目，不再逐个字段硬编码；
+  单位直接取接口返回的 *_units（°C、mm、km/h、%、s、W/m² …）。
+- 语义化格式化：weather_code → 天气文字、wind_direction_* → 方位、
+  is_day → 白天/夜间、*_duration 秒 → 小时、visibility 米 → 公里、
+  *_probability → 百分比；其余按数值大小自动保留小数。
+- UI：
+  · 新增「当前全部数据」展开区（默认展开），列出 current 的全部字段；
+  · 15 分钟改成横向列表（96 条，默认选中当前时刻），点任意一条看该时段全部字段；
+  · 16 天列表里「今天」默认展开，展开即显示这一天的全部字段 + 24 小时；
+  · 点某小时显示该小时全部字段（交互不变，字段数从 14 项增到 53 项）；
+  · 空气质量新增「全部字段」展开区（分项 AQI、沙尘、花粉、气溶胶等）。
+- 缓存结构版本升到 2：旧缓存字段不全，读取时自动作废并重拉，不会显示半截数据。
+
+改动的文件
+----------
+- ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 重写（OmBlock + 通用转换器 + 单位字典）
+- ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 重写数据装配
+- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 重做展示
+- ClassIsland/Services/Weather/OpenMeteoCacheService.cs — 缓存版本号
+
+验证
+------
+- 用北京坐标实测接口：HTTP 200；hourly 53 字段 × 384 小时、daily 22 × 16、
+  minutely_15 31 × 96、current 15 项，单位字段齐全；
+- 缓存序列化 → 反序列化 round-trip 通过（126 KB），字段数与取值一致；
+- 编译 0 error。
+
+================================================
 [2026-10-30 22:05] [修复] 打开「显示其他调试页面」后点「测试页面」必报导航错误
 ================================================
 

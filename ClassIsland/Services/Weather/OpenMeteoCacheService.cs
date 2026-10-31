@@ -13,6 +13,13 @@ namespace ClassIsland.Services.Weather;
 /// </summary>
 public class OpenMeteoCacheEntry
 {
+    /// <summary>
+    /// 缓存结构版本。模型改成「全字段字典」后旧缓存读不出内容，版本不一致时直接丢弃重拉。
+    /// </summary>
+    public const int CurrentVersion = 2;
+
+    [JsonPropertyName("version")] public int Version { get; set; }
+
     [JsonPropertyName("cachedAt")] public DateTime CachedAt { get; set; } = DateTime.Now;
 
     [JsonPropertyName("latitude")] public double Latitude { get; set; }
@@ -63,6 +70,13 @@ public class OpenMeteoCacheService(ILogger<OpenMeteoCacheService> logger)
 
             if (entry?.Forecast == null)
             {
+                return null;
+            }
+
+            if (entry.Version < OpenMeteoCacheEntry.CurrentVersion)
+            {
+                _logger.LogInformation("Open-Meteo 缓存结构版本过旧（{} < {}），忽略缓存",
+                    entry.Version, OpenMeteoCacheEntry.CurrentVersion);
                 return null;
             }
 

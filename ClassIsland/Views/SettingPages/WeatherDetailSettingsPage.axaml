@@ -53,6 +53,7 @@
                                TextWrapping="Wrap"
                                IsVisible="{Binding ViewModel.OpenMeteoError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
+                    <!-- 顶部常用指标 -->
                     <ItemsControl ItemsSource="{Binding ViewModel.OmMetrics}"
                                   IsVisible="{Binding !!ViewModel.OmMetrics.Count}">
                         <ItemsControl.ItemsPanel>
@@ -73,29 +74,106 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmMinutes.Count}">
-                        <TextBlock Text="未来 12 小时（每 15 分钟）" Foreground="White" Opacity="0.8"
-                                   FontSize="13" FontWeight="SemiBold" />
-                        <ItemsControl ItemsSource="{Binding ViewModel.OmMinutes}">
+                    <!-- 当前时刻的全部字段 -->
+                    <Expander IsExpanded="True"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Background="#14FFFFFF"
+                              CornerRadius="10">
+                        <Expander.Header>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="当前全部数据" Foreground="White" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding ViewModel.OmFieldCountText}" Foreground="#99FFFFFF"
+                                           FontSize="11" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Expander.Header>
+                        <ItemsControl ItemsSource="{Binding ViewModel.OmCurrentAll}" Margin="4 2 4 8">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <UniformGrid Columns="6" />
+                                    <UniformGrid Columns="4" />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Background="#14FFFFFF" CornerRadius="6" Padding="6 4" Margin="2">
-                                        <StackPanel Spacing="1" HorizontalAlignment="Center">
-                                            <TextBlock Text="{Binding Label}" Foreground="White" Opacity="0.75" FontSize="11" />
-                                            <TextBlock Text="{Binding Precip}" Foreground="White" FontSize="12"
-                                                       FontWeight="Medium" />
-                                        </StackPanel>
-                                    </Border>
+                                    <StackPanel Spacing="1" Margin="4 4">
+                                        <TextBlock Text="{Binding Label}" Foreground="#CCFFFFFF" FontSize="11" />
+                                        <TextBlock Text="{Binding Value}" Foreground="White" FontSize="12"
+                                                   FontWeight="Medium" TextTrimming="CharacterEllipsis"
+                                                   ToolTip.Tip="{Binding Value}" />
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                    </Expander>
+
+                    <!-- 每 15 分钟：未来 24 小时，点一条看该时段全部数据 -->
+                    <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmMinutes.Count}">
+                        <TextBlock Text="每 15 分钟 · 未来 24 小时（左右滑动，点一条看全部数据）"
+                                   Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
+
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled">
+                            <ListBox ItemsSource="{Binding ViewModel.OmMinutes}"
+                                     SelectedItem="{Binding ViewModel.SelectedMinute, Mode=TwoWay}"
+                                     Background="Transparent" BorderThickness="0" Padding="0">
+                                <ListBox.Styles>
+                                    <Style Selector="ListBoxItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="Margin" Value="2" />
+                                        <Setter Property="Background" Value="#14FFFFFF" />
+                                        <Setter Property="CornerRadius" Value="8" />
+                                    </Style>
+                                    <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                        <Setter Property="Background" Value="#40FFFFFF" />
+                                    </Style>
+                                </ListBox.Styles>
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Spacing="1" Margin="5 5" Width="54" HorizontalAlignment="Center">
+                                            <TextBlock Text="{Binding Label}" Foreground="White" Opacity="0.8"
+                                                       FontSize="11" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding Temp}" Foreground="White" FontSize="12"
+                                                       FontWeight="Medium" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding Precip}" Foreground="#FFBFE3FF" FontSize="10"
+                                                       HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </ScrollViewer>
+
+                        <Border Background="#22FFFFFF" CornerRadius="10" Padding="12"
+                                IsVisible="{Binding ViewModel.SelectedMinute, Converter={x:Static ObjectConverters.IsNotNull}}">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="{Binding ViewModel.SelectedMinute.Label, StringFormat='{}{0} 的全部数据'}"
+                                           Foreground="White" FontSize="13" FontWeight="SemiBold" />
+                                <ItemsControl ItemsSource="{Binding ViewModel.SelectedMinute.Detail}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Columns="4" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Spacing="1" Margin="3 3">
+                                                <TextBlock Text="{Binding Label}" Foreground="#CCFFFFFF" FontSize="11" />
+                                                <TextBlock Text="{Binding Value}" Foreground="White" FontSize="12"
+                                                           FontWeight="Medium" TextTrimming="CharacterEllipsis"
+                                                           ToolTip.Tip="{Binding Value}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
+                    <!-- 空气质量：常用项 + 全部字段 -->
                     <StackPanel Spacing="8" IsVisible="{Binding !!ViewModel.OmAqi.Count}">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Text="空气质量" Foreground="White" Opacity="0.8" FontSize="13"
@@ -121,11 +199,38 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+
+                        <Expander IsExpanded="False"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch"
+                                  Background="#14FFFFFF"
+                                  CornerRadius="10">
+                            <Expander.Header>
+                                <TextBlock Text="全部空气质量字段（含分项 AQI、沙尘、花粉等）"
+                                           Foreground="White" FontSize="12" FontWeight="SemiBold" />
+                            </Expander.Header>
+                            <ItemsControl ItemsSource="{Binding ViewModel.OmAqiAll}" Margin="4 2 4 8">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="4" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Spacing="1" Margin="4 4">
+                                            <TextBlock Text="{Binding Label}" Foreground="#CCFFFFFF" FontSize="11" />
+                                            <TextBlock Text="{Binding Value}" Foreground="White" FontSize="12"
+                                                       FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
                     </StackPanel>
 
-                    <!-- 未来 16 天：点一天 → 该日概况 + 这一天的小时；再点一个小时 → 小时的完整数据 -->
+                    <!-- 未来 16 天：今天默认展开；点一天看该日全部字段，再点一个小时看该小时全部字段 -->
                     <StackPanel Spacing="6" IsVisible="{Binding !!ViewModel.OmDays.Count}">
-                        <TextBlock Text="未来 16 天（点一天展开，再点一个小时看全部数据）"
+                        <TextBlock Text="未来 16 天（今天默认展开；点一天看全天数据，再点一个小时看该小时全部数据）"
                                    Foreground="White" Opacity="0.8" FontSize="13" FontWeight="SemiBold" />
 
                         <Grid ColumnDefinitions="66,26,108,*,88,42" ColumnSpacing="6" Margin="4 0 4 2">
@@ -141,7 +246,8 @@
                                 <DataTemplate>
                                     <Expander HorizontalAlignment="Stretch"
                                               HorizontalContentAlignment="Stretch"
-                                              Margin="0 1">
+                                              Margin="0 1"
+                                              IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
                                         <Expander.Header>
                                             <Grid ColumnDefinitions="66,26,108,*,88,42" ColumnSpacing="6" Margin="0 2">
                                                 <StackPanel Grid.Column="0" Spacing="0" VerticalAlignment="Center">
@@ -169,10 +275,12 @@
                                         <StackPanel Spacing="10" Margin="0 6 0 10">
                                             <TextBlock Text="{Binding Summary}" Foreground="#CCFFFFFF" FontSize="12" />
 
+                                            <TextBlock Text="这一天的全部数据" Foreground="#CCFFFFFF" FontSize="12"
+                                                       FontWeight="SemiBold" />
                                             <ItemsControl ItemsSource="{Binding Detail}">
                                                 <ItemsControl.ItemsPanel>
                                                     <ItemsPanelTemplate>
-                                                        <UniformGrid Columns="6" />
+                                                        <UniformGrid Columns="5" />
                                                     </ItemsPanelTemplate>
                                                 </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
@@ -180,7 +288,8 @@
                                                         <StackPanel Spacing="1" Margin="3 3">
                                                             <TextBlock Text="{Binding Label}" Foreground="#CCFFFFFF" FontSize="11" />
                                                             <TextBlock Text="{Binding Value}" Foreground="White" FontSize="13"
-                                                                       FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                                                                       FontWeight="Medium" TextTrimming="CharacterEllipsis"
+                                                                       ToolTip.Tip="{Binding Value}" />
                                                         </StackPanel>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
@@ -241,7 +350,8 @@
                                                                 <StackPanel Spacing="1" Margin="2 3">
                                                                     <TextBlock Text="{Binding Label}" Foreground="#CCFFFFFF" FontSize="11" />
                                                                     <TextBlock Text="{Binding Value}" Foreground="White" FontSize="13"
-                                                                               FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                                                                               FontWeight="Medium" TextTrimming="CharacterEllipsis"
+                                                                               ToolTip.Tip="{Binding Value}" />
                                                                 </StackPanel>
                                                             </DataTemplate>
                                                         </ItemsControl.ItemTemplate>
