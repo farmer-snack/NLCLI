@@ -36,7 +36,7 @@
       516 个类型全部可解析、成员签名 0 错误；剩余未解析类型只有插件自身缺失的 WinRT 依赖。
 
 产物（Filebin，2026-10-31 15:45）
-- patches.zip（875,970 字节）  https://filebin.net/classisland1029/patches.zip
+- patches.zip（大小以 Filebin 页面为准）  https://filebin.net/classisland1029/patches.zip
   含 apply.txt、update-918.txt（9 个提交）、update-last.txt、update-from-sync.txt、update.txt；
   补丁文件本身以 Filebin 页面显示的大小为准。
 - ci-win-x64.zip（121,996,438 字节）  https://filebin.net/classisland1029/ci-win-x64.zip
