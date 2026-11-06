@@ -1,4 +1,92 @@
 ================================================
+[2026-11-06 20:45] [修改] 插件可选依赖改为首次使用时下载
+================================================
+
+需求：「把这次你新加的两个 DLL 作为首次用下载，其他的都正常加载」——上一版把
+OpenCvSharp4 和 DlibDotNet 打进安装包，解压后多 136MB，绝大多数人根本用不到。
+
+处理：
+
+- 移除 ClassIsland.csproj 里 OpenCvSharp4 / OpenCvSharp4.runtime.win / DlibDotNet
+  三个 PackageReference，安装包不再包含这些文件。
+- 新增 ClassIsland/Services/PluginDependencyService.cs：
+  · 内置可选依赖清单（程序集名 → NuGet 包 + 需要抽取的文件），加新依赖只需添一条；
+  · 缓存目录 <数据目录>\PluginDependencies，托管库与原生库平铺在同一层；
+  · Ensure() 首次调用时同步下载 nupkg，只抽取清单里的文件，不整包解压；
+  · 下载源 api.nuget.org/v3-flatcontainer，失败回退 www.nuget.org/api/v2/package；
+  · 下载失败记 10 分钟冷却，避免每次解析都卡在同一个下载上；
+  · Prefetch() 在插件加载时后台读插件 dll 的 AssemblyRef，命中清单的提前下好。
+- PluginLoadContext：
+  · Load 增加第 ⑥ 步——缓存命中直接 LoadFromAssemblyPath，未命中调 Ensure() 现下；
+  · LoadUnmanagedDll 增加缓存目录查找，解决 OpenCvSharpExtern、DlibDotNetNative
+    这些原生库的解析（托管库从缓存加载后，DllImport 走的是插件上下文的解析）；
+  · 构造函数里触发 Prefetch。
+- 上一段补充里「预置 OpenCvSharp4 / DlibDotNet」的方案由本节取代，那些包引用已删除。
+
+文件：ClassIsland/Services/PluginDependencyService.cs（新增）、ClassIsland/PluginLoadContext.cs、
+     ClassIsland/ClassIsland.csproj
+
+验证：Linux 与 Windows 目标编译均 0 error；实跑下载测试 13 项断言全过——
+     OpenCvSharp 3.4s / DlibDotNet 4.0s 下载完成，二次调用命中缓存 <100ms；
+     落地文件 OpenCvSharp.dll 979KB、OpenCvSharpExtern.dll 65MB、ffmpeg 27MB、
+     DlibDotNet.dll 590KB、DlibDotNetNative.dll 21MB、DlibDotNetNativeDnn.dll 20MB；
+     托管库 AssemblyName 校验通过（OpenCvSharp 4.0.0.0 / DlibDotNet 19.21.0.0）。
+     发布目录已无 opencv/dlib 文件，回到 290MB（不含 pdb），压缩后约 128MB。
+
+下次同步注意：缓存目录在 <数据目录>\PluginDependencies，卸载重装不会清；
+     清单里的版本号写死在 PluginDependencyService，升级 OpenCvSharp 要同步改这里；
+     下载是在程序集解析里同步做的，无网环境首次调用会等满超时（5 分钟）才失败，
+     之后 10 分钟内不再重试。
+
+================================================
+[2026-11-06 20:17] [新增] 启动时从旧版本安装目录迁移插件与备份包
+================================================
+
+需求：「很有可能安装了其他的版本……找上一次开机自启的目录，把它的备份包和插件复制到当前目录」。
+
+处理：新增 LegacyDataMigrationHelper，在插件扫描之前执行一次：
+
+- 定位旧版本：遍历启动文件夹 %APPDATA%\...\Startup\*.lnk（用 WScript.Shell 读 TargetPath）
+  以及注册表 HKCU/HKLM 的 Software\Microsoft\Windows\CurrentVersion\Run，
+  只接受文件名以 ClassIsland 开头的可执行文件。
+- 推导数据目录：优先 <exe目录>\data（便携版布局），其次 <exe目录>（老版本扁平布局）；
+  两者都不像数据目录时，回退到 %AppData%\ClassIsland\Data（安装版布局，覆盖「装过安装版
+  又换成便携版」的情况）。
+- 复制 Plugins\*（递归整目录）与 Backups\*.zip 到当前数据目录；同名插件目录、同名备份
+  一律跳过，不覆盖现有内容。
+- 每个旧目录只处理一次，处理记录写入 Config\legacy-migration.txt；有插件复制失败时不记账，
+  下次启动重试。删掉该文件即可强制重新扫描。
+- 启动完成后弹 Toast 汇总：复制了几个插件、几个备份包、跳过几个同名插件。
+- 整个入口包在 #if Platforms_Windows 内，其它平台是空实现。
+
+文件：ClassIsland/Helpers/LegacyDataMigrationHelper.cs（新增）、ClassIsland/App.axaml.cs、
+     ClassIsland/PluginLoadContext.cs、ClassIsland/ClassIsland.csproj
+
+补丁：update-legacy-migrate-v2.txt（2 个提交，git am 可直接套用，不含本账本）
+
+补充（20:31）：第一版有两个硬伤，已修——
+
+1. ClassIsland 项目根本不定义 Platforms_Windows（只有 ClassIsland.Desktop 定义），
+   原来用 #if 包住 Run()，方法体被整段裁掉，迁移一次都没执行过。改成运行时
+   OperatingSystem.IsWindows() 判断。
+2. 宿主目录里其实有 System.Windows.Forms.dll、System.Drawing.Common.dll、
+   Microsoft.Windows.SDK.NET.dll，但它们不在 deps.json，插件加载上下文解析不到。
+   PluginLoadContext 增加「宿主目录按需加载」，并给默认上下文注册 Resolving 兜底，
+   连带 System.Windows.Forms 的依赖链一起解决。
+3. 预置 OpenCvSharp4 4.13（OpenCvSharpExtern 66MB + ffmpeg 28MB）、DlibDotNet 19.21
+   （两个 native 各 21MB），补上截图、摄像头、人脸识别插件缺的库；发布目录 +136MB。
+   这些只在 Windows 目标下引用（PublishPlatform=windows 或构建机是 Windows）。
+
+验证：Windows 目标（net10.0-windows10.0.19041.0）编译 0 error；
+     目录复制逻辑用真实文件系统跑了 16 项断言，全部通过——同名插件跳过、同名备份保留原件、
+     递归复制子目录、带引号/不带引号命令行解析、便携版与扁平目录识别、非 ClassIsland 程序忽略。
+     补丁在 b108ba6 干净基线上 git am 成功，落地 tree 186a2a8f 与源提交一致。
+
+下次同步注意：调用点固定在 FileFolderService.CreateFolders() 之后、
+     PluginService.ProcessPluginsInstall() 之前，不能挪到插件扫描后面——
+     迁移过来的插件需要在本次启动就能被扫到。
+
+================================================
 [2026-10-31 17:15] [修复] 上游 Issues 第二批：再修 6 个 Bug（组件方案互覆盖、安全模式插件、音频设备、集控代理、关机保存、全屏判定）
 ================================================
 
