@@ -2,6 +2,68 @@
 （最新记录在最上方，越往下越旧）
 
 ================================================================
+## 2026-11-06 21:10:29  同步 d62329d0
+上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (d62329d0)
+本次基线 : 329bf4b1
+本地分支 : develop/v2/misha-alpha  →  本地提交见本次 commit
+
+新增:
+  - (无)
+修改:
+  - build_release.yml (Build)
+删除:
+  - (无)
+未变更:
+  - close_stale_issues.yml (Close inactive issues)
+  - issues_similarity_analysis.yml (Issues Similarity Analysis)
+  - qodana_code_quality.yml (Qodana)
+
+本次同步的上游提交（41 个，全部列出，每条附改动文件数）:
+  - d62329d0 ci: 为 pdcc 引入并行数和重试数的配置支持（1 个文件）
+  - af4f7889 ci: 升级 pdcc 到 1.0.1.2（1 个文件）
+  - 9359b040 feat(diagnostic): 将设备信息获取解耦（11 个文件）
+  - 52f48c7e release: 2.1.2.0 [skip ci]（2 个文件）
+  - 817f8d24 feat(diag):添加Android平台的系统信息获取 (Misha) (#1983)（6 个文件）
+  - d83d78de fix(r/speech/edgetts): 修复 EdgeTTS 无法朗读的问题（1 个文件）
+  - 18020c28 merge: Merge pull request #2049 from lrs2187/develop/v2/misha-alpha-improve（21 个文件）
+  - 2499230d ci: 将 PDCC 升级到 1.0.1.1（1 个文件）
+  - d422659d feat(ui): 实现过度滚动回弹效果，并为滚动到端点增加反馈（4 个文件）
+  - 72a1c778 chore: 引入 Acceptance（44 个文件）
+  - 761901e2 fix(ui/profile-editor): 修复编辑课程页复选框缺失 Disable 条件（1 个文件）
+  - c7ca7993 fix(mainwindow/editmode): 修复编辑模式抽屉有概率无法打开的问题（1 个文件）
+  - 7f205190 Merge branch 'develop/v2/misha-alpha' into develop/v2/misha-alpha-improve（18 个文件）
+  - 5f0e330c feat(r/settings/weather): 更换所有 XML 实体图标为 IconKind（1 个文件）
+  - e0b96986 feat(ui/icon): 给 FluentIcon(Source) 和 LucideIcon(Source) 引入 Icon 属性（5 个文件）
+  - 7fa3800d fix(ui/schedule-datagrid): 复选框添加额外显示守卫，补齐缺失 offset（2 个文件）
+  - a1ad571a fix(build): 移除 slnf 包含安卓项目（2 个文件）
+  - 93d56d58 fix(platform/android/ui): 尝试修复系统默认字体可能选到非中文字体的问题（2 个文件）
+  - f9295a5c fix(ui): 修复特定情况下的页面样式应用问题（1 个文件）
+  - e6626fe2 Merge branch 'refs/heads/develop/v2/misha-alpha' into develop/v2/misha-alpha-improve（89 个文件）
+  - 92e51507 feat(ui): 允许调整 Skia GPU 缓存，以缓解大图卡顿的问题（9 个文件）
+  - 8fd81000 perf(ui): 修复视图秘制内存泄露的问题（8 个文件）
+  - dbc49d43 fix(mainwindow/editmode): 修复编辑模式可能出现组件设置变成滚木的问题（2 个文件）
+  - 8e856b77 doc: 修改 Scopes 错误表述（1 个文件）
+  - f8cf0e78 feat(r/settings/weather): 简单优化天气页面，统一空气质量表述（3 个文件）
+  - 6396f831 feat(platform/android): 在 Android 平台上移除内置字体以降低包体大小和提升与系统界面的一致性（14 个文件）
+  - 88a1cbc6 fix(build): 修复两个 Solution Filter 缺失的可编译项目（2 个文件）
+  - 16b01764 feat(ui/profile-editor): 「编辑课程」页添加「启用课程？」复选框（1 个文件）
+  - 36a6d504 feat(ui/profile-editor): 周视图下允许在表格左侧编辑课程启用状态（3 个文件）
+  - 831d35fa feat(ui): 在安卓端添加自定义背景图像支持（7 个文件）
+  - 8e4bfaa1 feat(app): 引入blob系统（10 个文件）
+  - 3a33ad26 chore: 修改 android 调试浮窗图标（1 个文件）
+  - 148a4eae feat(platform/android): 添加渲染模式选择功能（5 个文件）
+  - 2167cf01 feat(platform/android): 为安卓引入调试浮窗（6 个文件）
+  - 5e249672 feat(ui/mainview): 为日程课程编辑器添加手势缩放功能和震动反馈（6 个文件）
+  - 4b25d5d4 feat(platform/android): 将 Android 版本运行时由 mono 切换为 CoreCLR（3 个文件）
+  - 6652398b fix(r/components/schedule): 修复图标缩放滑动条没有 tooltip 的问题（1 个文件）
+  - d97bff2a chore(build): 修改 launch.json 的 ci 目标框架（1 个文件）
+  - 0e93de7f fix(mainwindow): 修复编辑模式「重置视图」报错的问题（1 个文件）
+  - 58f698e5 feat(ui): 竖直抽屉实现使用手势进行控制（18 个文件）
+  - 56093f21 feat(ui): 在移动端以抽屉形式显示 ComboBox 内容（6 个文件）
+冲突修正 : 发生过 1 个文件，已修正 1 个，残留 0 个
+================================================================
+
+================================================================
 ## 2026-10-24 07:25:45  同步 329bf4b1
 上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (329bf4b1)
 本次基线 : 41fc7035（上次同步点）
