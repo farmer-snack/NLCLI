@@ -36,7 +36,13 @@ public static class LegacyDataMigrationHelper
     /// </summary>
     public static void Run()
     {
-#if Platforms_Windows
+        // 注意：这里不能用 #if Platforms_Windows。ClassIsland 项目本身不定义该常量
+        // （只有 ClassIsland.Desktop 定义），用条件编译会导致方法体被整段裁掉。
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         var results = new List<MigrationResult>();
         try
         {
@@ -74,7 +80,6 @@ public static class LegacyDataMigrationHelper
         }
 
         Results = results;
-#endif
     }
 
     /// <summary>把旧目录下的插件和备份包复制到当前数据目录。</summary>

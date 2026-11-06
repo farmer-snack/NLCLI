@@ -20,6 +20,38 @@ public class PluginLoadContext : AssemblyLoadContext
 {
     private readonly bool _forceMonoPluginLoader;
 
+    static PluginLoadContext()
+    {
+        // 宿主目录里有一部分 dll（System.Windows.Forms、System.Drawing.Common、
+        // Microsoft.Windows.SDK.NET 等）只是被复制进来，并没有写进 deps.json，
+        // 默认加载上下文无法解析它们，插件用到时就会抛 FileNotFoundException。
+        // 这里兜底：默认上下文解析失败时，从宿主目录按同名文件加载。
+        Default.Resolving += ResolveFromHostDirectory;
+    }
+
+    private static Assembly? ResolveFromHostDirectory(AssemblyLoadContext context, AssemblyName assemblyName)
+    {
+        if (string.IsNullOrEmpty(assemblyName.Name))
+        {
+            return null;
+        }
+
+        var path = Path.Combine(AppContext.BaseDirectory, assemblyName.Name + ".dll");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return context.LoadFromAssemblyPath(path);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public PluginLoadContext(PluginInfo info, string fullPath, bool forceMonoPluginLoader) : base($"ClassIsland.PluginLoadContext[{info.Manifest.Id}]")
     {
         _forceMonoPluginLoader = forceMonoPluginLoader;
@@ -211,9 +243,37 @@ public class PluginLoadContext : AssemblyLoadContext
         {
             Info.AddCompatibilityNote(
                 $"程序集 {assemblyName.Name} 插件包内未提供，已复用宿主版本 {loadedAssembly.GetName().Version}。");
+            return loadedAssembly;
         }
 
-        return loadedAssembly;
+        // ⑥ 兼容层：宿主还没加载，但安装目录里放着同名 dll（System.Windows.Forms、
+        // System.Drawing.Common、OpenCvSharp、DlibDotNet 等可选依赖）。按需加载，
+        // 避免插件一调用到对应功能就抛 FileNotFoundException。
+        if (!string.IsNullOrEmpty(assemblyName.Name))
+        {
+            var hostAssemblyPath = Path.Combine(AppContext.BaseDirectory, assemblyName.Name + ".dll");
+            if (File.Exists(hostAssemblyPath))
+            {
+                try
+                {
+                    var hostAssembly = Default.LoadFromAssemblyPath(hostAssemblyPath);
+                    Info.AddCompatibilityNote(
+                        $"程序集 {assemblyName.Name} 插件包内未提供，已从宿主目录按需加载 {hostAssembly.GetName().Version}。");
+                    return hostAssembly;
+                }
+                catch (FileLoadException)
+                {
+                    // 已被其它线程加载，直接复用。
+                    return FindLoadedAssembly(assemblyName.Name);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[插件兼容] 从宿主目录加载 {assemblyName.Name} 失败：{ex.Message}");
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
