@@ -59,6 +59,9 @@ public class PluginLoadContext : AssemblyLoadContext
         PluginDirectory = Path.GetDirectoryName(fullPath) ?? "";
         CoreResolver = UseMonoPluginLoadingBehavior ? null : new(fullPath);
         MonoResolver = UseMonoPluginLoadingBehavior ? new(fullPath) : null;
+
+        // 提前在后台把这个插件引用到的可选依赖下好，等真正用到时就不用干等下载。
+        PluginDependencyService.Prefetch([fullPath]);
     }
 
     /// <summary>
@@ -246,8 +249,16 @@ public class PluginLoadContext : AssemblyLoadContext
             return loadedAssembly;
         }
 
-        // ⑥ 兼容层：宿主还没加载，但安装目录里放着同名 dll（System.Windows.Forms、
-        // System.Drawing.Common、OpenCvSharp、DlibDotNet 等可选依赖）。按需加载，
+        // ⑥ 可选依赖：OpenCvSharp、DlibDotNet 这类只有插件会用、主程序不引用的库不随安装包分发，
+        // 首次用到时下载到 PluginDependencies 目录，之后直接复用缓存。
+        var optionalAssembly = TryLoadOptionalDependency(assemblyName);
+        if (optionalAssembly != null)
+        {
+            return optionalAssembly;
+        }
+
+        // ⑦ 兼容层：宿主还没加载，但安装目录里放着同名 dll（System.Windows.Forms、
+        // System.Drawing.Common、Microsoft.Windows.SDK.NET 等）。按需加载，
         // 避免插件一调用到对应功能就抛 FileNotFoundException。
         if (!string.IsNullOrEmpty(assemblyName.Name))
         {
@@ -274,6 +285,53 @@ public class PluginLoadContext : AssemblyLoadContext
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 按需加载可选依赖。缓存命中直接加载，未命中则当场下载后再加载。
+    /// </summary>
+    /// <remarks>
+    /// 下载是同步的，因为程序集解析本身没有异步重载。为了不让用户点一下功能就干等，
+    /// 构造函数里已经用 <see cref="PluginDependencyService.Prefetch"/> 在后台预取过，
+    /// 正常情况走到这里时文件已经在缓存里了。
+    /// </remarks>
+    private Assembly? TryLoadOptionalDependency(AssemblyName assemblyName)
+    {
+        var name = assemblyName.Name;
+        if (!PluginDependencyService.IsKnown(name))
+        {
+            return null;
+        }
+
+        var cachedPath = PluginDependencyService.TryGetCachedAssemblyPath(name);
+        if (cachedPath is null)
+        {
+            if (!PluginDependencyService.Ensure(name!, out var error))
+            {
+                Info.AddCompatibilityNote(
+                    $"程序集 {name} 属于可选依赖，首次使用时下载失败：{error}。" +
+                    $"可手动下载对应 nupkg，把 dll 放到 {PluginDependencyService.CacheDirectory}。");
+                return null;
+            }
+
+            cachedPath = PluginDependencyService.TryGetCachedAssemblyPath(name);
+            if (cachedPath is null)
+            {
+                return null;
+            }
+
+            Info.AddCompatibilityNote($"程序集 {name} 已按需下载到本地缓存。");
+        }
+
+        try
+        {
+            return LoadFromAssemblyPath(cachedPath);
+        }
+        catch (FileLoadException)
+        {
+            // 已经在本上下文中加载过，复用即可。
+            return FindLoadedAssembly(name);
+        }
     }
 
     /// <summary>
@@ -325,6 +383,14 @@ public class PluginLoadContext : AssemblyLoadContext
         if (libraryPath != null)
         {
             return LoadUnmanagedDllFromPath(libraryPath);
+        }
+
+        // 可选依赖的原生库（OpenCvSharpExtern、DlibDotNetNative 等）和托管库同放在缓存目录，
+        // 托管库从缓存目录加载后，它的 DllImport 会走这里解析。
+        var optionalNativePath = PluginDependencyService.TryGetCachedNativePath(unmanagedDllName);
+        if (optionalNativePath != null)
+        {
+            return LoadUnmanagedDllFromPath(optionalNativePath);
         }
 
         // 兼容层：插件没有 deps.json 或解析器失效时，按约定目录逐个查找原生库。
