@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Core.Abstractions.Services.Management;
 using ClassIsland.Core.Controls;
+using ClassIsland.Helpers;
 using ClassIsland.Shared;
 using ClassIsland.Models;
 using ClassIsland.Models.Profile;
@@ -678,6 +679,8 @@ public partial class App : AppBase, IAppHost
         spanProcessUpdate.Finish();
 
         FileFolderService.CreateFolders();
+        // 在插件扫描之前，把旧版本（通过开机自启项定位）的插件与备份包复制过来。
+        LegacyDataMigrationHelper.Run();
         PluginService.ProcessPluginsInstall();
         bool isSystemSpeechSystemExist = false;
         var spanHostBuilding = spanPreInit.StartChild("startup-host-building");
@@ -690,6 +693,13 @@ public partial class App : AppBase, IAppHost
         AppBase.CurrentLifetime = ClassIsland.Core.Enums.ApplicationLifetime.StartingOffline;
         Logger = GetService<ILogger<App>>();
         Logger.LogInformation("ClassIsland {}", AppVersionLong);
+        foreach (var migration in LegacyDataMigrationHelper.Results)
+        {
+            Logger.LogInformation(
+                "已从旧版本 {Root} 迁移插件 {Copied} 个、备份包 {Backups} 个，跳过同名插件 {Skipped} 个，失败 {Failed} 个",
+                migration.LegacyRoot, migration.CopiedPlugins, migration.CopiedBackups, migration.SkippedPlugins,
+                migration.FailedPlugins);
+        }
         if (App.ApplicationCommand.Diagnostic)
         {
             var diagService = GetService<DiagnosticService>();
@@ -1010,6 +1020,15 @@ public partial class App : AppBase, IAppHost
         SentrySdk.ConfigureScope(s => s.Transaction = null);
         GetService<IAutomationService>();
         GetService<IRulesetService>().NotifyStatusChanged();
+        if (LegacyDataMigrationHelper.Results.Count > 0)
+        {
+            var migratedPlugins = LegacyDataMigrationHelper.Results.Sum(x => x.CopiedPlugins);
+            var migratedBackups = LegacyDataMigrationHelper.Results.Sum(x => x.CopiedBackups);
+            var skippedPlugins = LegacyDataMigrationHelper.Results.Sum(x => x.SkippedPlugins);
+            var message = $"已从旧版本目录复制 {migratedPlugins} 个插件、{migratedBackups} 个备份包" +
+                          (skippedPlugins > 0 ? $"，{skippedPlugins} 个同名插件保留了当前版本" : "") + "。";
+            PlatformServices.DesktopToastService.ShowToastAsync("已迁移旧版本数据", message);
+        }
         File.Delete(startupCountFilePath);
         if (ConfigureFileHelper.Errors.FirstOrDefault(x => x.Critical) != null)
         {
