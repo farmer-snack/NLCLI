@@ -1,7 +1,7 @@
 # 任务：把 ClassIsland 官方分支的最新代码同步到我的仓库，并处理冲突
 
-> **这是完整版（Windows / Linux / macOS 三平台通用）**，留作备用。
-> 日常请用 `prompt-windows.md` 或 `prompt-linux.md`——平台相关部分已经写死，不用判断。
+> **这是唯一维护的一份完整版**，Windows / Linux / macOS 三平台通用。
+> 平台差异统一在 A.2 节处理，不再另存 `prompt-windows.md` / `prompt-linux.md` 之类的专用版本。
 
 你是一名精通 Git 的自动化工程助手。请严格按下面的流程执行一次「上游同步」，全程不要跳步、不要自行简化。
 
@@ -9,13 +9,14 @@
 
 ```
 # ↓↓↓ 需要调整就改这里，其余内容一个字都不用动 ↓↓↓
-FAST            = 1
-PUSH_MODE       = auto
-UPSTREAM_BRANCH = develop/v2/misha-alpha
-TARGET_PROJ     = ClassIsland.Desktop/ClassIsland.Desktop.csproj
-LOCAL_REPO      = .
+FAST               = 1
+PUSH_MODE          = auto
+UPSTREAM_BRANCH    = develop/v2/misha-alpha
+UPSTREAM_BRANCH_FB = master
+TARGET_PROJ        = ClassIsland.Desktop/ClassIsland.Desktop.csproj
+LOCAL_REPO         = .
 # 附加需求：留空 = 只同步；填了 = 同步全部做完后，再按这句话继续开发（也可以直接在对话里跟我说）
-CUSTOM_TASK     =
+CUSTOM_TASK        =
 # ↑↑↑ 改完保存，整份文件发给 AI ↑↑↑
 ```
 
@@ -23,23 +24,24 @@ CUSTOM_TASK     =
 |---|---|---|
 | `FAST` | `1` / `0` | `1`=快速通道（跳过磁盘/LFS 检查、构建只跑一次增量）；`0`=完整检查（构建跑两遍、检查换行符） |
 | `PUSH_MODE` | `auto` / `direct` / `patch` | `auto`=能推就推、没权限自动导补丁；`direct`=只推，失败就报错；`patch`=不推，直接导补丁 |
-| `UPSTREAM_BRANCH` | 分支名 | 默认 `develop/v2/misha-alpha`；官方若删了这个分支，AI 会自动回退 `master` |
+| `UPSTREAM_BRANCH` | 分支名 | **同步源**分支，默认 `develop/v2/misha-alpha` |
+| `UPSTREAM_BRANCH_FB` | 分支名 / 留空 | 同步源不存在时的**回退目标**，默认 `master`。留空 = 不回退，直接停下问我 |
 | `TARGET_PROJ` | 项目路径 | 构建验证的目标；默认桌面宿主，会连带编译 Core 和主项目 |
 | `LOCAL_REPO` | 路径 | `.` = 在哪个目录启动就在哪个目录找仓库 |
-| `CUSTOM_TASK` | 一句话需求 / 留空 | 留空 = 只同步。填了就在**同步提交并推送完成之后**再做定制开发（见 1.5 / 13.9）；也可以不填，直接在对话里说 |
+| `CUSTOM_TASK` | 一句话需求 / 留空 | 留空 = 只同步。填了就在**同步提交并推送完成之后**再做定制开发（见 B.5 / 第 12 步）；也可以不填，直接在对话里说 |
 
 **AI 必须遵守的三条**：
 
-1. **第 0 步里这五项都要用上表的值**：`LOCAL_REPO`（`cd` 那行）、`UPSTREAM_BRANCH`（赋值那行）、
+1. **第 0 步里这六项都要用上表的值**：`LOCAL_REPO`（`cd` 那行）、`UPSTREAM_BRANCH` / `UPSTREAM_BRANCH_FB`（赋值那行）、
    `FAST` / `PUSH_MODE` / `TARGET_PROJ`（环境文件的 heredoc 里）。
    **不许照抄代码块里的默认值**——用户改过之后，代码块里的默认值就不作数了。
 2. **如果用户在对话里另外指定了参数**（例如「这次 FAST=0」「用 patch 模式」），**以用户当场说的为准**，
    并且要在汇报的第一行注明「本次参数：FAST=0, PUSH_MODE=patch …」。
 3. **`CUSTOM_TASK` 不是 shell 变量**：不要写进环境文件、不要 `export`、不要拿它做 `[ -n ... ]` 之外的花样。
-   它和「对话里现场提的需求」等价——**两者只要有一个非空，就必须执行 13.9**；两个都空才跳过。
-   **绝对不许因为"这轮只说了加功能、没说同步"就把整轮跳过**（见 1.5 的情形 C）。
+   它和「对话里现场提的需求」等价——**两者只要有一个非空，就必须执行第 12 步**；两个都空才跳过。
+   **绝对不许因为"这轮只说了加功能、没说同步"就把整轮跳过**（见 B.5 的情形 C）。
 
-## 0. 基本事实（已核实，直接使用，不要重新质疑）
+## A. 基本事实（已核实，直接使用，不要重新质疑）
 
 - 官方仓库：https://github.com/ClassIsland/ClassIsland.git
 - 我自己的仓库：https://github.com/farmer-snack/NLCLI.git
@@ -48,7 +50,7 @@ CUSTOM_TASK     =
   build_release.yml、close_stale_issues.yml、issues_similarity_analysis.yml、qodana_code_quality.yml
 - 工程语言：C# / .NET（Avalonia 桌面应用），官方默认分支为 master
 
-## 0.1 执行前提：每个命令块都是独立 shell
+## A.1 执行前提：每个命令块都是独立 shell
 
 **这是整份提示词最容易翻车的地方，务必先读。**
 
@@ -92,12 +94,12 @@ cd "$REPO_ROOT" || exit 1
 它只是原地不动。也就是说变量丢了的时候，`cd "$REPO_ROOT"` 会"成功"，然后后面的 `git checkout`、
 `git reset` 全部在**错误的目录**里执行。这一行是唯一能在源头拦住它的地方，不要删。
 
-## 0.2 平台适配（Windows / Linux / macOS 都要能跑，**不能只按 Linux 写**）
+## A.2 平台适配（Windows / Linux / macOS 都要能跑，**不能只按 Linux 写**）
 
 这套流程在三种机器上都要成立：**Linux、macOS、Windows**。它们不是"路径斜杠不同"这么简单，
 下面每一条都是实测会让人卡住的地方。
 
-### 0.2.0 Windows 上必须先解决的一件事：命令到底进了哪个 shell
+### A.2.0 Windows 上必须先解决的一件事：命令到底进了哪个 shell
 
 **这是 Windows 上最容易整轮白跑的地方。**
 
@@ -146,7 +148,7 @@ profile。如果你在 PowerShell 里执行，当前目录很可能是 `C:\Windo
 也不要自己"翻译"成 PowerShell 版本（`$env:X`、`Get-ChildItem` 那套会和文档逻辑对不上）。
 按方式 B 整体交给 bash，或者停下来告诉我需要换 Git Bash。
 
-### 0.2.1 判定当前 shell（第 0 步第一条命令）
+### A.2.1 判定当前 shell（第 0 步第一条命令）
 
 **必须用 bash**：Linux/macOS 的终端、Windows 的 **Git Bash**（推荐）或 **WSL**。
 
@@ -162,7 +164,7 @@ else
 fi
 ```
 
-### 0.2.2 平台判定与差异表
+### A.2.2 平台判定与差异表
 
 ```
 case "$(uname -s)" in
@@ -177,7 +179,7 @@ echo "PLATFORM=$PLATFORM"
 | 事项 | Linux | macOS | Windows（Git Bash） | 本文档怎么处理 |
 |---|---|---|---|---|
 | **Git 版本** | **必须 ≥ 2.20** | 系统自带通常够（用 `git --version` 确认） | 老机器上可能是 msysgit 1.8 | 本文档要求 **Git ≥ 2.20**：`:(literal)` 要 1.9+、`-c core.quotePath` 要 2.0+、`get-url --all` 要 2.7+、`--ignore-cr-at-eol` 要 2.10+。第 0 步会解析版本，低于 2.20 直接 FAIL，不带着旧 Git 硬跑 |
-| AI 工具的默认 shell | bash | zsh | **PowerShell** | 见 0.2.0：Windows 必须在 Git Bash 里启动工具，或整段交给 `bash` 执行；macOS 见 0.2.6 |
+| AI 工具的默认 shell | bash | zsh | **PowerShell** | 见 A.2.0：Windows 必须在 Git Bash 里启动工具，或整段交给 `bash` 执行；macOS 见 A.2.6 |
 | 临时目录 | `/tmp` | `/tmp` | `/tmp` 由 MSYS 映射到 `%TEMP%`，**可写** | 统一用字面量 `/tmp/upstream-sync`（三平台都可用），不要自己拼 TMPDIR |
 | `.git` 换行 | LF | LF | 默认 `core.autocrlf=true`，会把整个仓库判成"全改" | 第 0 步对**本仓库**设 `core.autocrlf=false` |
 | 路径长度 | 无限制 | 无限制 | 260 字符上限，深层目录会报 `Filename too long` | 第 0 步设 `core.longpaths=true`；**克隆/仓库放在浅目录**（如 `D:\NLCLI`），别放 `D:\Projects\2026\xxx\NLCLI`——这个仓库最长路径已经 100+ 字符 |
@@ -189,7 +191,7 @@ echo "PLATFORM=$PLATFORM"
 | 中文路径 | OK | OK | OK，但控制台默认 GBK 会乱码 | 读取 git 输出时不要靠"看起来正常"判断，要看退出码 |
 | 文件占用 | 少见 | 少见 | IDE/杀软锁定 `bin/`、`obj/` → 构建报 `being used by another process` | 构建失败先问是不是开着 Visual Studio |
 
-### 0.2.3 Windows 上必须做的四项设置（只改本仓库，不动全局）
+### A.2.3 Windows 上必须做的四项设置（只改本仓库，不动全局）
 
 **这里只是说明，不要单独执行这一节**——真正设置它们的是第 0 步那条完整命令块
 （`git config core.autocrlf / core.eol / core.longpaths / core.filemode` 四行在里面）。
@@ -212,7 +214,7 @@ echo "PLATFORM=$PLATFORM"
 
 **不要用 `--global`**：这些设置只该对这个仓库生效，别污染我其它项目的配置。
 
-### 0.2.4 环境文件本身也要防 CRLF
+### A.2.4 环境文件本身也要防 CRLF
 
 Windows 上如果环境文件被写成 CRLF，`source` 会报 `$'\r': command not found`，
 而且报错信息很不直观，容易误判成"变量没落盘"。所以**每次写完全局环境文件后，立刻转成 LF**：
@@ -230,7 +232,7 @@ tr -d '\r' < /tmp/upstream-sync.env > /tmp/upstream-sync.env.tmp \
 
 同理，任何 `.sh` 脚本、`.git/hooks/*` 如果被你改动过，也要保证是 LF。
 
-### 0.2.5 命令写法上的跨平台约束
+### A.2.5 命令写法上的跨平台约束
 
 | 不要用 | 原因 | 改用 |
 |---|---|---|
@@ -242,7 +244,7 @@ tr -d '\r' < /tmp/upstream-sync.env > /tmp/upstream-sync.env.tmp \
 | `ls -l --time-style` | 不通用 | 只用 `ls -l` |
 | 路径写死 `C:\...` 或 `/home/...` | 三平台不通用 | 一律 `git rev-parse --show-toplevel` 取 |
 
-### 0.2.6 三个平台各怎么开始（这段也要转述给我）
+### A.2.6 三个平台各怎么开始（这段也要转述给我）
 
 | 平台 | 怎么做 | 坑 |
 |---|---|---|
@@ -250,9 +252,9 @@ tr -d '\r' < /tmp/upstream-sync.env > /tmp/upstream-sync.env.tmp \
 | **macOS** | 用 `bash -l` 启动 AI 工具；或让 AI 用 `bash -c "…"` 包住每个命令块 | 默认是 zsh，`BASH_VERSION` 为空，第 0 步会直接判失败。**单独在终端敲 `exec bash` 没用**——每个命令块都是新 shell，那个子 bash 立刻退出 |
 | **Windows** | 仓库目录右键 → **Git Bash Here**，在这个窗口里启动 AI 工具 | 默认是 PowerShell；**不需要 WSL**，Git for Windows 自带的 Git Bash 就够 |
 
-Windows 具体两种做法见 **0.2.0**，这里不重复。
+Windows 具体两种做法见 **A.2.0**，这里不重复。
 
-## 0.3 remote 身份判定（**每轮必须先做，以 URL 为准，绝不看名字**）
+## A.3 remote 身份判定（**每轮必须先做，以 URL 为准，绝不看名字**）
 
 > **铁律 1**：这是整份提示词里最不能出错的地方。remote 名字随便叫，URL 说了算。
 
@@ -264,7 +266,7 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 
 一句话记忆：**看到 NLCLI 就是我自己的仓库，看到 ClassIsland 就是官方；名字完全不重要。**
 
-## 1. 其余变量（**都是自动推导的，不要手工改**）
+## B. 其余变量（**都是自动推导的，不要手工改**）
 
 需要用户调整的只有开头「★ 可修改参数」里那 5 项（`CUSTOM_TASK` 是纯文字需求，不进环境文件、也不参与任何推导），这里不重复。下面这些由运行过程自动得出：
 
@@ -282,76 +284,64 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 
 规则：任何变量为空且无法自动推导时，**停下来问我**，不要猜。
 
-## 1.1 三条铁律（每次执行前默念一遍，后面各节还会反复回扣）
+## B.1 三条铁律（每次执行前默念一遍，后面各节还会反复回扣）
 
 1. **remote 看 URL，不看名字**。URL 含 `NLCLI` 的是我自己的仓库（推送终点），含 `ClassIsland` 的是官方（只读）。
    搞反 = 事故，推错仓库无法撤销。
-2. **我的定制一行都不能丢**。冲突时「保留我的改动」优先于「吸收官方」；`fixxed.txt` 里列过的文件一律按定制对待。
+2. **我的定制一行都不能丢**。冲突时「保留我的改动」优先于「吸收官方」。
+   **但"定制"的判据只有两个**：① git 里本地确实改过；② 账本里带 `[定制]` / `[修复]` 标记的段落里列过的文件。
+   账本里标注「取上游 / 三方合并 / 冲突修正」的文件**是上一轮的同步记录，不算定制**——
+   否则每轮账本都会把全部上游改动文件写进去，下一轮它们会被整体误判成定制，交集膨胀、冲突判断全乱。
 3. **记录文件的新内容写在上方**。`out.txt` 和 `$FIXLOG` 都是**前插**，不是追加；旧内容原样下移，一个字都不改。
 
 下面每一节讲到这三件事时都会再重复一次，别嫌啰嗦。
 
-## 1.2 执行顺序总览（先看这里，避免把三条线搞混）
+## B.2 执行顺序总览（先看这里，避免把三条线搞混）
 
 本次运行有**三条互相独立**的线：
 
 - **线 A：和我自己的仓库（NLCLI）对齐** —— 每次必做，与官方有没有更新无关。我自己的仓库有新推送就 pull。
 - **线 B：从官方（ClassIsland）同步代码** —— 只有官方有新提交时才做；官方没有就跳过（但线 A 必须已经完成）。
 - **线 C：附加定制开发** —— 只有 `CUSTOM_TASK` 非空、或我在对话里提了功能需求时才做。
-  **必须排在线 A、线 B 全部结束之后**，不许和同步混在一起做（原因见 1.5）。
+  **必须排在线 A、线 B 全部结束之后**，不许和同步混在一起做（原因见 B.5）。
 
-固定顺序：环境自检 + remote 识别 → **线 A 对齐** → 读三个记录文件 → fetch 官方判断有无新提交
-→ 有新提交则走同步流程 / 无新提交则**只跳过线 B** → **看 `CUSTOM_TASK`：非空就做 13.9，空就结束**。
+固定顺序：第 0 步 → 第 1 步 → 第 2 步 → 第 3 步判断有无新提交
+→ 有：第 4~8 步 → 第 9 步写记录 → 第 10 步提交 → 第 11 步推送
+→ 无：只跳过同步（本地领先则仍去第 11 步）
+→ 最后：第 12 步定制（可选）→ 第 13 步汇报。
 
-判断依据分别是什么，不要混：
-- 「我自己的仓库有没有新东西」看 `git rev-list --count "HEAD..$MY_REMOTE/$MY_BRANCH"`
-- 「官方有没有新东西」看 `$UPSTREAM_REMOTE/$UPSTREAM_BRANCH` 与 `action.txt` 里的 `LAST_SYNCED_SHA` 是否相同
-- 「这轮要不要写代码」看 `CUSTOM_TASK` / 对话里的需求，**与官方有没有更新无关**
+**全文只有一套编号：`第 N 步` 就是 `N 节`，两者恒等，不存在换算表。**
+A、B 两节是前置知识（基本事实、变量、铁律、总览），不占步骤号。
 
-**主干步骤（照这个顺序走，细节再往下翻）：**
+| 节 | 动作 | 关键判据 / 分支 |
+|---|---|---|
+| **0** | 环境自检 + 按 URL 认 remote | 工作区干净；四条 URL 断言全过 |
+| **1** | 和我的仓库对齐 | 落后 → `pull --rebase`；分叉 → 停；本地领先 → 继续 |
+| **2** | 读四个记录文件、解析 `LAST_SYNCED_SHA` | 缺失 ≠ 错误，按首次同步处理 |
+| **3** | fetch 官方，判断有没有新提交 | 无新提交 → 只跳过同步（本地领先则仍去第 11 步） |
+| **4** | 算 BASE、三次校验 | 算不出 → 停；不在官方历史 → 重算 |
+| **5** | 文件分类 | 交集 > 200 → 先问我 |
+| **6** | 合并：6.1 分拣 → 6.2 三方合并 → 6.3 覆盖 → 6.4 写回 | 二进制 / add-add / 语义互斥 → 停 |
+| **7** | 逐文件修正冲突 | 每条改完立刻写 `/tmp/conflict-log.md` |
+| **8** | 一致性校验 + 构建 | `FAST=1` 增量单次；`FAST=0` 全量 + 增量 |
+| **9** | 写记录文件（`action.txt` / `out.txt` / 账本；有经验再追加 `memory.txt`） | **新内容在上**，旧内容一字不改 |
+| **10** | 提交 | 单个 commit；排除 `patches/`、`bin/`、`obj/`、中间产物。**提示词改了要一起提交** |
+| **11** | 推送，或按 `PUSH_MODE` 导补丁 | 无权限 → `patches/update.txt` + `apply.txt` |
+| **12** | 定制开发（可选） | 仅当 `CUSTOM_TASK` 非空 / 我提了需求；**单独一个 commit** |
+| **13** | 汇报 | 有定制就一并汇报，别分两次 |
 
-**下面这一列对号入座**（"顺序号"只是阅读顺序，"章节号"才是执行时用到的）：
+**编号顺序 = 执行顺序**，不再有例外。旧版本里三处「编号和顺序对不上」的地方，现在都不存在：
 
-| 顺序 | 章节 | 动作 | 关键判据 / 分支 |
-|---|---|---|---|
-| 1 | **第 0 步** | 环境自检 + 按 URL 认 remote | 工作区干净；四条 URL 断言全过 |
-| 2 | **第 1 步** | 和我的仓库对齐 | 落后 → `pull --rebase`；分叉 → 停；本地领先 → 继续 |
-| 3 | **第 2 步** | 读三个记录文件、解析 `LAST_SYNCED_SHA` | 缺失 ≠ 错误，按首次同步处理 |
-| 4 | **第 3 步** | fetch 官方，判断有没有新提交 | 无新提交 → 只跳过同步（本地领先则仍去第 10 步） |
-| 5 | **第 4 步** | 算 BASE、三次校验 | 算不出 → 停；不在官方历史 → 重算 |
-| 6 | **第 5 步** | 文件分类 | 交集 > 200 → 先问我 |
-| 7 | **第 6 步** | 合并：8.1 分拣 → 8.2 三方合并 → 8.3 覆盖 → 8.4 写回 | 二进制 / add-add / 语义互斥 → 停 |
-| 8 | **第 7 步** | 逐文件修正冲突 | 每条改完立刻写 `/tmp/conflict-log.md` |
-| 9 | **第 8 步** | 一致性校验 + 构建 | `FAST=1` 增量单次；`FAST=0` 全量 + 增量 |
-| 10 | **13.1 / 13.2 / 13.3** | 写三个记录文件 | **新内容在上**，旧内容一字不改 |
-| 11 | **第 9 步** | 提交（必须在记录文件写完之后） | 单个 commit；排除提示词/patches/bin/obj |
-| 12 | **第 10 步** | 推送，或按 `PUSH_MODE` 导补丁 | 无权限 → `patches/update.txt` + `apply.txt` |
-| 13 | **13.9（第 13 步）** | 定制开发（可选） | 仅当 `CUSTOM_TASK` 非空 / 我提了需求；**单独一个 commit** |
-| 14 | **14 节** | 汇报 | 有定制就一并汇报，别分两次 |
-
-⚠️ **「第 N 步」和「第 M 节」是两套编号**：**第 0~12 步：第 N 步 = 第 N+2 节**；
-**第 13 步是例外，在 13.9 节**（内容上属于"写记录文件"那一节的延伸，按序排它本该在 15 节）。
-
-| 说「第几步」 | 去第几节 |
+| 旧版现象 | 现在 |
 |---|---|
-| 第 0 / 1 / 2 / 3 步 | 2 / 3 / 4 / 5 节 |
-| 第 4 / 5 / 6 / 7 步 | 6 / 7 / 8 / 9 节 |
-| 第 8 / 9 / 10 / 11 步 | 10 / 11 / 12 / 13 节 |
-| 第 12 步（汇报） | 14 节 |
-| 第 13 步（定制） | **13.9 节**（例外） |
+| 写记录（旧 13 节）排在提交（旧 11 节）之前，编号却更大 | 写记录是第 9 步，提交是第 10 步，顺序与编号一致 |
+| 定制开发（旧 13.9）挂在「记录文件」节下面 | 定制是第 12 步，独立成节 |
+| 汇报（旧 14 节）编号比定制小，却排在最后 | 汇报是第 13 步，就是最后一步 |
 
-**执行顺序不等于编号顺序**，下面三处最容易看错：
+⚠️ **第 12 步（定制）必须真排在第 11 步（推送）之后**。哪怕我这句话听起来像"你就只加个功能"，只要官方这轮有新提交，
+也是"先同步完、再定制"，不是"跳过同步直接写代码"——唯一例外是我明确说"这次别同步"（见 B.5 情形 C）。
 
-| 现象 | 真相 |
-|---|---|
-| 13.x（写记录）在第 9 步提交**之前** | 记录文件必须和代码进同一个 commit，commit 之后就不能改了 |
-| 第 12 步（汇报）在**最后**执行 | 13.9 的定制和它之后的推送都排在汇报前面 |
-| 第 13 步的章节号是 13.9 | 它内容上属于"记录文件"那一节的延伸 |
-
-⚠️ **顺序 13 必须真排在 12 之后**。哪怕我这句话听起来像"你就只加个功能"，只要官方这轮有新提交，
-也是"先同步完、再定制"，不是"跳过同步直接写代码"——唯一例外是我明确说"这次别同步"（见 1.5 情形 C）。
-
-## 1.3 双重校验总表（每个关键节点两道关，两道都过才继续）
+## B.3 双重校验总表（每个关键节点两道关，两道都过才继续）
 
 **原则：第二道必须来自独立信息源，不能是把第一道的结论再用文字复述一遍。**
 
@@ -364,16 +354,16 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 | 5 | 基线可信 | `git rev-parse --verify "$LAST_SYNCED_SHA"` 成功 | `BASE` 在官方历史中；**「不是本地祖先」不等于失败**（见第 4 步三种情况） | 三条路径会重算：分支回退（`BRANCH_FALLBACK=1`）/ 基线失效（`BASELINE_INVALID=1`）/ 情况 c（不在官方历史）；重算后仍不过则停 |
 | 6 | 冲突真正解决 | `grep` 无冲突标记 | 该文件中 `fixxed.txt` 记录的关键定制片段仍然存在 | 重合并，不许提交 |
 | 7 | 构建可用 | `dotnet build "$TARGET_PROJ"` 退出码为 0 | `FAST=0` 用 `--no-incremental` 复验；`FAST=1` 可省，但**构建失败后修复重验必须全量** | 停止，不提交 |
-| 8 | 提交内容正确 | 提交后 `git show --name-status --format= HEAD` 与"仅上游 + 双方都改 + 3 个记录文件"逐项比对 | 提交后 `git status --porcelain` 为空（排除 patches/、提示词文件） | 不许推送 |
-| 9 | 推送目标正确 | `git remote get-url --push "$MY_REMOTE"` 含 NLCLI | `git push --dry-run` 通过；**认证类失败转 12.1 导补丁**，不算失败 | 其他错误 → 停止 |
+| 8 | 提交内容正确 | 提交后 `git show --name-status --format= HEAD` 与"仅上游 + 双方都改 + 3 个记录文件（+ 本轮有追加的 `memory.txt` + 本轮改过的 `prompt*.md`）"逐项比对 | 提交后 `git status --porcelain` 为空（排除 patches/）；本轮改过提示词时 `git show --name-only` 必须含 `prompt*.md` | 不许推送 |
+| 9 | 推送目标正确 | `git remote get-url --push "$MY_REMOTE"` 含 NLCLI | `git push --dry-run` 通过；**认证类失败转 11.1 导补丁**，不算失败 | 其他错误 → 停止 |
 | 10 | 推送真的成功 | `git push` 退出码 0 | `git ls-remote "$MY_REMOTE" "refs/heads/$MY_BRANCH"` 取到的 SHA 与本地 HEAD 相等 | 如实报告失败，不许谎报 |
-| 11 | 记录文件正确（**在提交之前**） | 写完后重读 `action.txt`，脚本真比对 | `LAST_SYNCED_SHA` 与 `UPSTREAM_HEAD` 逐字符相等；`out.txt` 新段在第 4 行；`$FIXLOG` 旧内容 `cmp` 一致 | 修正后重写，不许带着错值提交 |
-| 12 | 定制可以开工（**仅当有需求**） | `git status --porcelain` 为空 | `SYNC_VERDICT=NO_UPDATE`、或 HEAD 附近有 `chore(sync):`、或我明确说了"别同步"（`CUSTOM_ONLY=1`） | 停下，先收尾同步 |
+| 11 | 记录文件正确（**在提交之前**） | 写完后重读 `action.txt`，脚本真比对 | `LAST_SYNCED_SHA` 与 `UPSTREAM_HEAD` 逐字符相等；`out.txt` 新段在第 4 行；`$FIXLOG` 旧内容 `cmp` 一致；`memory.txt` 若本轮追加，旧内容同样 `cmp` 一致 | 修正后重写，不许带着错值提交 |
+| 12 | 定制可以开工（**仅当有需求**） | `git status --porcelain` 为空 | `SYNC_VERDICT` 为 `NO_UPDATE` / `NO_OP_FALLBACK`、或 HEAD 附近有 `chore(sync):`、或我明确说了"别同步"（`CUSTOM_ONLY=1`） | 停下，先收尾同步 |
 | 13 | 定制提交干净 | 账本顶部 `[定制]` 段覆盖了每个改动文件 | `git log --oneline -2` 能看到 `feat(custom):` 与 `chore(sync):` 两个提交；`action.txt`/`out.txt` 未被改动 | 补记账，不许 amend |
 
 这 13 项里，第 2、4、5、6、10 项**只要有一项不过，就停下来问我**，不要"大概没问题"就往下走。
 
-## 1.4 快速通道（`FAST=1`，默认开启）
+## B.4 快速通道（`FAST=1`，默认开启）
 
 **为什么有它**：正常同步九成的情况是「官方推了几个提交、本地没碰过这些文件」。每次都跑全套体检（磁盘、LFS、换行符、全量编译）纯属浪费，一次同步能拖到十几分钟。
 
@@ -385,7 +375,7 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 | YAML 语法校验 | 第 8 步 | **本次确实有 `.github/workflows/` 变更时才做** |
 | 第二次 `--no-incremental` 构建 | 第 8 步 | **构建失败、修完重验时才必须做** |
 
-⚠️ 跳过的只是**探测**，不是**设置**。0.2.3 那四项 `git config`（`autocrlf` / `eol` / `longpaths` / `filemode`）
+⚠️ 跳过的只是**探测**，不是**设置**。A.2.3 那四项 `git config`（`autocrlf` / `eol` / `longpaths` / `filemode`）
 在 Windows 上**任何 `FAST` 取值都必须执行**——它们决定工作区能不能变干净，不是"体检项"。
 
 **`FAST=1` 也绝不能跳的（安全底线，共 10 条）：**
@@ -393,8 +383,8 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 1. 按 URL 识别 remote，四条断言必须全过
 2. 工作区必须干净（`git status --porcelain` 为空）
 3. `BASE` 的两次祖先校验
-4. **8.1 的特殊文件分拣**（一方已删除 / 上游重命名）——跳过它会导致这些文件两边都不处理
-5. **8.2 的二进制过滤**——`merge-file` 对二进制不保证返回错误码，它可能"成功"地把 png 写成乱码
+4. **6.1 的特殊文件分拣**（一方已删除 / 上游重命名）——跳过它会导致这些文件两边都不处理
+5. **6.2 的二进制过滤**——`merge-file` 对二进制不保证返回错误码，它可能"成功"地把 png 写成乱码
 6. 冲突标记零残留扫描
 7. 定制点断言（水印/页面/贡献者等）
 8. **构建至少跑一次**（增量也算）
@@ -407,15 +397,15 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 ⚠️ **FAST=1 的例外**：如果这次构建**报错**，修完之后重验必须用 `--no-incremental` 跑一次。
 增量缓存在修复场景下最容易造成"假通过"——上一次的产物还在，改坏的代码可能被跳过。
 
-## 1.5 我同时让你加功能时怎么办（`CUSTOM_TASK`）
+## B.5 我同时让你加功能时怎么办（`CUSTOM_TASK`）
 
-**这节讲顺序和边界，具体怎么做在 13.9。** 现实里最常见的三种说法：
+**这节讲顺序和边界，具体怎么做在 12。** 现实里最常见的三种说法：
 
 | 情形 | 我大概会怎么说 | 你该怎么做 |
 |---|---|---|
-| **A. 同步 + 定制**（默认） | 「同步一下，顺便把设置页加个 XXX」 | 完整走完同步（含提交、推送/补丁、三个记录文件），**再**进 13.9 做定制；**两个独立 commit**，推送或补丁按当时的 `PUSH_MODE` 收尾 |
+| **A. 同步 + 定制**（默认） | 「同步一下，顺便把设置页加个 XXX」 | 完整走完同步（含提交、推送/补丁、三个记录文件），**再**进 12 做定制；**两个独立 commit**，推送或补丁按当时的 `PUSH_MODE` 收尾 |
 | **B. 只同步** | 什么都不提，或 `CUSTOM_TASK` 留空 | 走完 1~12 步就结束，**不要**顺手加任何东西 |
-| **C. 只定制** | 「这次别同步了，就帮我加个 XXX」 | 第 0 步 + 第 1 步对齐 + 第 2 步读记录 + **第 3 步只 fetch 判断（不做合并）**，然后跳过第 4~12 步，直接进 13.9；`action.txt` / `out.txt` 一个字都不动 |
+| **C. 只定制** | 「这次别同步了，就帮我加个 XXX」 | 第 0 步 + 第 1 步对齐 + 第 2 步读记录 + **第 3 步只 fetch 判断（不做合并）**，然后跳过第 4~12 步，直接进 12；`action.txt` / `out.txt` 一个字都不动 |
 
 判定规则：`CUSTOM_TASK` 非空 **或** 对话里出现"加/改/换成/支持/去掉/把 XX 改成 YY"这类**要动代码或资源**的诉求
 （新功能、改文案、换图标、调默认值、加配置项都算）→ 就是 A 或 C。
@@ -432,12 +422,12 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
    echo "export CUSTOM_ONLY=1" >> /tmp/upstream-sync.env
    ```
 
-   这是 13.9 门 2、以及第 3 步离线分支唯一认的"跳过同步"凭据。**只有在我说了"别同步"时才能设**，
+   这是 12 门 2、以及第 3 步离线分支唯一认的"跳过同步"凭据。**只有在我说了"别同步"时才能设**，
    不许因为同步卡住了、冲突不想修了，就拿它绕过去——那不是跳过，那是逃避。汇报里必须写"本轮按你的要求跳过同步"。
 2. **第 3 步照跑**（fetch 是只读操作，不动工作区），账本段头要用 `$UPSTREAM_SHORT` 标明"基于哪个上游点"。
    离线时不用你临场发挥：第 3 步的 fetch 失败分支看到 `CUSTOM_ONLY=1` 会自动退化成
    "参照点 = 本地 HEAD"，并落 `UPSTREAM_OFFLINE=1`，然后正常往下走。汇报里注明"未取到上游 SHA，参照点是本地 HEAD"。
-3. 第 4~12 步全部跳过：不合并、不构建、不写 `action.txt` / `out.txt`，直接进 13.9。
+3. 第 4~12 步全部跳过：不合并、不构建、不写 `action.txt` / `out.txt`，直接进 12。
 
 ### 为什么必须"先同步、后定制"，不能反过来
 
@@ -447,7 +437,7 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 |---|---|
 | 第 0 步「工作区必须干净」直接不通过 | 还没开始就卡住；绕过去的话，后面每一步都在错误前提上跑 |
 | `git diff` 里混着你的新功能，第 5 步会把这些文件判成"本地定制" | 冲突分类全乱，本该自动合并的文件被当成冲突 |
-| 8.2 的三方合并会把你的新代码和上游改动搅在一个文件里 | 冲突修不干净，最后既不像你的写法也不像上游 |
+| 6.2 的三方合并会把你的新代码和上游改动搅在一个文件里 | 冲突修不干净，最后既不像你的写法也不像上游 |
 | 提交时"同步修复"和"新功能"混在一个 commit | 下次同步看不懂哪些改动是同步引入的，`fixxed.txt` 也没法分类 |
 | 构建失败时无法判断是"上游带来的"还是"你新写的" | 3 轮修复全打在错误目标上 |
 
@@ -458,7 +448,7 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 | `action.txt` 的 `LAST_SYNCED_SHA` | 它是同步锚点，定制不改上游，改了会让下次同步多拉或漏拉一整段 |
 | `out.txt` | 那是"同步到了哪些 Action"的记录，不是功能日志。定制不产生新的同步记录 |
 | 三个记录文件的**旧内容** | 和同步时同一条铁律：只许在最前面插新段，旧内容逐字节不许变 |
-| 刚同步进来的上游代码（删/回退） | 定制只能"在这之上加"，不许为了好实现就把上游刚修的东西删掉。真要改，按 1.5 最后一条处理 |
+| 刚同步进来的上游代码（删/回退） | 定制只能"在这之上加"，不许为了好实现就把上游刚修的东西删掉。真要改，按 B.5 最后一条处理 |
 
 ### 两条软要求（不做不算失败，但要在汇报里说明）
 
@@ -472,12 +462,12 @@ Windows 具体两种做法见 **0.2.0**，这里不重复。
 最多问我 **3 个**问题（放哪个界面 / 具体行为 / 失败或空数据时怎么办），问完就按最保守的默认实现，
 并把"我假设了什么"写进账本。**不许**因为需求不完整就停下来不动，也**不许**自己脑补一大套 UI 交互。
 
-## 2. 第 0 步：环境自检与 remote 识别（任何一项不满足就停下问我）
+## 0. 第 0 步：环境自检与 remote 识别（任何一项不满足就停下问我）
 
 **这是整轮的第一条命令，也是唯一不 source 环境文件的命令块**（环境文件还没建）。它必须自己完成定位并建好环境文件，后面所有块才能活。
 
 ```
-# ---- ① shell 与平台探测（0.2 节）----
+# ---- ① shell 与平台探测（A.2 节）----
 if [ -z "$BASH_VERSION" ]; then
   if [ -n "$ZSH_VERSION" ]; then
     echo "FAIL: 当前是 zsh（macOS 默认）。请用 bash -l 启动 AI 工具，或让它用 bash -c 包裹每个命令块"; exit 1
@@ -566,7 +556,7 @@ EOL_NOISE=0
 if [ "$DIRTY" -gt 0 ]; then
   # 三条都要查：工作区 vs 索引（忽略 CR）、索引 vs HEAD（已暂存的真实改动）。
   # 少查 --cached 的话，用户 git add 过的改动会被当成"换行噪声"放行，
-  # 然后被第 9 步的 git add -A 静默并进同步提交。
+  # 然后被第 10 步的 git add -A 静默并进同步提交。
   WS=$(git diff --ignore-cr-at-eol --numstat)
   IDX=$(git diff --cached --numstat)
   if [ -z "$WS" ] && [ -z "$IDX" ]; then
@@ -583,13 +573,22 @@ if [ "$DIRTY" -gt 0 ]; then
 fi
 
 # 未跟踪文件：默认不允许（git add -A 会把它们顺手提交进去）。
-# 但有两类东西是"本来就该在仓库里、又不该进库"的，先自动放进 .git/info/exclude 再重算：
-#   - patches/                 上一轮导出的补丁（本机可能从未跑过 12.1，目录还在）
-#   - prompt.md / *.prompt.md  这份提示词，很多人直接丢在仓库根目录
-# 剩下的（真·未跟踪源码、临时笔记）仍然挡住流程——那是要人来决定的。
-for pat in 'patches/' 'prompt.md' '*.prompt.md'; do
-  grep -qxF -- "$pat" .git/info/exclude 2>/dev/null || printf '%s\n' "$pat" >> .git/info/exclude
-done
+# 只有一类东西是"本来就该在仓库本地、又不该进库"的，先自动放进 .git/info/exclude 再重算：
+#   - patches/                 上一轮导出的补丁（本机可能从未跑过 11.1，目录还在）
+# ⚠️ 提示词文件（prompt*.md）**不排除**：它是仓库内容，改了就必须随本轮改动一起提交、一起进补丁。
+#    若它处于未跟踪状态，下面的检查会挡住——此时应 `git add prompt*.md` 把它纳入版本控制，
+#    而不是把它 ignore 掉（ignore 掉就等于「改了也不提交」，下一轮读到的是旧提示词）。
+grep -qxF -- 'patches/' .git/info/exclude 2>/dev/null || printf '%s\n' 'patches/' >> .git/info/exclude
+
+# ★ 清掉历史遗留：旧版提示词曾把 'prompt*.md' 写进这里的 exclude，导致
+#   「提示词改了也不提交」——git add -A 会静默跳过被 ignore 的未跟踪文件。
+#   只删这一条，其余保留。
+if grep -qxF -- 'prompt*.md' .git/info/exclude 2>/dev/null; then
+  grep -vxF -- 'prompt*.md' .git/info/exclude > .git/info/exclude.tmp \
+    && mv .git/info/exclude.tmp .git/info/exclude \
+    && echo "NOTE: 已从 .git/info/exclude 移除 prompt*.md（提示词必须能被提交进补丁）"
+fi
+
 UNTRACKED=$(git status --porcelain | grep -c '^??' || true)
 [ "$UNTRACKED" -eq 0 ] || { echo "FAIL: 有 $UNTRACKED 个未跟踪文件，先处理掉再跑"; git status --porcelain | grep '^??' | head -10; exit 1; }
 
@@ -614,7 +613,7 @@ ENV_FILE=/tmp/upstream-sync.env
 mkdir -p "$WORK_DIR" || { echo "FAIL: 建不了 $WORK_DIR"; exit 1; }
 
 # ★ 清掉上一轮留在 /tmp 的中间文件。不清的话会"隔夜串味"：
-#   典型是 /tmp/synced-files.txt —— 10.3 ① 只在它不存在时才重算，
+#   典型是 /tmp/synced-files.txt —— 8.3 ① 只在它不存在时才重算，
 #   于是今天构建失败时，A/B 分类用的还是昨天那份文件清单，改了同步引入的错误却判成"官方自带"。
 #   其余几十个同理：它们都是"本轮一次性"的产物，跨轮残留只会让后续步骤读到旧内容，没有保留价值。
 #   注意：这里不能删 /tmp/upstream-sync.env（就是本块马上要写的那个）和仓库里的记录文件。
@@ -641,14 +640,15 @@ cat > "$ENV_FILE" <<ENVEOF
 export REPO_ROOT="$REPO_ROOT"
 export LOCAL_BRANCH="$LOCAL_BRANCH"
 export MY_BRANCH="$MY_BRANCH"
-# ★ 下面四项必须照抄开头「可修改参数」的值。
+# ★ 下面五项必须照抄开头「可修改参数」的值。
 #   不要写 \${FAST:-1} 这种形式——执行这条命令时 shell 里没有 FAST 变量，
 #   它永远取后面的默认值，用户在参数区改的 0 会被静默吃掉。
-#   每项全文件只允许出现一次；改参数时只改这四行（和上面的 UPSTREAM_BRANCH）。
+#   每项全文件只允许出现一次；改参数时只改这五行（和上面的 UPSTREAM_BRANCH）。
 export FAST=1
 export PUSH_MODE=auto
 export TARGET_PROJ=ClassIsland.Desktop/ClassIsland.Desktop.csproj
 export UPSTREAM_BRANCH=develop/v2/misha-alpha
+export UPSTREAM_BRANCH_FB=master
 # 以下不需要改
 export PLATFORM="$PLATFORM"
 export WORK_DIR="$WORK_DIR"
@@ -669,12 +669,12 @@ export VSLANG=1033
 # rebase / commit 时不要拉编辑器
 export GIT_EDITOR=:
 export GIT_SEQUENCE_EDITOR=:
-# 注意：TARGET_PROJ 已经在上面的「★ 四项」里 export 过了，这里不要再写一遍，
+# 注意：TARGET_PROJ 已经在上面的「★ 五项」里 export 过了，这里不要再写一遍，
 # 否则会覆盖用户改的值，而且回显看起来还是对的。
 ENVEOF
 
 # Windows 上环境文件可能带 CRLF，source 会报 "$'\r': command not found"
-# 注意 ENV_FILE 故意放在 WORK_DIR 之外：8.2 会 rm -rf "$WORK_DIR"，
+# 注意 ENV_FILE 故意放在 WORK_DIR 之外：6.2 会 rm -rf "$WORK_DIR"，
 # 环境文件要是放在里面，三方合并一开始就被删了，后面每个 source 全部失败
 tr -d '\r' < "$ENV_FILE" > /tmp/upstream-sync.env.tmp && mv /tmp/upstream-sync.env.tmp "$ENV_FILE"
 
@@ -688,7 +688,7 @@ git remote -v                                # 先看全貌
 # 如果和用户在参数区写的不一致，说明抄错了，立刻改过来重跑第 0 步。
 echo "=== 本次参数 ==="
 echo "FAST=$FAST  PUSH_MODE=$PUSH_MODE"
-echo "UPSTREAM_BRANCH=$UPSTREAM_BRANCH  TARGET_PROJ=$TARGET_PROJ"
+echo "UPSTREAM_BRANCH=$UPSTREAM_BRANCH  FB=${UPSTREAM_BRANCH_FB:-<空>}  TARGET_PROJ=$TARGET_PROJ"
 ```
 
 **环境风险检查**（`FAST=1` 只查必查项，其余等真出问题再回头看）：
@@ -735,7 +735,7 @@ cd "$REPO_ROOT" || exit 1
 #   在空值上 fetch 会变成 `git fetch --deepen=400 ""`，报错又被 2>/dev/null 吞掉，
 #   三次全部空转，最后误报"加深失败"。
 [ -n "$MY_REMOTE" ] && [ -n "$UPSTREAM_REMOTE" ] && [ -n "$UPSTREAM_BRANCH" ] \
-  || { echo "FAIL: remote 变量为空——请先完成 0.3 的 remote 身份识别，再回来加深"; exit 1; }
+  || { echo "FAIL: remote 变量为空——请先完成 A.3 的 remote 身份识别，再回来加深"; exit 1; }
 
 # 关于 --deepen：它只加深「refspec 覆盖到的」那些 ref。
 # 用 --all 可以避开这条限制，不用关心 remote 的 fetch 配置。
@@ -843,7 +843,7 @@ source /tmp/upstream-sync.env || { echo "FAIL: 环境文件回读失败"; exit 1
 
 
 
-## 3. 第 1 步：先和「我自己的仓库」对齐（**无条件执行，与官方有没有更新无关**）
+## 1. 第 1 步：先和「我自己的仓库」对齐（**无条件执行，与官方有没有更新无关**）
 
 **背景**：我自己的仓库（NLCLI）很可能已经被我在网页上、或在别的机器上改过，而本地这一份还停在旧版本。不先对齐，后面基于旧代码做的同步会白做，甚至推不上去。
 
@@ -857,7 +857,7 @@ cd "$REPO_ROOT" || exit 1
 # 单分支克隆（--single-branch / --depth）、`git remote add -t 某分支` 的仓库，
 # 直接 `git fetch --prune` 只更新配置里那一部分，拿不到别的分支。
 git fetch "$MY_REMOTE" "+refs/heads/*:refs/remotes/$MY_REMOTE/*" --prune \
-  || { echo "FAIL: fetch $MY_REMOTE 失败，看网络（12.2）"; exit 1; }
+  || { echo "FAIL: fetch $MY_REMOTE 失败，看网络（11.2）"; exit 1; }
 
 # ★ 先判「远端有没有这个分支」，再算领先/落后。
 #   新建的空 fork、分支被改名时，下面每条 rev-list / rev-parse 都会报错；
@@ -871,12 +871,12 @@ if git rev-parse --verify --quiet "refs/remotes/$MY_REMOTE/$MY_BRANCH" >/dev/nul
   SYNCED_FROM_SHA=$(git rev-parse --short=7 "$MY_REMOTE/$MY_BRANCH")
 else
   echo "NOTE: $MY_REMOTE 上还没有 $MY_BRANCH 分支（新建的 fork，或分支被改名）"
-  echo "      跳过对齐；第 10 步推送时会创建这个分支"
+  echo "      跳过对齐；第 11 步推送时会创建这个分支"
   SYNCED_FROM_SHA=$(git rev-parse --short=7 HEAD)   # 用本地 HEAD 当参照点，别留空值
   echo "export REMOTE_BRANCH_MISSING=1" >> /tmp/upstream-sync.env
 fi
 
-# 把"对齐前/对齐后"都记下来：13.1 的 SYNCED_FROM 和汇报模板都要用，
+# 把"对齐前/对齐后"都记下来：9.1 的 SYNCED_FROM 和汇报模板都要用，
 # 不落盘的话跨 shell 就只剩"我记得当时是多少"，容易写错。
 {
   echo "export SYNCED_FROM_SHA=$SYNCED_FROM_SHA"
@@ -949,7 +949,7 @@ fi
 |---|---|---|
 | 左 > 0，右 = 0 | 我的仓库比我新，本地是旧版 | **执行 `git pull --rebase "$MY_REMOTE" "$MY_BRANCH"`** |
 | 左 = 0，右 = 0 | 已对齐 | 跳过，继续下一步 |
-| 左 = 0，右 > 0 | 本地有未推送的提交 | **继续，不要停下**。远端没有新东西，不需要 pull；这些提交留到第 10 步一起推。汇报里注明「本地已有 N 个未推送提交，本次一并推送」 |
+| 左 = 0，右 > 0 | 本地有未推送的提交 | **继续，不要停下**。远端没有新东西，不需要 pull；这些提交留到第 11 步一起推。汇报里注明「本地已有 N 个未推送提交，本次一并推送」 |
 | 左 > 0，右 > 0 | 历史分叉 | **停下来问我**，不要自作主张 rebase 或 merge |
 
 **为什么"本地领先"不能停下问你**：无推送权限的机器（`PUSH_MODE=auto/patch`）每轮同步完都会留下
@@ -962,11 +962,11 @@ fi
 - pull 完成后确认 `git status --porcelain` 为空，并记录 `$MY_REMOTE/$MY_BRANCH` 的最新短 SHA，写进汇报。
 - 这一步**只动 MY_REMOTE**，不碰官方 remote。
 
-## 4. 第 2 步：读取历史记录（必须在第 1 步对齐之后做）
+## 2. 第 2 步：读取历史记录（必须在第 1 步对齐之后做）
 
 对齐完成后，这些文件可能已被我仓库的版本更新过，所以要**重新**读取。
 
-**先探测日志文件名，结果存进 `$FIXLOG`，从这一步到第 11 步写入全程复用它，不要中途重新判断**（单双 x、大小写都兼容）：
+**先探测日志文件名，结果存进 `$FIXLOG`，从这一步到第 9 步写入全程复用它，不要中途重新判断**（单双 x、大小写都兼容）：
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
@@ -1007,7 +1007,7 @@ cd "$REPO_ROOT" || exit 1
 command -v iconv >/dev/null 2>&1 \
   || { echo "FAIL: 环境里没有 iconv，无法验证编码。请安装（Git Bash 自带；Linux 装 glibc-common）"; exit 1; }
 
-for f in "$FIXLOG" action.txt out.txt; do
+for f in "$FIXLOG" action.txt out.txt memory.txt; do
   [ -f "$f" ] || continue
 
   # ① 必须是合法 UTF-8
@@ -1043,7 +1043,7 @@ done
 
 **总则：下文凡出现 `fixxed.txt` 字样，实际执行时一律替换为 `$FIXLOG`。** 无论是读取、grep、插入还是 `ls`，都不要用字面量 `fixxed.txt`。
 
-**先把三个文件的存在状态摊开看——不存在是正常情况，不是错误：**
+**先把四个文件的存在状态摊开看——不存在是正常情况，不是错误：**
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
@@ -1051,7 +1051,7 @@ source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，
 cd "$REPO_ROOT" || exit 1
 [ -n "$FIXLOG" ] || { echo "FAIL: FIXLOG 为空，上面探测那步没执行"; exit 1; }
 
-for f in "$FIXLOG" action.txt out.txt; do
+for f in "$FIXLOG" action.txt out.txt memory.txt; do
   if [ -f "$f" ]; then echo "EXISTS  $f ($(wc -l < "$f") 行)"; else echo "MISSING $f"; fi
 done
 ```
@@ -1060,10 +1060,11 @@ done
 |---|---|---|
 | `$FIXLOG` | 通常**存在**且有历史内容 | 不算错，稍后新建；汇报里注明「首次建立改动日志」 |
 | `action.txt` | **大概率不存在** | **判定为首次同步**：`BASE` 走 `git merge-base`，不报错、不问我 |
-| `out.txt` | **大概率不存在** | 不算错，第 11 步写入时先建表头（见 13.2） |
+| `out.txt` | **大概率不存在** | 不算错，第 9 步写入时先建表头（见 9.2） |
+| `memory.txt` | **可能不存在** | 不算错，跳过；本轮有经验再新建（见 9.4） |
 
 判定细节：
-- **三个都不存在** → 标准首次同步，直接往下走。
+- **四个都不存在** → 标准首次同步，直接往下走。
 - **只有 `action.txt` 缺失** → 首次同步，但 `out.txt` 有历史，可在汇报里提一句。
 - **`action.txt` 存在、`out.txt` 缺失（或反之）** → 继续，但汇报里注明「记录文件不完整，缺 X」，**不要凭猜测补内容**。
 - 任何情况下都**不许**因为文件缺失就停下来问我要不要创建——这是预期内的情况。
@@ -1076,6 +1077,9 @@ done
    本次结束后，你要把新段落**插到文件最前面**（旧内容整体下移），**严格沿用文件里已有的书写格式、标题层级和字段名**，不要另创一套格式。
 2. `action.txt` —— 上次同步的进度锚点，其中 `LAST_SYNCED_SHA` 是上次同步到的官方 commit，同时是本次三方合并的**基线（base）**。若不存在，判定首次同步，基线用 `git merge-base` 推导。
 3. `out.txt` —— 上次同步得到的 Action 清单，用于对比本次变化。
+4. `memory.txt` —— **跨轮经验库**，记的是「哪些坑踩过一次、下次怎么绕开」。
+   存在就**完整读完**，因为本轮所有判断都要参考它（尤其是构建、编码、子模块、定制点这几类）；
+   不存在就跳过。**它里面列的文件名不代表定制**，定制判定只看账本里的 `[定制]` / `[修复]` 段落。
 
 **解析基线变量**（第 3、4 步都要用，必须在此显式取出，不要等到用时才临时 grep）：
 
@@ -1090,7 +1094,7 @@ echo "LAST_SYNCED_SHA=$LAST_SYNCED_SHA"
 
 为空 → 视为首次同步（`action.txt` 不存在或没有该字段），后续走 `merge-base`。
 
-## 5. 第 3 步：拉取官方代码（**先探测分支，再算 HEAD，顺序不能反**）
+## 3. 第 3 步：拉取官方代码（**先探测分支，再算 HEAD，顺序不能反**）
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
@@ -1121,7 +1125,7 @@ if ! git fetch "$UPSTREAM_REMOTE" \
     echo "UPSTREAM: 离线（只定制模式），参照点=$(git rev-parse --short=7 HEAD)"
     exit 0
   fi
-  echo "FAIL: fetch 官方仓库失败，看网络（12.2）"; exit 1
+  echo "FAIL: fetch 官方仓库失败，看网络（11.2）"; exit 1
 fi
 
 # ---- ② 探测分支是否存在，不存在才回退 ----
@@ -1129,11 +1133,16 @@ if git rev-parse --verify --quiet "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH" >/dev/null
   echo "OK: 使用官方分支 $UPSTREAM_BRANCH"
   BRANCH_FALLBACK=0
 else
-  echo "WARN: 官方 $UPSTREAM_BRANCH 不存在，尝试回退 master"
-  UPSTREAM_BRANCH=master
+  if [ -z "${UPSTREAM_BRANCH_FB:-}" ]; then
+    echo "FAIL: 官方 $UPSTREAM_BRANCH 不存在，且参数区 UPSTREAM_BRANCH_FB 留空"
+    echo "      先确认官方是不是把分支改名/迁移了；要自动回退就在参数区填上 UPSTREAM_BRANCH_FB"
+    exit 1
+  fi
+  echo "WARN: 官方 $UPSTREAM_BRANCH 不存在，按 UPSTREAM_BRANCH_FB 回退到 $UPSTREAM_BRANCH_FB"
+  UPSTREAM_BRANCH="$UPSTREAM_BRANCH_FB"
   BRANCH_FALLBACK=1
   git rev-parse --verify --quiet "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH" >/dev/null \
-    || { echo "FAIL: 官方 master 也不存在，停下问我"; exit 1; }
+    || { echo "FAIL: 回退分支 $UPSTREAM_BRANCH 也不存在，停下问我"; exit 1; }
 fi
 
 # ---- ③ 分支确定之后才算 HEAD（放在回退之前算，回退后拿到的就是空值）----
@@ -1157,13 +1166,15 @@ echo "UPSTREAM: $UPSTREAM_REMOTE/$UPSTREAM_BRANCH @ $UPSTREAM_SHORT (fallback=$B
 
 - **顺序不能反**：先 fetch → 再探测分支 → 最后 `rev-parse`。反过来（先算 HEAD、再回退分支）会在回退时
   得到一个空的 `UPSTREAM_HEAD`，后续所有 `git diff "$UPSTREAM_HEAD"` 直接 fatal。
-- 回退发生后，**`action.txt` 里的 `LAST_SYNCED_SHA` 一律作废**（那是旧分支的 commit，不能当 master 的基线），
-  第 4 步必须强制走 `git merge-base` 重算，汇报里写明「同步源已从 develop/v2/misha-alpha 回退到 master」。
+- 回退发生后，**`action.txt` 里的 `LAST_SYNCED_SHA` 一律作废**（那是旧分支的 commit，不能当回退分支的基线），
+  第 4 步必须强制走 `git merge-base` 重算，汇报里写明「同步源已从 `<原分支>` 回退到 `<回退分支>`」。
 - 回退只影响**同步源**，不影响推送目标：`MY_BRANCH` 仍是本地当前分支名。
-- 回退只对**本轮**生效：下次运行仍先按参数区的 `UPSTREAM_BRANCH` 探测，如果 develop 仍不存在会再次自动回退到 master
+- 回退只对**本轮**生效：下次运行仍先按参数区的 `UPSTREAM_BRANCH` 探测，原分支仍不存在就再回退一次
   （`action.txt` 里的分支名只供人查看，代码不会拿它覆盖参数区）。
-- **回退时跳过下面「官方无新提交」的判断**——`LAST_SYNCED_SHA` 属于旧分支，拿它跟 master 比毫无意义，
-  直接当作「有更新」继续。
+  **若回退分支与本地树级 0 差异，第 5 步会判 `NO_OP_FALLBACK`，跳过合并/提交/推送**，不产生空提交；
+  汇报里必须写「请把参数区 `UPSTREAM_BRANCH` 改成 `<回退分支>`」，否则每轮都会重复走一次回退。
+- **回退时跳过下面「官方无新提交」的判断**——`LAST_SYNCED_SHA` 属于旧分支，拿它跟回退分支比毫无意义，
+  直接当作「有更新」继续，再由第 5 步的树级比较决定是不是 `NO_OP_FALLBACK`。
 
 **先跑这条判断，不要靠肉眼比 40 位 SHA**（比错了要么白跑一轮，要么漏同步）：
 
@@ -1240,29 +1251,30 @@ echo "VERDICT=$VERDICT"
 - **不做**三方合并、**不修改** `action.txt` / `out.txt`、**不写** `$FIXLOG` 的同步段、**不为同步而 commit**；
   保持工作区干净，这样下次运行时的自检才能通过（这是幂等要求）。
   （唯一例外是有附加需求，见下面第三条——那时会为**定制**单独 commit，同步记录仍然不动。）
-- **但如果本地领先 origin（之前有没推成功的提交），仍然要执行第 10 步推送。**
+- **但如果本地领先 origin（之前有没推成功的提交），仍然要执行第 11 步推送。**
   否则会出现：上一轮 commit 成功、push 失败（没权限/网络），这一轮官方又没更新 →
   永远走不到推送，那些提交就永远卡在本地。判断：
   分支存在时用 `[ "$(git rev-list --count "$MY_REMOTE/$MY_BRANCH"..HEAD 2>/dev/null || echo 0)" -gt 0 ]`；
-  远端还没有这个分支（`REMOTE_BRANCH_MISSING=1`）时直接去第 10 步——推送会创建它。
+  远端还没有这个分支（`REMOTE_BRANCH_MISSING=1`）时直接去第 11 步——推送会创建它。
   不要直接写 `[ "$(git rev-list --count ...)" -gt 0 ]`：分支不存在时 rev-list 退出 128、输出空，
   `[ "" -gt 0 ]` 会报 "integer expression expected" 并当成假，本地提交就永远推不上去。
 - **走到这里不等于整轮结束。** 先看有没有附加需求：
   - `CUSTOM_TASK` 为空、对话里也没提功能 → 直接结束并告诉我：
     「官方无新提交，本次同步跳过；我已把本地与 NLCLI 对齐到 <短 SHA>，本地 <分支> 与其一致/领先 N 个提交」。
-  - `CUSTOM_TASK` 非空、或对话里提了功能 → **不要结束**，跳到 13.9 做定制。
+  - `CUSTOM_TASK` 非空、或对话里提了功能 → **不要结束**，跳到 12 做定制。
     此时 `action.txt` / `out.txt` **仍然一个字都不动**（没有同步，就没有新的同步记录），只写 `$FIXLOG` 的 `[定制]` 段。
-    13.9 的门 2 就是靠 `SYNC_VERDICT=NO_UPDATE` 认"同步已经处理过了"，不要再自己造一个判断。
-  - 本地领先 **且** 要定制时：先去第 10 步推掉旧提交，再进 13.9。
+    12 的门 2 就是靠 `SYNC_VERDICT=NO_UPDATE` 认"同步已经处理过了"，不要再自己造一个判断。
+  - 本地领先 **且** 要定制时：先去第 11 步推掉旧提交，再进 12。
     两批提交可以一次 push 出去，但**必须是两个独立 commit**（同步的、定制的），不许 squash。
 
 **特别注意**：这里判断的只是官方有没有新提交。我自己的仓库有没有新推送，
 由第 1 步独立判断和处理——两者不要混为一谈。我自己的仓库有新推送就照样 pull，哪怕官方一动不动。
 
-## 6. 第 4 步：确定合并基线
+## 4. 第 4 步：确定合并基线
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空，回第 3 步}"
 cd "$REPO_ROOT" || exit 1
 
@@ -1290,6 +1302,17 @@ else
 fi
 
 [ -n "$BASE" ] || { echo "FAIL: 算不出 BASE（浅克隆？merge-base 失败？），停下问我，不要全量覆盖"; exit 1; }
+
+# 回退时多查一道：旧基线还在不在回退分支的历史里。
+# 不在 = 官方很可能做了 squash / rebase 迁移（提交 SHA 全变），merge-base 会退到很早的分叉点，
+# 下一节的交集文件数会异常膨胀。这里只警告不拦，真正的硬闸在第 5 步（交集 > 200 必须停下来问）。
+if [ "${BRANCH_FALLBACK:-0}" = "1" ] && [ -n "${LAST_SYNCED_SHA:-}" ]; then
+  if ! git merge-base --is-ancestor "$LAST_SYNCED_SHA" "$UPSTREAM_REF" 2>/dev/null; then
+    echo "WARN: 旧基线 $LAST_SYNCED_SHA 不在 $UPSTREAM_BRANCH 的历史里"
+    echo "      可能发生过 squash / rebase 迁移；若第 5 步交集异常大，先停下问我，不要闷头合并"
+  fi
+fi
+
 echo "export BASE=$BASE" >> /tmp/upstream-sync.env
 echo "BASE=$BASE ($(git rev-parse --short "$BASE"))"
 ```
@@ -1298,6 +1321,7 @@ echo "BASE=$BASE ($(git rev-parse --short "$BASE"))"
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${BASE:?FAIL: BASE 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空}"
 cd "$REPO_ROOT" || exit 1
 
@@ -1369,12 +1393,13 @@ echo "BASE_LOCKED: BASE 已锁定，等于 action.txt 的基线"
 
 发生回退（情况 c）时，汇报里必须写明：「action.txt 的基线已失效，已改用 merge-base 重算（旧 `xxx` → 新 `yyy`）」。
 
-## 7. 第 5 步：文件分类（本次同步的核心判断）
+## 5. 第 5 步：文件分类（本次同步的核心判断）
 
 分别看「官方从 BASE 到 HEAD 改了什么」和「本地从 BASE 到 HEAD 改了什么」：
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 git -c core.quotePath=false diff --no-renames --name-status "$BASE" "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"   # 官方侧改动
@@ -1393,13 +1418,18 @@ git -c core.quotePath=false diff --no-renames --name-status "$BASE" HEAD        
 | 官方删除、本地未改过 | 无冲突 | 跟随官方删除（删除前先在汇报里列出，并写进 fixxed.txt） |
 | 官方删除、但本地改过该文件 | 我的定制 | **保留本地文件**，并在 fixxed.txt 中说明「官方已删除但本地保留」 |
 
-补充判定：**`fixxed.txt` 里列出的文件，一律按「我的定制」对待**，即使用 git 看起来本地没改，
-也走「保留本地 / 冲突需人工裁决」分支。
+补充判定：**只有账本里带 `[定制]` / `[修复]` 标记的段落中列出的文件，才按「我的定制」对待**——
+即使用 git 看起来本地没改，也走「保留本地 / 冲突需人工裁决」分支。
+
+⚠️ **同步段落里列的文件不算定制**。账本每轮都会把所有改动文件写进去（那是给下轮看的同步记录），
+如果把这些文件也当定制，交集会一行一轮地膨胀，最后每个文件都要"人工裁决"，等于没法同步。
+判定的优先级：`git diff` 显示本地确实改过 > 账本 `[定制]` / `[修复]` 段里列过 > 其余一律视为非定制。
 
 **双重校验：先量规模，再决定怎么干。**
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失或损坏，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 # --no-renames：把重命名拆成「删+增」，逐文件处理才不会漏掉旧路径
@@ -1420,6 +1450,22 @@ wc -l /tmp/up-files.txt /tmp/local-files.txt /tmp/both-files.txt
 
 # 两个 0 要区分：真没改动 vs 命令静默失败
 UP_N=$(wc -l < /tmp/up-files.txt); LOC_N=$(wc -l < /tmp/local-files.txt)
+
+# ★ 回退分支专用判据：直接比「上游树 vs 本地树」，不能看上面那两个 diff 是否为 0。
+#   二者等价只在 BASE==HEAD 时成立；更常见的是 master 与 HEAD 内容相同、但 BASE 很老，
+#   此时两侧 diff 都不为 0，却确实没有任何东西要同步。
+if [ "${BRANCH_FALLBACK:-0}" = "1" ] && git diff --quiet "$UPSTREAM_REF" HEAD 2>/dev/null; then
+  # 官方把分支迁走了、但代码没变——正常情况。
+  # 不特判的话，第 6~11 步会在 0 个文件上空跑一遍，写出一份「同步 0 个文件」的账本 + 一个空提交；
+  # 而且参数区的 UPSTREAM_BRANCH 没变，下一轮还会重复一次，永远不收敛。
+  echo "NO_OP_FALLBACK: 回退到 $UPSTREAM_BRANCH 后与本地树级 0 差异，本轮没有代码要同步"
+  echo "export SYNC_VERDICT=NO_OP_FALLBACK" >> /tmp/upstream-sync.env
+  echo "export FALLBACK_NOOP=1" >> /tmp/upstream-sync.env
+  # BUILD_RESULT 要有个值：第 10 步的 :? 校验会因为它为空而报错，汇报模板也要引用
+  echo "export BUILD_RESULT=\"未执行（NO_OP_FALLBACK，本轮无改动）\"" >> /tmp/upstream-sync.env
+  exit 0
+fi
+
 if [ "$UP_N" -eq 0 ] && [ "$LOC_N" -eq 0 ]; then
   echo "NOTE: 双方都是 0 个改动——先确认不是基线选错（git diff --stat $BASE $UPSTREAM_REF）"
 fi
@@ -1431,12 +1477,14 @@ echo "export GD=\"$GD\"" >> /tmp/upstream-sync.env
 - 合并结束后必须复核：**实际产生冲突的文件数**（`git merge-file` 退出码 >0 的数量）应当 ≤ 交集文件数；
   若两者数量明显不符（比如交集 30 个，最终只处理了 5 个），说明漏了文件，回第 5 步重算，不许继续提交。
 
-## 8. 第 6 步：执行同步
+## 6. 第 6 步：执行同步
 
 **动手前先记一个锚点**，后面反查"到底改了哪些文件"要用：
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失或损坏，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 PRE_MERGE_HEAD=$(git rev-parse HEAD)
@@ -1444,14 +1492,16 @@ echo "export PRE_MERGE_HEAD=$PRE_MERGE_HEAD" >> /tmp/upstream-sync.env
 echo "PRE_MERGE_HEAD=$PRE_MERGE_HEAD"
 ```
 
-### 8.1 先挑出三种特殊情况（**它们不能进 merge-file**）
+### 6.1 先挑出三种特殊情况（**它们不能进 merge-file**）
 
 **动手前必须先跑这段**，把"一方已删除 / 上游重命名"的文件单独列出来。
-不跑的话，这些文件会在 8.2 被静默过滤掉、在 8.3 又被"交集排除"跳过，
+不跑的话，这些文件会在 6.2 被静默过滤掉、在 6.3 又被"交集排除"跳过，
 最后既没合并也没覆盖，结果取决于上一次的状态——这是最难发现的一类错误。
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${BASE:?FAIL: BASE 为空，回第 4 步}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空，回第 3 步}"
 cd "$REPO_ROOT" || exit 1
 [ -f /tmp/both-files.txt ] || { echo "FAIL: /tmp/both-files.txt 不存在，回第 5 步"; exit 1; }
@@ -1459,8 +1509,8 @@ cd "$REPO_ROOT" || exit 1
 : > /tmp/special-files.txt
 : > /tmp/both-addadd.txt
 : > /tmp/gitlink-files.txt
-: > /tmp/same-content.txt    # 双方新增但内容完全一致；8.2 必须跳过它们，不能算"三方缺失"
-: > /tmp/custom-kept.txt     # 8.1/8.3 记"保持现状"的文件；8.3 结束后无条件并入 extra-log.md
+: > /tmp/same-content.txt    # 双方新增但内容完全一致；6.2 必须跳过它们，不能算"三方缺失"
+: > /tmp/custom-kept.txt     # 6.1/6.3 记"保持现状"的文件；6.3 结束后无条件并入 extra-log.md
 
 # ① 把交集分成三类：一方不存在 / 双方各自新增 / 子模块指针
 while IFS= read -r f; do
@@ -1479,7 +1529,7 @@ while IFS= read -r f; do
     continue
   fi
 
-  # 符号链接（mode 120000）：merge-file 会把链接目标当普通文本合，8.4 的 cp 又会把它
+  # 符号链接（mode 120000）：merge-file 会把链接目标当普通文本合，6.4 的 cp 又会把它
   # 写成普通文件（类型都变了）。双方都改时直接停，别悄悄弄坏。
   if [ "$m1" = "120000" ] || [ "$m2" = "120000" ]; then
     echo "FAIL: $f 是符号链接且双方都改过，脚本不自动合并符号链接；停下问我"; exit 1
@@ -1491,8 +1541,8 @@ while IFS= read -r f; do
   git cat-file -e "$UPSTREAM_REF:$f" 2>/dev/null && t=1
 
   if [ "$b" = "0" ] && [ "$o" = "1" ] && [ "$t" = "1" ]; then
-    # 双方各自新增了同名文件（BASE 里没有）。8.2 会因 BASE 缺失跳过它，
-    # 8.3 又因"在交集里"跳过它——不单独挑出来就两边都不处理。
+    # 双方各自新增了同名文件（BASE 里没有）。6.2 会因 BASE 缺失跳过它，
+    # 6.3 又因"在交集里"跳过它——不单独挑出来就两边都不处理。
     # 但内容完全一样时不算冲突（两边各自加了个同样的模板/配置文件很常见），
     # 直接留本地即可，否则会为一份完全相同的文件停下来问用户。
     if git diff --quiet "$UPSTREAM_REF:$f" "HEAD:$f" 2>/dev/null; then
@@ -1531,7 +1581,7 @@ fi
 #    直接放弃检测、退化成 D+A，下面的"重命名+本地修改"就永远拦不住了。
 # ★ 警告走的是 **stderr**，必须单独接：只重定向 stdout 的话，
 #   "inexact rename detection was skipped" 根本不会进这个文件，下面那句 grep 永远不命中，
-#   于是这条防线形同虚设（真遇到时 git 静默退化成 D+A，重命名+本地修改直接被 8.3 当删除处理）。
+#   于是这条防线形同虚设（真遇到时 git 静默退化成 D+A，重命名+本地修改直接被 6.3 当删除处理）。
 git -c core.quotePath=false -c diff.renameLimit=0 diff -M --name-status \
   "$BASE" "$UPSTREAM_REF" > /tmp/rename-status.txt 2> /tmp/rename-stderr.txt \
   || { echo "FAIL: 重命名检测失败，停下问我"; exit 1; }
@@ -1558,7 +1608,7 @@ echo "RENAMES_OK"
 
 **① 重命名（上面③判定通过时）**
 
-- 本地**没碰过**源文件 → 跟随上游：源文件删除、目标文件新增（由 8.3 的 A / D 分支自动完成）；
+- 本地**没碰过**源文件 → 跟随上游：源文件删除、目标文件新增（由 6.3 的 A / D 分支自动完成）；
 - 本地**改过**源文件 → 上面已经拦下来，停下问我。
 
 **② 一方文件不存在**（`git show` 会失败，不能硬塞给 merge-file）
@@ -1567,7 +1617,7 @@ echo "RENAMES_OK"
 |---|---|---|
 | 本地已删除、上游有修改 | `ours=0 theirs=1` | **保持删除**：**不要执行任何 git 命令**（文件已经不在了，`git rm` 会报错）。写进 fixxed：「上游有改但本地保留删除」 |
 | 上游已删除、本地有修改 | `ours=1 theirs=0` | **保留本地文件**：同样**什么都不做**，文件保持现状。写进 fixxed：「上游已删除但本地保留」 |
-| 上游已删除、本地也没改 | 不在这里 | 本地没改 → 不在交集 → 由 **8.3 的 D 分支**执行 `git rm` |
+| 上游已删除、本地也没改 | 不在这里 | 本地没改 → 不在交集 → 由 **6.3 的 D 分支**执行 `git rm` |
 
 **注意这张表里两处都是"什么都不做"**。这是因为 `git checkout` / `git rm` 在这两种状态下都会报错，
 而它们要的最终结果恰好就是"保持当前工作区状态"。不要画蛇添足。
@@ -1575,18 +1625,20 @@ echo "RENAMES_OK"
 **③ 二进制文件**（`git diff --numstat "$BASE" HEAD -- <file>` 输出 `-\t-`）
 
 - 双方都改 → **停下问我**，绝不做文本合并（会把 png/ico/字体/nupkg 写坏）；
-- 只有一方改 → 由 8.2（双方都改）或 8.3（仅上游改）处理，二进制只在"双方都改"时才需要拦截。
+- 只有一方改 → 由 6.2（双方都改）或 6.3（仅上游改）处理，二进制只在"双方都改"时才需要拦截。
 
-### 8.2 常规文本文件的三方合并
+### 6.2 常规文本文件的三方合并
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${BASE:?FAIL: BASE 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空}"
 cd "$REPO_ROOT" || exit 1
 rm -rf "$WORK_DIR" && mkdir -p "$WORK_DIR"   # 清掉上一轮残留，避免读到旧 base/ours/theirs
 : > "$WORK_DIR/map.txt"
 
-# 8.1 已经挑走的文件（纯路径列）
+# 6.1 已经挑走的文件（纯路径列）
 awk -F'\t' '{print $1}' /tmp/special-files.txt > /tmp/skip-1.txt 2>/dev/null || : > /tmp/skip-1.txt
 cat /tmp/both-addadd.txt /tmp/gitlink-files.txt /tmp/same-content.txt >> /tmp/skip-1.txt 2>/dev/null || true
 
@@ -1658,7 +1710,7 @@ fi
 
 [ ! -s /tmp/both-binary.txt ]  || { echo "FAIL: 以下二进制文件双方都改过，停下问我用哪一边："; cat /tmp/both-binary.txt; exit 1; }
 [ ! -s /tmp/both-big.txt ]     || { echo "FAIL: 以下超大文件双方都改过，停下问我怎么处理："; cat /tmp/both-big.txt; exit 1; }
-[ ! -s /tmp/both-missing.txt ] || { echo "FAIL: 以下文件三方中有一方不存在（8.1 本应挑出），停下问我："; cat /tmp/both-missing.txt; exit 1; }
+[ ! -s /tmp/both-missing.txt ] || { echo "FAIL: 以下文件三方中有一方不存在（6.1 本应挑出），停下问我："; cat /tmp/both-missing.txt; exit 1; }
 
 n=0
 while IFS= read -r f; do
@@ -1690,7 +1742,7 @@ while IFS= read -r f; do
   else
     echo "ERROR($rc) $f  —— merge-file 自身失败，不写回"
     echo "$f" >> /tmp/merge-error.txt
-    rm -f "$WORK_DIR/merged.$b"     # 删掉空结果，防止 8.4 误写回
+    rm -f "$WORK_DIR/merged.$b"     # 删掉空结果，防止 6.4 误写回
     continue                        # 不进 map.txt
   fi
 
@@ -1726,12 +1778,14 @@ echo "合并完成：map.txt $(wc -l < "$WORK_DIR/map.txt") 行 / 可合并 $(wc
   只有当冲突恰好出现在**文件第 1 行、且差异只是 BOM 有无**时，**保持本地原来的 BOM 状态**，
   不要把 BOM 删掉或加两遍——`.NET` 的编译器对带 BOM 的源文件有特殊处理，改错会报奇怪的行号偏移。
 
-### 8.3 仅上游改动的文件：直接采用上游版本
+### 6.3 仅上游改动的文件：直接采用上游版本
 
 双方都改过的文件已经单独处理，剩下的「只有上游改过」的文件不需要任何合并，直接取上游版本：
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${BASE:?FAIL: BASE 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空}"
 cd "$REPO_ROOT" || exit 1
 [ -f /tmp/both-files.txt ] || { echo "FAIL: both-files.txt 不存在，回第 5 步"; exit 1; }
@@ -1742,7 +1796,7 @@ git -c core.quotePath=false diff --no-renames --name-status \
   "$BASE" "$UPSTREAM_REF" > /tmp/up-status.txt \
   || { echo "FAIL: 官方侧 diff 失败，停下问我"; exit 1; }
 
-# 去掉双方都改的（它们已在 8.2 处理）
+# 去掉双方都改的（它们已在 6.2 处理）
 # 必须用 FILENAME==ARGV[1]，不能用 NR==FNR：
 # 两个文件求差集时，若第一个文件是空的（零交集，也就是最常见的"完全没冲突"），
 # NR==FNR 对第二个文件的每一行都成立 → 整份清单被 next 吞掉 → 一个文件都不处理，
@@ -1751,7 +1805,7 @@ git -c core.quotePath=false diff --no-renames --name-status \
 #   both-files.txt 每行只有"路径"一列（$1），
 #   up-status.txt 每行是"状态<TAB>路径"（$2 才是路径）。
 # 第一个文件若误写成 $2，$2 是空的，both[""]=1，一个都排除不掉 →
-# up-only 变成"上游全部改动"，交集文件会被 8.3 再覆盖一遍（覆盖掉 8.2 的合并结果）。
+# up-only 变成"上游全部改动"，交集文件会被 6.3 再覆盖一遍（覆盖掉 6.2 的合并结果）。
 awk -F'\t' 'FILENAME==ARGV[1]{both[$1]=1;next} !($2 in both)' \
   /tmp/both-files.txt /tmp/up-status.txt > /tmp/up-only-status.txt \
   || { echo "FAIL: 求差集失败"; exit 1; }
@@ -1759,7 +1813,7 @@ awk -F'\t' 'FILENAME==ARGV[1]{both[$1]=1;next} !($2 in both)' \
 echo "上游改动 $(wc -l < /tmp/up-status.txt) 个，其中仅上游改 $(wc -l < /tmp/up-only-status.txt) 个"
 cut -f1 /tmp/up-only-status.txt | sort | uniq -c
 
-# 对账：上游改动 = 仅上游改 + 交集里被 8.1/8.2 处理掉的
+# 对账：上游改动 = 仅上游改 + 交集里被 6.1/6.2 处理掉的
 # 不等就说明有漏项，宁可停下也别提交半成品
 UPN=$(wc -l < /tmp/up-status.txt)
 ONLY=$(wc -l < /tmp/up-only-status.txt)
@@ -1783,7 +1837,7 @@ while IFS=$'\t' read -r st f; do
     D)
       # 上游删了，但 fixxed.txt 里记着这是我的定制 → 保留，不删
       # ★ 这里扫**全文**是有意的：历史上任何一轮记过的定制，上游删了都要保留。
-      #   13.3 的账本反查只看"本轮顶部段落"，两处口径不同、不要统一（目标不一样）。
+      #   9.3 的账本反查只看"本轮顶部段落"，两处口径不同、不要统一（目标不一样）。
       if [ -n "$FIXLOG" ] && [ -f "$FIXLOG" ] && grep -Fq -- "$f" "$FIXLOG"; then
         echo "KEEP_CUSTOM  $f（上游已删除，但 fixxed 里有记录，保留本地）"
         printf '%s\t%s\n' "$f" "上游已删除，但 fixxed.txt 记为定制，保留本地" >> /tmp/custom-kept.txt
@@ -1813,19 +1867,21 @@ if [ -s /tmp/custom-kept.txt ] && [ ! -f /tmp/custom-kept.merged ]; then
 fi
 ```
 
-### 8.4 把三方合并结果写回工作区
+### 6.4 把三方合并结果写回工作区
 
-8.2 只在 `$WORK_DIR` 里生成了结果，还要落回仓库。**冲突文件也照样写回**——写回去后文件里带着
+6.2 只在 `$WORK_DIR` 里生成了结果，还要落回仓库。**冲突文件也照样写回**——写回去后文件里带着
 `<<<<<<<` 标记，第 7 步直接在这个仓库文件上改，比在临时文件上改不容易搞错路径。
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}"
 cd "$REPO_ROOT" || exit 1
 
-# map.txt 必须存在：8.2 无论有没有可合并文件都会建它（哪怕是空的）。
-# 缺失 = 8.2 没跑完或 WORK_DIR 被清过，绝不能当成"本次无冲突"放过去。
-[ -f "$WORK_DIR/map.txt" ] || { echo "FAIL: map.txt 不存在，8.2 没跑完，回 8.2"; exit 1; }
+# map.txt 必须存在：6.2 无论有没有可合并文件都会建它（哪怕是空的）。
+# 缺失 = 6.2 没跑完或 WORK_DIR 被清过，绝不能当成"本次无冲突"放过去。
+[ -f "$WORK_DIR/map.txt" ] || { echo "FAIL: map.txt 不存在，6.2 没跑完，回 6.2"; exit 1; }
 
 WROTE=0; FAILED=0
 while IFS=$'\t' read -r f b rc; do
@@ -1871,9 +1927,9 @@ echo "已保存修前清单：$(wc -l < /tmp/conflict-files.before.txt) 个文�
 
 **可执行位是在哪里丢的**（别搞错归因，否则会对不需要修的文件白修）：
 
-- **8.2 走过的文件**（`git show ... > base/ours/theirs`）——`>` 创建的是 umask 决定的普通文件，
-  mode **在这一步就丢了**；8.4 的 `cp` 只是照搬那个 644，不会恢复。这类文件才需要 chmod。
-- **8.3 覆盖的文件**（`git checkout <ref> -- path`）——git 按索引里的 mode 写回，`100755` 会保留。
+- **6.2 走过的文件**（`git show ... > base/ours/theirs`）——`>` 创建的是 umask 决定的普通文件，
+  mode **在这一步就丢了**；6.4 的 `cp` 只是照搬那个 644，不会恢复。这类文件才需要 chmod。
+- **6.3 覆盖的文件**（`git checkout <ref> -- path`）——git 按索引里的 mode 写回，`100755` 会保留。
   这类文件不需要 chmod，硬修反而可能把不该可执行的文件改成可执行。
 
 处理方式按平台分：
@@ -1882,26 +1938,27 @@ echo "已保存修前清单：$(wc -l < /tmp/conflict-files.before.txt) 个文�
 - **Windows（Git Bash）**：`core.filemode=false`，`chmod` 基本不起作用，改了也不会进索引。
   这种文件直接**跳过权限修复**，在汇报里注明「N 个可执行位未恢复，Windows 平台限制」，不要谎报已修好。
 
-## 9. 第 7 步：冲突的人工（AI）修正规则
+## 7. 第 7 步：冲突的人工（AI）修正规则
 
 > **铁律 2 回扣**：合并的第一目标是**保住我的定制**，第二目标才是吸收官方。
 > 宁可少吸收一个上游特性，也不能丢一行我的改动。
 
 对每个带冲突标记的文件：
 
-**开始处理之前，清空本轮的两份手工日志**（conflict-log / buildfix-log；extra-log 已由第 0 步清空，并在 8.3 结束灌入了"保持现状"记录，这里不能再清）：
+**开始处理之前，清空本轮的两份手工日志**（conflict-log / buildfix-log；extra-log 已由第 0 步清空，并在 6.3 结束灌入了"保持现状"记录，这里不能再清）：
 
 ```
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : > /tmp/conflict-log.md
 : > /tmp/buildfix-log.md
-# extra-log.md 不在这里清：第 0 步已经清过，而且 8.3 结束时已经把
+# extra-log.md 不在这里清：第 0 步已经清过，而且 6.3 结束时已经把
 # "保持现状"的 custom-kept 灌进去了。这里再清会把那些记录抹掉。
 echo "LOGS_RESET"
 ```
 
 0. **每处理完一个文件，立刻把结果追加到 `/tmp/conflict-log.md`**，不要攒着——
    后面还要构建、排查、写三个记录文件，跨了十几个命令块，细节很容易记错。
-   （13.3 只从 `/tmp/conflict-files.before.txt` 取文件名，把它标成「冲突修正」；
+   （9.3 只从 `/tmp/conflict-files.before.txt` 取文件名，把它标成「冲突修正」；
     这里写的过程细节不进账本，只是给你自己排查时看的）
 
    ```
@@ -1915,7 +1972,7 @@ echo "LOGS_RESET"
    ```
 
    - 开始处理冲突前先 `: > /tmp/conflict-log.md` 清空，避免带上上一轮的旧内容；
-   - 本次完全没有冲突也要建这个文件（写一行 `- 本次无冲突需要修正。`），13.3 直接读。
+   - 本次完全没有冲突也要建这个文件（写一行 `- 本次无冲突需要修正。`），9.3 直接读。
 
 1. 先读 `fixxed.txt` 中关于该文件的条目，明确「我当初为什么改这里、想达到什么效果」。
 2. 再读冲突区块的官方侧（`theirs`），理解官方这次动了什么。
@@ -1937,7 +1994,7 @@ echo "LOGS_RESET"
    ```
 
    > 这里包含 `=======$` 是有意的：文件本来就是冲突文件，只剩中间那条分隔符是真实的漏修形态。
-   > 10.1 的全改动扫描不加它——那里扫的是所有改动文件，Markdown 的 7 等号下划线会误报。
+   > 8.1 的全改动扫描不加它——那里扫的是所有改动文件，Markdown 的 7 等号下划线会误报。
 
 5. **第二道校验：确认我的定制没被吃掉。** 只"没有冲突标记"是不够的——AI 完全可能把两边都删掉、或整段用官方版本覆盖，一样没有冲突标记，但我的改动没了。
 
@@ -1957,11 +2014,13 @@ echo "LOGS_RESET"
 ### 7.1 全部修完之后，重扫一遍（必做）
 
 上面是逐文件处理。全部处理完之后，**必须重新扫一次**并把结果覆盖到 `/tmp/conflict-files.txt`
-——不重扫的话，13.3 里"冲突标记残留"那一栏读到的还是**修之前**的数量，账本会写成"残留 N 个"，
+——不重扫的话，9.3 里"冲突标记残留"那一栏读到的还是**修之前**的数量，账本会写成"残留 N 个"，
 而实际上已经修好了。
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}"
 cd "$REPO_ROOT" || exit 1
 
@@ -1984,14 +2043,15 @@ fi
 echo "CONFLICTS_CLEARED"
 ```
 
-注意上面读的是 `/tmp/conflict-files.before.txt`（修之前那份清单，由 8.4 结束时保存）。
+注意上面读的是 `/tmp/conflict-files.before.txt`（修之前那份清单，由 6.4 结束时保存）。
 
-## 10. 第 8 步：一致性校验与构建验证（**必须做，不通过就不许提交**）
+## 8. 第 8 步：一致性校验与构建验证（**必须做，不通过就不许提交**）
 
-### 10.1 残留检查与语法校验
+### 8.1 残留检查与语法校验
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}" "${PRE_MERGE_HEAD:?FAIL: PRE_MERGE_HEAD 为空，回第 6 步}"
 cd "$REPO_ROOT" || exit 1
 
@@ -2029,6 +2089,8 @@ echo "NO_CONFLICT_MARKERS"
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 
@@ -2063,12 +2125,14 @@ EOF
 - **有 FAIL → 停下修，修不好就告诉我，不要提交。**
 - 没有 python3/PyYAML 导致跳过时，汇报里必须写「YAML 校验未执行（环境缺 PyYAML）」，不许写成"通过"。
 
-### 10.2 构建验证
+### 8.2 构建验证
 
 **先做三项前置检查，缺一项就会白编一遍**（都是毫秒级，`FAST=1` 下也照做——昨天踩的坑正是它们）：
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 
@@ -2114,6 +2178,8 @@ fi
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 
@@ -2135,6 +2201,8 @@ echo "TARGET_PROJ=$TARGET_PROJ"
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${TARGET_PROJ:?FAIL: TARGET_PROJ 为空}"
 cd "$REPO_ROOT" || exit 1
 [ -f "$TARGET_PROJ" ] || { echo "FAIL: $TARGET_PROJ 不存在"; exit 1; }
@@ -2190,7 +2258,7 @@ fi
 |---|---|
 | `FAST=1`，`BUILD_EXIT=0` | 通过 |
 | `FAST=0`，三个退出码全 0 | 通过 |
-| 非 0 | 失败 → 进 10.3 修复流程 |
+| 非 0 | 失败 → 进 8.3 修复流程 |
 | 输出 `NO_DOTNET` / `SDK 版本不足` | **未执行**，不是失败。汇报里必须照实写，不许写"通过" |
 
 
@@ -2198,11 +2266,11 @@ fi
 - **`FAST=1` 下一旦构建失败，修复后的重验必须切到 `--no-incremental`**——缓存会掩盖"改坏了但没重编"的情况；
 - `FAST=0` 的两次构建结果不一致（一次过、一次不过）→ 以失败为准，这通常意味着增量缓存掩盖了问题。
 - 构建可能耗时较久，耐心等待，不要中途判定为卡死。
-- **构建失败 → 进入 10.3 的修复流程，不许直接提交、不许推送。**
+- **构建失败 → 进入 8.3 的修复流程，不许直接提交、不许推送。**
 - 构建失败时**保留工作区现状，不要 `git checkout .` 回滚**，我要看到现场。
 - 构建通过 → 汇报里写明「构建通过」，继续。
 
-### 10.3 构建失败后的修复流程（**每轮 3 步，最多 3 轮**）
+### 8.3 构建失败后的修复流程（**每轮 3 步，最多 3 轮**）
 
 **先看清楚结构，别把"步"当成"轮"**：
 
@@ -2211,7 +2279,7 @@ fi
         ↑                      │
         └──── 不通过就回 ① ────┘   （最多 3 轮）
 
-③ 通过            → 进入第 9 步提交
+③ 通过            → 进入第 10 步提交
 ③ 不通过且未满 3 轮 → 回 ① 开下一轮
 ③ 不通过且已满 3 轮 → 停止，交材料给我
 ```
@@ -2223,6 +2291,8 @@ fi
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${TARGET_PROJ:?FAIL: TARGET_PROJ 为空}" "${PRE_MERGE_HEAD:?FAIL: 锚点丢失}"
 cd "$REPO_ROOT" || exit 1
 
@@ -2275,7 +2345,7 @@ echo "错误行数: $(grep -cE 'error [A-Z]+[0-9]+|error :|错误 ?[A-Z]+[0-9]+|
   `git cat-file -e "HEAD:<路径>"` 为假、`git cat-file -e "$UPSTREAM_REF:<路径>"` 为真。
   是的话优先**保留本地删除**：把引用它的文件回退到本地版本（`git checkout HEAD -- <文件>`），
   不要为了编译把本地删掉的水印/开发版组件再拉回来；构建面缩水在汇报里写明。
-- **本地删除但上游这一轮没改的文件**：它不在 `both-files` 里，8.1 看不见，只会在构建时以 CS0246 暴露——
+- **本地删除但上游这一轮没改的文件**：它不在 `both-files` 里，6.1 看不见，只会在构建时以 CS0246 暴露——
   按上面这条"先查本地删除"处理，不要直接去上游补文件。
 
 无法归类 → 停下来把错误和判断依据给我，不要硬猜。
@@ -2329,6 +2399,8 @@ echo "错误行数: $(grep -cE 'error [A-Z]+[0-9]+|error :|错误 ?[A-Z]+[0-9]+|
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失或损坏，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 set -o pipefail
@@ -2345,7 +2417,7 @@ fi
 ```
 
 - **修复后的重验固定跑这两条，不受 `FAST` 影响**——修复场景必须全量，缓存不可信。
-- 两次都通过 → 进入第 9 步提交（`BUILD_RESULT` 已被改写成「通过（修复后重验）」）。
+- 两次都通过 → 进入第 10 步提交（`BUILD_RESULT` 已被改写成「通过（修复后重验）」）。
 - **不通过 → 看 `$FIX_ROUND`**：
   - `< 3` → 回 **①**（它会自动把轮次 +1），继续修；
   - `= 3` → **立即停止**，把三样材料交给用户，不许再改。
@@ -2365,7 +2437,7 @@ fi
 每一处修复都要写进 `fixxed.txt` 的新增段落，包含：**文件 / 错误码 / 根因 / 修法 / 影响面 / 是否属于防御性补强**。
 这部分内容同时要出现在最终汇报的「构建修复」小节里。
 
-同样**边修边落盘**，不要等到 13.3 再回忆（`/tmp/buildfix-log.md`，13.3 会拼进去）：
+同样**边修边落盘**，不要等到 9.3 再回忆（`/tmp/buildfix-log.md`，9.3 会拼进去）：
 
 ```
 cat >> /tmp/buildfix-log.md <<EOF
@@ -2379,39 +2451,823 @@ EOF
 
 开始修之前先 `: > /tmp/buildfix-log.md`；本次构建一次通过也要建（写一行 `- 无，构建一次通过。`）。
 
-### 10.4 收尾执行顺序（一次说清，别来回跳）
+### 8.4 收尾执行顺序（一次说清，别来回跳）
 
 构建通过后，按这个顺序走完，中间不要回头：
 
-1. **13 节（第 11 步）** 写三个记录文件：`action.txt`、`out.txt`、`$FIXLOG`
-2. **11 节（第 9 步）** `git add -A -- . ':(exclude)patches' …` + `git commit`
-3. **12 节（第 10 步）** 推送，或按 `PUSH_MODE` 导出补丁
-4. **13.9（第 13 步）** 只有 `CUSTOM_TASK` 非空 / 我提了功能需求时才做：定制 → 构建 → 写 `[定制]` 段 → **第二个** commit → 再推/再导补丁
-5. **14 节（第 12 步）** 汇报（有定制就一次汇报完，别拆成两次）
+1. **第 9 步** 写记录文件：`action.txt`、`out.txt`、`$FIXLOG`（本轮有经验再追加 `memory.txt`）
+2. **第 10 步** `git add -A -- . ':(exclude)patches' …` + `git commit`
+3. **第 11 步** 推送，或按 `PUSH_MODE` 导出补丁
+4. **第 12 步** 只有 `CUSTOM_TASK` 非空 / 我提了功能需求时才做：定制 → 构建 → 写 `[定制]` 段 → **第二个** commit → 再推/再导补丁
+5. **第 13 步** 汇报（有定制就一次汇报完，别拆成两次）
 
-**章节号比步骤号大 2**，看到「13 节」不要以为是第 13 步——那是第 11 步的内容。
-**13.9 才是第 13 步**，它排在推送之后、汇报之前，别把两者搞混。
+**节号就是步号，不需要换算**：第 9 步在第 9 节，第 12 步在第 12 节。
 
-## 11. 第 9 步：提交（**必须先把第 11 步的三个记录文件写完，再执行本步**）
+## 9. 第 9 步：写记录文件（三个必有 + `memory.txt` 按需；**必须在第 10 步提交之前完成**）
 
-先跳到 13 节（第 11 步）写完 `action.txt` / `out.txt` / `$FIXLOG`，再回来一起提交
+> **铁律 3 回扣**：`out.txt` 与 `$FIXLOG` 的新内容都写在**文件上方**，不是末尾。
+> 写完用 `head` 检查（不是 `tail`），确认新段落在最上面、旧内容紧随其后且完好。
+
+### 9.1 `action.txt` —— 同步进度锚点（用于下次同步）
+
+先把两个统计量算出来（**必须现算，不要凭印象填**）：
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${PRE_MERGE_HEAD:?FAIL: 锚点丢失，回第 6 步}"
+cd "$REPO_ROOT" || exit 1
+
+# 三个来源都要算：
+#   ① 工作区 vs 锚点（未暂存的改动）
+#   ② 索引 vs 锚点（AI 可能已经 git add 过）
+#   ③ 未跟踪的新文件（第 7 步新拷进来的上游新文件）
+# 少算 ② 或 ③ 的话，UPDATED_FILES 会偏小甚至为 0，而这个值会写进 action.txt 长期留存。
+{
+  git -c core.quotePath=false diff --no-renames --name-only "$PRE_MERGE_HEAD" || exit 1
+  git -c core.quotePath=false diff --no-renames --cached --name-only "$PRE_MERGE_HEAD" || exit 1
+  git ls-files --others --exclude-standard || exit 1
+} > /tmp/updated-raw.txt || { echo "FAIL: 统计改动文件失败，停下问我"; exit 1; }
+
+# 记录文件名里的 . 要转义，否则 fixxedXtxt 这类名字也会被误排除（见 9.3 同款注释）
+FIXLOG_RE=$(printf '%s' "${FIXLOG:-fixxed.txt}" | sed 's/\./\\./g')
+UPDATED_FILES=$(LC_ALL=C sort -u /tmp/updated-raw.txt \
+  | grep -vE "^(action\.txt|out\.txt|${FIXLOG_RE}|patches/.*)$" \
+  | wc -l | tr -d ' ')
+
+# CONFLICT_FILES 记的是"本次发生过冲突的文件数"（6.4 的 before 清单），
+# 不是"修完之后还剩多少"（7.1 会用重扫结果覆盖 conflict-files.txt，成功时恒为 0）。
+# 用 -f 判存在，不要写成 `$(wc -l < 文件 | tr -d ' ' || echo 0)`：
+# `<` 打不开时 wc 根本不执行，但它在管道左侧，整条管道的退出码由右侧 tr 决定（0），
+# || echo 0 永远不触发，捕获到的是空串 → 下面 case 报"冲突计数非法 []"。
+CONFLICT_FILES=0
+[ -f /tmp/conflict-files.before.txt ] && CONFLICT_FILES=$(wc -l < /tmp/conflict-files.before.txt | tr -d ' ')
+case "$CONFLICT_FILES" in ''|*[!0-9]*) echo "FAIL: 冲突计数非法 [$CONFLICT_FILES]"; exit 1 ;; esac
+case "$UPDATED_FILES"  in ''|*[!0-9]*) echo "FAIL: 文件计数非法 [$UPDATED_FILES]";  exit 1 ;; esac
+
+echo "UPDATED_FILES=$UPDATED_FILES  CONFLICT_FILES=$CONFLICT_FILES"
+if [ "$UPDATED_FILES" -eq 0 ]; then
+  echo "FAIL: 本次改动文件数为 0，说明前面没真正改到东西，停下问我"
+  exit 1
+fi
+{
+  echo "export UPDATED_FILES=$UPDATED_FILES"
+  echo "export CONFLICT_FILES=$CONFLICT_FILES"
+} >> /tmp/upstream-sync.env
+```
+
+口径写明：`UPDATED_FILES` **不含** `action.txt`/`out.txt`/`$FIXLOG` 这三个记录文件，否则每轮都会多出 3 个。
+
+**用下面的命令整文件覆写**（不要靠 AI 手写，字段多、容易漏；`heredoc` 不加引号，变量会展开）：
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
+cd "$REPO_ROOT" || exit 1
+
+[ -n "$UPSTREAM_HEAD" ] || { echo "FAIL: UPSTREAM_HEAD 为空，回第 3 步"; exit 1; }
+[ -n "$BASE" ]          || { echo "FAIL: BASE 为空，回第 4 步"; exit 1; }
+[ -n "$SYNCED_FROM_SHA" ] || { echo "FAIL: SYNCED_FROM_SHA 为空，回第 1 步"; exit 1; }
+[ -n "$BUILD_RESULT" ]  || { echo "FAIL: BUILD_RESULT 为空，第 8 步没落盘"; exit 1; }
+# MY_REMOTE / MY_BRANCH 也要断言：少一个就会写出 "SYNCED_FROM = my/ @ abc1234"
+# 这种看着像正常、实际缺了分支名的值，而且不会有任何报错。
+[ -n "$MY_REMOTE" ] && [ -n "$MY_BRANCH" ] \
+  || { echo "FAIL: MY_REMOTE / MY_BRANCH 为空，回第 0 步"; exit 1; }
+
+cat > action.txt <<EOF
+# 上游同步进度记录
+UPSTREAM_REPO      = https://github.com/ClassIsland/ClassIsland.git
+UPSTREAM_BRANCH    = $UPSTREAM_BRANCH
+UPSTREAM_BRANCH_FB = ${UPSTREAM_BRANCH_FB:-}
+BRANCH_FALLBACK    = ${BRANCH_FALLBACK:-0}
+LAST_SYNCED_SHA   = $UPSTREAM_HEAD
+LAST_SYNCED_SHORT = $UPSTREAM_SHORT
+LAST_SYNCED_AT    = $(date +%Y-%m-%dT%H:%M:%S%z)
+BASE_SHA          = $(git rev-parse --short "$BASE")
+SYNCED_FROM       = $MY_REMOTE/$MY_BRANCH @ $SYNCED_FROM_SHA
+MY_REMOTE_URL     = $MY_REMOTE_URL
+LOCAL_BRANCH      = $LOCAL_BRANCH
+UPDATED_FILES     = $UPDATED_FILES
+CONFLICT_FILES    = $CONFLICT_FILES
+BUILD_RESULT      = $BUILD_RESULT
+EOF
+
+# AI 在 Windows 上写文件可能带 CRLF。不转的话，下次 source 时
+# `LAST_SYNCED_AT = ...\r` 的值会带一个 \r，比对永远不等，而且看不出来。
+tr -d '\r' < action.txt > action.txt.lf && mv action.txt.lf action.txt \
+  || { echo "FAIL: action.txt 转 LF 失败（文件被占用？关掉编辑器重试）"; exit 1; }
+
+cat action.txt
+```
+
+字段含义（照这个自查，别写反）：
+
+```
+# 上游同步进度记录
+UPSTREAM_REPO      = https://github.com/ClassIsland/ClassIsland.git
+UPSTREAM_BRANCH    = <本次实际使用的分支：参数区值，或回退后的 UPSTREAM_BRANCH_FB>
+UPSTREAM_BRANCH_FB = <参数区配置的回退目标；没配就留空>
+BRANCH_FALLBACK    = <0 正常 / 1 已回退>
+LAST_SYNCED_SHA   = <本次同步到的官方 commit 完整 SHA>
+LAST_SYNCED_SHORT = <前 7 位>
+LAST_SYNCED_AT    = <同步完成时间，ISO 8601 带时区>
+BASE_SHA          = <本次使用的合并基线短 SHA>
+SYNCED_FROM       = <MY_REMOTE 的实际名字>/<MY_BRANCH> @ <对齐后的短 SHA>
+MY_REMOTE_URL     = <第 0 步识别出的我仓库 URL>
+LOCAL_BRANCH      = <本地当前分支名>
+UPDATED_FILES     = <本次同步的文件总数>
+CONFLICT_FILES    = <冲突文件数量>
+BUILD_RESULT      = <构建结果：通过 / 失败 / 环境无 SDK 未执行>
+```
+
+**写完必须回读校验（第二道）：**
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_HEAD:?FAIL: UPSTREAM_HEAD 为空，回第 3 步}"
+cd "$REPO_ROOT" || exit 1
+
+[ -f action.txt ] || { echo "FAIL: action.txt 不存在"; exit 1; }
+
+# 真比较，不是打印出来让人肉眼看——40 位 SHA 肉眼比不出差异
+get_field() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" action.txt | head -1 | tr -d ' \r'; }
+
+GOT=$(get_field LAST_SYNCED_SHA)
+[ "$GOT" = "$UPSTREAM_HEAD" ] \
+  || { echo "FAIL: LAST_SYNCED_SHA 不一致"; echo "  文件里: [$GOT]"; echo "  应该是: [$UPSTREAM_HEAD]"; exit 1; }
+
+[ -n "$(get_field UPSTREAM_BRANCH)" ] || { echo "FAIL: UPSTREAM_BRANCH 为空"; exit 1; }
+[ -n "$(get_field BUILD_RESULT)" ]    || { echo "FAIL: BUILD_RESULT 为空"; exit 1; }
+[ -n "$(get_field UPDATED_FILES)" ]   || { echo "FAIL: UPDATED_FILES 为空"; exit 1; }
+grep -q $'\r' action.txt && { echo "FAIL: action.txt 里还有 \r"; exit 1; }
+echo "ACTION_OK: LAST_SYNCED_SHA=$GOT"
+```
+
+- `action.txt` 必须存在且已转 LF；
+- `LAST_SYNCED_SHA` 必须与 `$UPSTREAM_HEAD` **逐字符相等**（脚本会真比对，不靠肉眼）；
+- 其它必填字段（`UPSTREAM_BRANCH` / `BUILD_RESULT` / `UPDATED_FILES`）不能为空；
+- 任何一项不过就重写，写完再验一次，仍不过则停下来告诉我，不许带着错值提交。
+- **`out.txt` 和 `$FIXLOG` 在这一步还不需要检查**——它们分别在 9.2 / 9.3 才写。
+
+### 9.2 `out.txt` —— 历次同步的 Action 记录（**新记录插在最上面，旧记录往下压**）
+
+名称取 `.github/workflows/*.yml` 里 `name:` 字段的值；没有该字段就用文件名。
+
+**写入方式：前插（prepend），不是追加。** 每次同步的新段落插在表头之后、**旧记录之前**；
+旧记录整体下移，**内容一个字都不许改、不许重排、不许删除**。
+
+首次创建时的表头（表头永远在最顶部，不要动它）：
+
+```
+# ClassIsland 上游同步 · Action 变更记录
+（最新记录在最上方，越往下越旧）
+```
+
+**插入位置示意：**
+
+```
+# ClassIsland 上游同步 · Action 变更记录
+（最新记录在最上方，越往下越旧）
+
+================================================================
+## 2026-10-17 21:00:00  同步 fd83102      ← 这次新的插在这里
+================================================================
+================================================================
+## 2026-09-20 10:00:00  同步 a8af81ba      ← 上次的，被压到下面
+================================================================
+================================================================
+## 2026-08-30 09:00:00  同步 045901ad      ← 更早的，继续往下
+================================================================
+```
+
+**前插的写法（表头是前 2 行）：**
+
+**第一步：先把本次段落写成文件**（不要用 shell 变量传整段文本——跨 shell 会丢，
+`printf "$NEW_SECTION"` 输出两个空行照样会被当成"写成功"）：
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_SHORT:?FAIL: UPSTREAM_SHORT 为空}" \
+  "${BASE:?FAIL: BASE 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空}" "${LOCAL_BRANCH:?FAIL: LOCAL_BRANCH 为空}"
+cd "$REPO_ROOT" || exit 1
+
+# 非空 ≠ 能解析。下面 `git diff "$BASE" "$UPSTREAM_REF"` 是带 `|| :` 兜底的，
+# 解析失败时它会把 wf-status.txt 清空 → out.txt 写成"新增/修改/删除 全部(无)"，
+# 看起来像"本次没动 workflow"，实际是一个都没查。必须提前拦住。
+git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
+  || { echo "FAIL: BASE 解析不到（$BASE），回第 4 步"; exit 1; }
+git rev-parse --verify --quiet "$UPSTREAM_REF^{commit}" >/dev/null \
+  || { echo "FAIL: UPSTREAM_REF 解析不到（$UPSTREAM_REF），回第 3 步"; exit 1; }
+
+OUT_WF=".github/workflows"
+
+# ---- ① 工作流名称：优先 name: 字段，回退文件名 ----
+wf_name() {  # $1=ref  $2=path
+  # name: 后面可能带引号（name: "Build"）或行内注释（name: Build # 临时），
+  # 原样塞进 out.txt 会变成 build_release.yml ("Build") 这种脏格式，先剥干净。
+  # 只认「空白 + #」才是注释：name: a#b 里的 # 属于值本身，不能一起切掉。
+  _n=$(git show "$1:$2" 2>/dev/null | sed -n 's/^name:[[:space:]]*//p' | head -1 \
+       | sed -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//')
+  _n=${_n%\"}; _n=${_n#\"}
+  _n=${_n%\'}; _n=${_n#\'}
+  [ -n "$_n" ] || _n=$(basename "$2")
+  printf '%s' "$_n"
+}
+
+# 这里不能写 `2>/dev/null || : > 文件`：diff 一失败（BASE/UPSTREAM_REF 无效）就被吞成
+# "没有 workflow 变更"，out.txt 的「新增/修改/删除」全写 (无)，看不出任何异常。
+git -c core.quotePath=false diff --no-renames --name-status \
+  "$BASE" "$UPSTREAM_REF" -- "$OUT_WF" > /tmp/wf-status.txt 2>/tmp/wf-status.err \
+  || { echo "FAIL: 取 workflow 变更失败（BASE/UPSTREAM_REF 无效？）"; cat /tmp/wf-status.err; exit 1; }
+
+: > /tmp/wf-block.txt
+for pair in "新增:A" "修改:M" "删除:D"; do
+  label=${pair%%:*}; code=${pair##*:}
+  echo "${label}:" >> /tmp/wf-block.txt
+  cnt=0
+  while IFS=$'\t' read -r st f; do
+    [ "$st" = "$code" ] || continue
+    if [ "$code" = "D" ]; then _r="$BASE"; else _r="$UPSTREAM_REF"; fi
+    echo "  - $(basename "$f") ($(wf_name "$_r" "$f"))" >> /tmp/wf-block.txt
+    cnt=$((cnt+1))
+  done < /tmp/wf-status.txt
+  [ "$cnt" -eq 0 ] && echo "  - (无)" >> /tmp/wf-block.txt
+done
+
+echo "未变更:" >> /tmp/wf-block.txt
+# 同上：先落到 raw 再过滤，别让 ls-tree 的失败被 grep 的退出码掩盖
+git -c core.quotePath=false ls-tree -r --name-only "$UPSTREAM_REF" -- "$OUT_WF" > /tmp/wf-all.raw 2>/tmp/wf-all.err \
+  || { echo "FAIL: 列 workflow 文件失败（UPSTREAM_REF 无效？）"; cat /tmp/wf-all.err; exit 1; }
+grep -E '\.ya?ml$' /tmp/wf-all.raw > /tmp/wf-all.txt || true
+awk -F'\t' '{print $2}' /tmp/wf-status.txt | LC_ALL=C sort -u > /tmp/wf-changed.txt
+LC_ALL=C comm -23 <(LC_ALL=C sort /tmp/wf-all.txt) /tmp/wf-changed.txt > /tmp/wf-same.txt
+cnt=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  echo "  - $(basename "$f")" >> /tmp/wf-block.txt
+  cnt=$((cnt+1))
+done < /tmp/wf-same.txt
+[ "$cnt" -eq 0 ] && echo "  - (无)" >> /tmp/wf-block.txt
+
+# ---- ② 提交列表：每条上游提交后面附「改动文件数」 ----
+#    手抄的话，提交标题里的反引号、$() 会在 heredoc 里被二次展开（C# 仓库标题里
+#    带 `ProfileService` 这种很常见），轻则缺字，重则真的执行一段命令。
+#    文件数按「相对第一父提交」算；merge commit 也能算出一个有意义的值。
+git rev-list "$BASE".."$UPSTREAM_REF" > /tmp/commit-shas.txt \
+  || { echo "FAIL: 取提交列表失败"; exit 1; }
+: > /tmp/commit-list.txt
+while IFS= read -r sha; do
+  [ -n "$sha" ] || continue
+  subj=$(git log -1 --format=%s "$sha") \
+    || { echo "FAIL: 读不到提交 $sha 的标题"; exit 1; }
+  if git rev-parse --verify --quiet "$sha^1" >/dev/null 2>&1; then
+    nf=$(git -c core.quotePath=false diff --no-renames --name-only "$sha^1" "$sha" | wc -l | tr -d ' ')
+  else
+    nf=$(git -c core.quotePath=false show --format= --name-only --root "$sha" | sed '/^$/d' | wc -l | tr -d ' ')
+  fi
+  printf '  - %s %s（%s 个文件）\n' "$(git rev-parse --short "$sha")" "$subj" "$nf" >> /tmp/commit-list.txt
+done < /tmp/commit-shas.txt
+CN=$(wc -l < /tmp/commit-list.txt | tr -d ' ')
+
+# 冲突修正统计：发生过多少、实际修正多少、残留多少（7.1 之后残留应为 0）
+# 与 9.1 的 CONFLICT_FILES 同一套写法：先 -f 判存在，再 wc。
+# 不要写 `cat 文件 | wc -l`：cat 打不开时 wc 照样输出 0，把
+# "文件缺失 / 没权限" 伪装成 "没有冲突"——而下面正是拿 0 去判「冲突修正 : 无」。
+CF_BEFORE=0
+if [ -f /tmp/conflict-files.before.txt ]; then
+  CF_BEFORE=$(wc -l < /tmp/conflict-files.before.txt | tr -d ' ')
+fi
+CF_AFTER=0
+if [ -f /tmp/conflict-files.txt ]; then
+  CF_AFTER=$(wc -l < /tmp/conflict-files.txt | tr -d ' ')
+fi
+case "$CF_BEFORE" in ''|*[!0-9]*) echo "FAIL: 冲突计数非法 [$CF_BEFORE]"; exit 1 ;; esac
+case "$CF_AFTER"  in ''|*[!0-9]*) echo "FAIL: 残留计数非法 [$CF_AFTER]";  exit 1 ;; esac
+if [ "$CF_BEFORE" -eq 0 ]; then
+  CF_LINE="冲突修正 : 无"
+else
+  CF_LINE="冲突修正 : 发生过 $CF_BEFORE 个文件，已修正 $((CF_BEFORE - CF_AFTER)) 个，残留 $CF_AFTER 个"
+fi
+
+cat > /tmp/new-out.txt <<BLOCK
+================================================================
+## $(date '+%Y-%m-%d %H:%M:%S')  同步 $UPSTREAM_SHORT
+上游目标 : ClassIsland/ClassIsland @ $UPSTREAM_BRANCH ($UPSTREAM_SHORT)
+本次基线 : $(git rev-parse --short "$BASE")
+本地分支 : $LOCAL_BRANCH  →  本地提交见本次 commit
+
+$(cat /tmp/wf-block.txt)
+
+本次同步的上游提交（$CN 个，全部列出，每条附改动文件数）:
+$(cat /tmp/commit-list.txt)
+$CF_LINE
+================================================================
+BLOCK
+
+# ---- ③ 校验：空段落、占位符残留、提交条数对不上，一律不许往下走 ----
+[ -s /tmp/new-out.txt ] || { echo "FAIL: 新段落为空"; exit 1; }
+grep -q '^## ' /tmp/new-out.txt || { echo "FAIL: 段落缺少 ## 标题行"; exit 1; }
+
+# 占位符统一按尖括号检：模板里出现过 <或写 (无)>、<短SHA> 等各种写法，
+# 只查 '<填：' 是查不到的。
+# ★ 不能简单写成 '<[^>]{1,40}>'：提交标题里出现 List<T> / Dictionary<string, object>
+#   这类泛型是常事，那样会把正常内容当成占位符，直接卡死整轮。
+#   这里只认两种"像占位符"的：尖括号里含非 ASCII（中文），或全大写标识符（TARGET_PROJ 这种）。
+# ★ LC_ALL=C 不能省：UTF-8 locale 下 grep 会把 " -~" 这个范围当成三个字面字符 {空格,-,~}，
+#   于是 [^ -~] 几乎匹配任何字母 → 满屏误报（连 List<T> 都命中）。C locale 下才是按字节判断。
+if tr -d '\r' < /tmp/new-out.txt | LC_ALL=C grep -nE '<[^>]*[^ -~][^>]*>|<[A-Z][A-Z0-9_]{2,}>'; then
+  echo "FAIL: 上面这些占位符没替换干净，改完再跑这一步"; exit 1
+fi
+
+GOT_CN=$(grep -c '^  - [0-9a-f]\{7,\} ' /tmp/new-out.txt || true)
+[ "$GOT_CN" -eq "$CN" ] \
+  || { echo "FAIL: 提交列表 $GOT_CN 条 != 实际 $CN 条"; exit 1; }
+
+echo "OK: 新段落 $(wc -l < /tmp/new-out.txt) 行，提交 $CN 条"
+```
+
+**第二步：插入（表头 2 行不动，新段落插在第 3 行位置）**：
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_SHORT:?FAIL: UPSTREAM_SHORT 为空}"
+cd "$REPO_ROOT" || exit 1
+[ -s /tmp/new-out.txt ] || { echo "FAIL: 新段落不存在，先做上一步"; exit 1; }
+grep -q -- "$UPSTREAM_SHORT" /tmp/new-out.txt \
+  || { echo "FAIL: 新段落里没有本次短 SHA，可能是上一轮的残留文件"; exit 1; }
+
+# 末尾必须有换行，否则 cat 时新段最后一行会和旧文件第 3 行粘成一行，
+# 行数守恒校验会失败，报的却是"旧记录被吞"——排查方向直接跑偏。
+if [ -n "$(tail -c 1 /tmp/new-out.txt)" ]; then printf '\n' >> /tmp/new-out.txt; fi
+
+# 只转新段落的 CR，旧 out.txt 逐字节保留：
+# 旧文件若本来就是 CRLF，对整份文件 tr -d '\r' 会把旧记录每一行都改掉，
+# 违反"旧内容一个字都不许改"。FIXLOG 那边也是只转新段。
+tr -d '\r' < /tmp/new-out.txt > /tmp/new-out.lf \
+  || { echo "FAIL: 新段落转 LF 失败"; exit 1; }
+NEW_N=$(wc -l < /tmp/new-out.lf | tr -d ' ')
+
+if [ -f out.txt ]; then
+  # 表头必须是那两行。只查首行不够：如果文件是旧版（只有 1 行表头），
+  # head -2 + tail -n +3 会把第 2 行的旧记录挤掉，历史就少一条。
+  head -1 out.txt | grep -q '^# ClassIsland 上游同步' \
+    || { echo "FAIL: out.txt 首行不是预期表头，停下问我"; exit 1; }
+  sed -n '2p' out.txt | grep -q '最新记录在最上方' \
+    || { echo "FAIL: out.txt 第 2 行不是说明行（可能是旧版格式），停下问我"; head -3 out.txt; exit 1; }
+
+  cp out.txt out.txt.bak || { echo "FAIL: 备份 out.txt 失败"; exit 1; }
+  OLD_N=$(wc -l < out.txt | tr -d ' ')
+
+  { head -2 out.txt; echo; cat /tmp/new-out.lf; tail -n +3 out.txt; } > out.txt.tmp \
+    || { echo "FAIL: 拼接失败"; rm -f out.txt.tmp; exit 1; }
+  [ -s out.txt.tmp ] || { echo "FAIL: 拼接结果为空，旧记录丢了"; exit 1; }
+
+  # 行数守恒：旧 + 新 + 1（中间那个空行）。少了就是旧记录被吞
+  EXP=$((OLD_N + NEW_N + 1))
+  GOT=$(wc -l < out.txt.tmp | tr -d ' ')
+  [ "$GOT" -eq "$EXP" ] \
+    || { echo "FAIL: 行数 $GOT != 预期 $EXP（旧 $OLD_N + 新 $NEW_N + 1）"; rm -f out.txt.tmp; exit 1; }
+
+  # 新段落已在上一步转成 LF；这里不再对整份文件做 tr，旧内容保持原字节
+  mv out.txt.tmp out.txt || { echo "FAIL: 覆盖 out.txt 失败（文件被占用？）"; exit 1; }
+else
+  # 首次：表头用两个参数要写两条格式串，否则 printf 会把格式串复用两遍变成 4 行
+  printf '%s\n%s\n\n' '# ClassIsland 上游同步 · Action 变更记录' '（最新记录在最上方，越往下越旧）' > out.txt
+  cat /tmp/new-out.lf >> out.txt
+fi
+
+# 结构断言：新段落必须紧跟在表头下方（表头 2 行 + 1 空行，第 4 行应是 ====）
+head -4 out.txt | tail -1 | grep -q '^====' \
+  || { echo "FAIL: 新段没插在表头下方（可能是追加到了末尾）"; head -8 out.txt; exit 1; }
+echo "OUT_OK: 总行数 $(wc -l < out.txt)，新段 $(echo "$NEW_N") 行在最上方"
+```
+
+- 文件不存在时：先写表头 + 新段落；
+- 文件存在时：前 2 行表头保持不动，新段落插在第 3 行位置，旧内容全部往后推。
+- **不要用 `>>` 追加到末尾**：那会把新记录压到文件最后，旧记录反而跑到上面。
+
+每次同步**插到最上方**的段落（照此格式，**标题、字段名、缩进都保持一致**）：
+
+```
+================================================================
+## <YYYY-MM-DD HH:mm:ss>  同步 <短SHA>
+上游目标 : ClassIsland/ClassIsland @ <UPSTREAM_BRANCH> (<短 SHA>)
+本次基线 : <BASE 短SHA>
+本地分支 : <LOCAL_BRANCH>  →  本地提交见本次 commit
+
+新增:
+  - (无)
+修改:
+  - build_release.yml (Build)
+删除:
+  - (无)
+未变更:
+  - close_stale_issues.yml (Close inactive issues)
+  - issues_similarity_analysis.yml (Issues Similarity Analysis)
+  - qodana_code_quality.yml (Qodana)
+
+本次同步的上游提交（<N> 个，全部列出，每条附改动文件数）:
+  - fd83102d feat(ui): 支持通过滑动消除界面 toast（1 个文件）
+  - 9650fb0c feat(profile): 日程课表调课功能（3 个文件）
+  - d8e5f012 feat(ui/profile-editor): 优化档案编辑器在日程模式和经典模式下的行为（2 个文件）
+  - ……（本次共有多少个就继续列多少行，一条不省）
+冲突修正 : 无
+================================================================
+```
+
+格式要点（这几条决定文件好不好读）：
+- `新增 / 修改 / 删除 / 未变更` 四节**固定顺序**，每节下的条目**一行一个**，不要用逗号挤在同一行；
+- 名称统一写成 `文件名 (workflow 的 name 字段)`；`name` 缺失时只写文件名；
+- 某节为空写 `(无)`，但**不要删掉这一节**；
+- 提交列表标题里写明总条数，正文逐条列全，不写「其余 N 个见 git log」。
+- 每条上游提交后面必须写 `（N 个文件）`，N 是该提交相对第一父提交改动的文件数（rename 按删除+新增计，和全流程 `--no-renames` 口径一致）。
+- 段末必须有 `冲突修正 : …` 一行：无冲突写 `无`；有冲突写 `发生过 N 个文件，已修正 M 个，残留 K 个`。
+- `本地提交` 一栏写「见本次 commit」——因为本文件在提交之前生成，此时还没有 commit SHA。
+
+若本次完全没有涉及 workflow 变更，`新增/修改/删除` 三节都写 `(无)`，并在段落末尾加一行 `本次无 Action 变更`——
+**不要自己编造名字**。提交列表必须真实，取自 `git rev-list "$BASE".."$UPSTREAM_REF"`；文件数用 `git diff --name-only <sha>^ <sha> | wc -l`（见上面的生成块），不要手估。
+
+**提交列表必须逐条列全，不许省略。** 本次有多少个提交就写多少行（43 个就写 43 行），
+禁止出现「其余 N 个见 git log」「...」「（略）」这类写法——这份文件是给人看的，不是索引。
+
+**前插完成后回读校验**：`head -70 out.txt` 必须能看到刚写的那一段，**且它在表头正下方、所有旧记录之上**；
+段头的短 SHA 与 `UPSTREAM_HEAD` 一致。若发现新段落跑到了文件末尾，说明用了追加，改回来重写。
+
+### 9.3 改动账本（**新段落插在最前面，旧内容原样下移，不覆写**）
+
+**直接用第 2 步探测出的 `$FIXLOG`，不要在这里重新判断一次**（重新判断有可能因为期间新增/删除文件而落到另一个文件上）。
+若 `$FIXLOG` 为空，说明第 2 步漏执行了，停下来回头补。
+
+- 两个相似文件同时存在时**只写 `fixxed.txt`**（即 `$FIXLOG` 指向的那个），并在汇报里告诉我「发现 fixed.txt 与 fixxed.txt 并存」，不要合并、不要删除任何一个。
+- 日志文件原本不存在时，本步骤负责创建 `$FIXLOG`（默认 `fixxed.txt`），并在汇报里标注「首次建立改动日志」。
+
+**文件已存在时**（绝大多数情况），里面是我此前改动的记录。你要：
+1. 先**完整读一遍**，理解已有格式（标题层级、字段名、书写习惯）；
+2. 把新段落**插到文件最开头**（旧内容整体下移），格式与已有内容保持一致；
+3. 旧内容**一行都不许改、不许重排、不许删除**。
+
+**第一步：先把本次段落写成文件**（理由同 9.2——跨 shell 传整段文本必丢）：
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${FIXLOG:?FAIL: FIXLOG 为空，回第 2 步探测}" \
+  "${UPSTREAM_SHORT:?FAIL: UPSTREAM_SHORT 为空}" "${BASE:?FAIL: BASE 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空}" \
+  "${UPSTREAM_REMOTE:?FAIL: UPSTREAM_REMOTE 为空}" "${UPSTREAM_BRANCH:?FAIL: UPSTREAM_BRANCH 为空}"
+cd "$REPO_ROOT" || exit 1
+
+# 变量非空不等于能解析：这里有两个值要真的参与计算，解析不到就会在账本里留下空白
+# （"上游  个提交"、"基线 "），看起来像同步成功，实际什么都没算。
+git rev-parse --verify --quiet "$UPSTREAM_REF^{commit}" >/dev/null \
+  || { echo "FAIL: UPSTREAM_REF 解析不到（$UPSTREAM_REF），回第 3 步"; exit 1; }
+git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
+  || { echo "FAIL: BASE 解析不到（$BASE），回第 4 步"; exit 1; }
+
+# 构建结果也要断言：缺了的话模板会写出 "构建:  → "，占位符检查只会报"占位符没替换"，
+# 排查方向跑偏（真正的问题是第 8 步没落盘）。
+[ -n "$BUILD_RESULT" ] || { echo "FAIL: BUILD_RESULT 为空，第 8 步没落盘，回去补"; exit 1; }
+[ -n "$TARGET_PROJ" ]  || { echo "FAIL: TARGET_PROJ 为空，回第 0 步"; exit 1; }
+
+if [ -f "$FIXLOG" ]; then echo "FIXLOG=$FIXLOG（已存在，$(wc -l < "$FIXLOG") 行）"; else echo "FIXLOG=$FIXLOG（不存在，将新建）"; fi
+
+# 几份"边做边记"的日志如果本轮没写过，就补一行占位，避免 heredoc 拼出空段落
+[ -s /tmp/extra-log.md ]     || echo "- 本次无其他调整。" > /tmp/extra-log.md
+[ -s /tmp/clean-merge-log.md ] || echo "- 本次无干净三方合并。" > /tmp/clean-merge-log.md
+[ -s /tmp/conflict-log.md ]  || echo "- 本次无冲突需要修正。" > /tmp/conflict-log.md
+[ -s /tmp/buildfix-log.md ]  || {
+  case "${BUILD_RESULT%%（*}" in
+    通过)   echo "- 无，构建一次通过。" > /tmp/buildfix-log.md ;;
+    未执行) echo "- 构建未执行（${BUILD_RESULT}），本轮没有修复记录。" > /tmp/buildfix-log.md ;;
+    *)      echo "- 构建未通过（${BUILD_RESULT}），详见 action.txt。" > /tmp/buildfix-log.md ;;
+  esac
+}
+
+# 冲突标记残留数直接从 7.1 的重扫结果取，不靠 AI 数
+# 同 9.1：用 -f 判存在，别让"< 打不开"被管道吞成空串
+# （空串写进账本就是"上游  个文件"，看起来像统计坏了）
+cnt() { if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
+CM=$(cnt /tmp/conflict-files.txt)
+UPN=$(cnt /tmp/up-files.txt)
+BN=$(cnt /tmp/both-files.txt)
+LN=$(cnt /tmp/local-files.txt)
+
+# heredoc 不加引号：下面 $(cat ...) 需要展开，把四份边做边记的日志直接拼进来，不靠回忆。
+# ★ 账本只记「改了哪些文件、每个文件怎么处理的」，不写冲突细节、不贴代码。
+#   用户要求过：文件必须列全，代码怎么改的不写。
+#   处理方式只有四种：取上游 / 三方合并 / 冲突修正 / 保留本地。
+git -c core.quotePath=false diff --no-renames --name-only "$PRE_MERGE_HEAD" > /tmp/fixlog-all.raw \
+  || { echo "FAIL: 取改动清单失败（PRE_MERGE_HEAD 无效？）"; exit 1; }
+git -c core.quotePath=false diff --no-renames --cached --name-only "$PRE_MERGE_HEAD" >> /tmp/fixlog-all.raw \
+  || { echo "FAIL: 取暂存改动清单失败"; exit 1; }
+LC_ALL=C sort -u /tmp/fixlog-all.raw \
+  | grep -vE '^(action\.txt|out\.txt|patches/.*)$' \
+  | grep -vxF -- "$FIXLOG" > /tmp/fixlog-changed.txt || true
+# grep 无匹配时退出码是 1，不是错误；但清单为空要当错误处理（一个文件都没改却写账本，肯定是操作错了）
+[ -s /tmp/fixlog-changed.txt ] || { echo "FAIL: 改动清单为空，检查 PRE_MERGE_HEAD 和暂存状态"; exit 1; }
+
+: > /tmp/fixlog-files.md
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if   [ -f /tmp/conflict-files.before.txt ] && grep -Fxq -- "$f" /tmp/conflict-files.before.txt; then how="冲突修正"
+  elif [ -f /tmp/clean-merge-files.txt ]     && grep -Fxq -- "$f" /tmp/clean-merge-files.txt;     then how="三方合并"
+  elif [ -f /tmp/custom-kept.txt ]           && grep -Fq  -- "$f" /tmp/custom-kept.txt;           then how="保留本地"
+  else how="取上游"
+  fi
+  printf -- '- %s — %s\n' "$f" "$how" >> /tmp/fixlog-files.md
+done < /tmp/fixlog-changed.txt
+
+cat > /tmp/new-fixlog.txt <<BLOCK
+================================================
+[$(date '+%Y-%m-%d %H:%M')] 同步 $UPSTREAM_REMOTE/$UPSTREAM_BRANCH @ $UPSTREAM_SHORT
+================================================
+
+范围：基线 $(git rev-parse --short "$BASE") → $UPSTREAM_SHORT，上游 $(git rev-list --count "$BASE".."$UPSTREAM_REF") 个提交，改动 $(cnt /tmp/fixlog-changed.txt) 个文件。
+处理：冲突 ${CONFLICT_FILES:-0} 个（残留 $CM 个）；本地定制 $LN 个文件保留未动；分支回退 ${BRANCH_FALLBACK:-0}。
+构建：$TARGET_PROJ → $BUILD_RESULT
+
+改动的文件
+----------
+$(cat /tmp/fixlog-files.md)
+BLOCK
+
+[ -s /tmp/new-fixlog.txt ] || { echo "FAIL: 新段落为空"; exit 1; }
+# 必须精确到日期行。只写 '^\[' 的话，正文里随手一行 [改上游] / [issue #123] 就能骗过检查，
+# 真漏了标题行也照样通过——而下一轮 9.3 的 awk 截段要靠 [YYYY- 开头，那时才发现账本坏了。
+grep -qE '^\[[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] ' /tmp/new-fixlog.txt \
+  || { echo "FAIL: 段落缺少 [YYYY-MM-DD HH:MM] 标题行"; exit 1; }
+grep -q -- "$UPSTREAM_SHORT" /tmp/new-fixlog.txt \
+  || { echo "FAIL: 段落里没有本次短 SHA"; exit 1; }
+
+# 占位符统一按尖括号检。模板里可能残留 <文件:行号> / <0 或 数量> / <TARGET_PROJ> 等，
+# 只查 '<填：' 是查不到的（本模板里根本没有 '<填：' 这种写法）。
+# ★ 同样不能写成 '<[^>]{1,60}>'：账本里贴 C# 泛型（List<Profile>、Dictionary<string,int>）
+#   太正常了，宽匹配会把真实内容判成占位符，逼着 AI 去"修"一段本来正确的内容。
+# ★ LC_ALL=C 必须加：UTF-8 locale 下 " -~" 这个范围会被当成字面字符集，
+#   [^ -~] 变成"不是空格/减号/波浪号"，几乎匹配所有字母，检查直接失效（全误报）。
+if tr -d '\r' < /tmp/new-fixlog.txt | LC_ALL=C grep -nE '<[^>]*[^ -~][^>]*>|<[A-Z][A-Z0-9_]{2,}>'; then
+  echo "FAIL: 上面这些尖括号占位符没替换，改完再跑这一步"; exit 1
+fi
+
+echo "OK: 新段落 $(wc -l < /tmp/new-fixlog.txt) 行"
+```
+
+**第二步：插到文件最开头（旧内容原样下移，一个字都不许改）**：
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${FIXLOG:?FAIL: FIXLOG 为空}"
+cd "$REPO_ROOT" || exit 1
+[ -s /tmp/new-fixlog.txt ] || { echo "FAIL: 新段落不存在，先做上一步"; exit 1; }
+
+# 新段落自己先转 LF（只动新段，绝不动旧内容——旧文件如果本来用 CRLF，
+# 对它做 tr -d 会把每一行都改掉，正好违反"旧内容一个字都不许改"）
+tr -d '\r' < /tmp/new-fixlog.txt > /tmp/new-fixlog.lf && mv /tmp/new-fixlog.lf /tmp/new-fixlog.txt \
+  || { echo "FAIL: 新段落转 LF 失败"; exit 1; }
+
+# ★ 末尾必须有换行。没有的话 cat 新段+旧文件时，新段最后一行会和旧文件第一行粘成一行：
+#   行数校验会失败，但报的是"旧内容被改动了"，很容易被误判成"手滑改到旧内容"。
+if [ -n "$(tail -c 1 /tmp/new-fixlog.txt)" ]; then printf '\n' >> /tmp/new-fixlog.txt; fi
+
+NEW_N=$(wc -l < /tmp/new-fixlog.txt | tr -d ' ')
+
+if [ -f "$FIXLOG" ]; then
+  # 先留一份原件，用于逐字节比对（行数相等不代表内容没被换掉）
+  cp "$FIXLOG" /tmp/fixlog.old || { echo "FAIL: 备份 FIXLOG 失败"; exit 1; }
+  OLD_N=$(wc -l < "$FIXLOG" | tr -d ' ')
+  cat /tmp/new-fixlog.txt "$FIXLOG" > "$FIXLOG.tmp" \
+    || { echo "FAIL: 拼接失败"; rm -f "$FIXLOG.tmp"; exit 1; }
+
+  # 行数守恒
+  GOT=$(wc -l < "$FIXLOG.tmp" | tr -d ' ')
+  EXP=$((NEW_N + OLD_N))
+  [ "$GOT" -eq "$EXP" ] \
+    || { echo "FAIL: 行数 $GOT != 旧 $OLD_N + 新 $NEW_N = $EXP"; rm -f "$FIXLOG.tmp"; exit 1; }
+
+  # ★ 逐字节验证"旧内容原样下移"——比行数更可靠：
+  # 把 tmp 跳过前 NEW_N 行后的部分，跟备份原件逐字节比较。
+  tail -n +$((NEW_N + 1)) "$FIXLOG.tmp" | cmp -s - /tmp/fixlog.old \
+    || { echo "FAIL: 旧内容被改动了（不只是行数问题）"; rm -f "$FIXLOG.tmp"; exit 1; }
+else
+  OLD_N=0
+  cp /tmp/new-fixlog.txt "$FIXLOG.tmp" || { echo "FAIL: 建文件失败"; exit 1; }
+fi
+
+[ -s "$FIXLOG.tmp" ] || { echo "FAIL: 结果为空"; exit 1; }
+mv "$FIXLOG.tmp" "$FIXLOG" || { echo "FAIL: 覆盖 $FIXLOG 失败（文件被占用？关掉编辑器重试）"; exit 1; }
+
+head -5 "$FIXLOG"
+echo "旧 $OLD_N 行 → 新 $(wc -l < "$FIXLOG") 行"
+```
+
+- **为什么删掉了"旧文件末尾补换行"**：新段落在前、旧内容在后，所以新旧之间会不会粘连，
+  取决于**新段落**末尾有没有换行，跟旧文件末尾无关。旧文件末尾补换行反而改动了旧内容。
+- **为什么用 `cmp` 而不是只比行数**：行数相等时，"旧内容被换成另一段等行数的内容"照样能过。
+  `cmp` 是逐字节比对，能把这类静默损坏抓住。
+
+**结构断言**（不要只看 `head -20`——新段落可能比它更长，看一半判断不了）：
+
+```
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+: "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
+cd "$REPO_ROOT" || exit 1
+[ -n "$FIXLOG" ] || { echo "FAIL: FIXLOG 为空"; exit 1; }
+
+[ -n "$UPSTREAM_SHORT" ] || { echo "FAIL: UPSTREAM_SHORT 为空"; exit 1; }
+
+# 第一行应是本次新段的分隔线
+head -1 "$FIXLOG" | grep -q '^====' \
+  || { echo "FAIL: 第 1 行不是分隔线，新段没插在最前面"; head -3 "$FIXLOG"; exit 1; }
+
+# 前 3 行必须含本次短 SHA（否则可能是上一轮的残留段落）
+head -3 "$FIXLOG" | grep -q -- "$UPSTREAM_SHORT" \
+  || { echo "FAIL: 前 3 行没有本次短 SHA（$UPSTREAM_SHORT），可能插错位置"; head -3 "$FIXLOG"; exit 1; }
+
+echo "FIXLOG_OK: 新段在最顶部，含 $UPSTREAM_SHORT"
+```
+
+**关于格式**：新段落由上面第一步的 heredoc 统一生成，只有四块：
+
+```
+================================================
+[2026-10-24 13:20] 同步 upstream/develop/v2/misha-alpha @ 329bf4b1
+================================================
+
+范围：基线 41fc7035 → 329bf4b1，上游 1 个提交，改动 50 个文件。
+处理：冲突 0 个（残留 0 个）；本地定制 25 个文件保留未动；分支回退 0。
+构建：ClassIsland.Desktop → 通过（0 errors / 1294 warnings）
+
+改动的文件
+----------
+- ClassIsland/Views/MainView.axaml — 取上游
+- ClassIsland/Views/MainView.axaml.cs — 取上游
+- ClassIsland.Core/Controls/VerticalDrawer.axaml.cs — 冲突修正
+```
+
+规则只有三条：
+
+- **文件必须列全**：`git diff` 里出现过的代码文件，一个都不能漏（三个记录文件自身和 `patches/` 除外）；
+- **每个文件只写一句处理方式**，只允许四种：`取上游` / `三方合并` / `冲突修正` / `保留本地`；
+- **不写冲突是怎么合的、不写代码是怎么改的、不贴片段、不写行号**。
+
+为什么不写细节：账本是给"下一次同步"看的，它只需要知道"这个文件上次被动过、是怎么处理的"。
+真要看清改了什么，`git log -p` 和文件本身比账本准得多。把细节塞进账本只会让它越来越长，
+读到后面全是噪音，反而没人看。
+
+- **凡是你动过的文件，一个都不能漏。** 冲突合并、构建修复、防御性补强、格式调整——只要在 `git diff` 里出现，就必须列进来。
+- 每条写全五要素：**位置（文件:行号）、原状、改后、理由、影响面**。
+- **能贴 diff 就贴 diff**：每处改动附 3–10 行前后对照或 `diff` 片段，让我不翻仓库就能看懂改了什么。
+- 修改方式要写到「可复现」的程度。反例：「调整了错误处理」。正例：「把 `catch (Exception)` 改为 `catch (IOException ex)`，并在 catch 内 `logger.LogError(ex, ...)` 后 `throw`」。
+- 禁止只写「已修复」「已处理」「已同步」这类没有信息量的话。
+- 若本次没有任何 AI 改动，写一行 `本次无需 AI 修正的改动。`，段落仍然要插入。
+- **收尾反查（必做）**：本节在 `git add`/`commit` **之前**执行，此时 `HEAD` 还等于 `PRE_MERGE_HEAD`，
+  写 `git diff "$PRE_MERGE_HEAD" HEAD` 会恒为空、把每次同步都误判成"没改文件"。
+
+  **口径要说清**：和 `fixxed.txt` 比对的，既不是"全部改动"也不是"工作区全部"，
+  而是**只有 AI 亲自动过的文件**。因为 `git diff "$PRE_MERGE_HEAD"` 里必然还混着：
+  ① 三个记录文件自己；② 6.3 用 `git checkout` 覆盖进来的全部「仅上游改动」文件。
+  拿它们去和账本比，永远对不上，AI 只能靠编条目来凑数。
+
+  ```
+  source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+  : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${PRE_MERGE_HEAD:?FAIL: 锚点丢失，回第 6 步}"
+  cd "$REPO_ROOT" || exit 1
+
+  # ① 本次全部改动（工作区 + 索引 + 未跟踪）
+  # ★ 先写 raw 再排序，不要写成 `{ ...; } | sort -u > 目标`：管道左侧跑在子 shell 里，
+  #   里面任何一步失败都传不出来，而 sort 永远返回 0 —— 清单会"看起来正常"，实际是空或残缺的。
+  {
+    git -c core.quotePath=false diff --no-renames --name-only "$PRE_MERGE_HEAD"
+    git -c core.quotePath=false diff --no-renames --cached --name-only "$PRE_MERGE_HEAD"
+    git ls-files --others --exclude-standard
+  } > /tmp/all-changed.raw.txt || { echo "FAIL: 取改动清单失败，停下问我"; exit 1; }
+  LC_ALL=C sort -u /tmp/all-changed.raw.txt > /tmp/all-changed.txt \
+    || { echo "FAIL: 排序失败"; exit 1; }
+
+  # ② 剔除三个记录文件与提示词文件。FIXLOG 里的 . 要转义，否则 fixxedXtxt 这种也会被误排除；
+  #    不转义不会误伤当前两个文件名，但换个日志名就可能中招。
+  #    提示词（prompt*.md）也要剔：它必须进提交，但**不写进账本**（见硬性约束 26）——
+  #    账本记的是「代码改了什么、跟上游怎么冲突的」，提示词的改动属于工具本身，混进来会污染下一轮的定制判定。
+  FIXLOG_RE=$(printf '%s' "${FIXLOG:-fixxed.txt}" | sed 's/\./\\./g')
+  grep -vE "^(action\.txt|out\.txt|${FIXLOG_RE}|prompt[^/]*\.md|patches/.*)$" /tmp/all-changed.txt > /tmp/code-changed.txt
+
+  # ③ 再剔除「仅上游改动」的文件（那些是 6.3 批量覆盖的，不属于 AI 的手工改动）
+  cut -f2 /tmp/up-only-status.txt 2>/dev/null | LC_ALL=C sort -u > /tmp/up-only-paths.txt
+  LC_ALL=C comm -23 /tmp/code-changed.txt /tmp/up-only-paths.txt > /tmp/ai-touched.txt
+
+  echo "全部代码改动 $(wc -l < /tmp/code-changed.txt) 个，其中 AI 手工动过的 $(wc -l < /tmp/ai-touched.txt) 个"
+  ```
+
+  **④ 拿 `/tmp/ai-touched.txt` 逐行比对账本——必须只比"顶部这一段"**：
+
+  ```
+  source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+  : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${FIXLOG:?FAIL: FIXLOG 为空}"
+  cd "$REPO_ROOT" || exit 1
+
+  # 直接 grep -qF "$f" "$FIXLOG" 扫整个文件是无效检查：旧段落里提过的文件名会"匹配成功"，
+  # 本轮漏记账照样能过（等于把硬性约束 16 做成摆设）。
+  # 段头固定是「==== / [日期] / ====」，所以遇到等号线时往后看一行：
+  # 下一行是 [YYYY- 才算下一段开始。账本内容里贴的分隔线（conflict-log.md 常贴 diff 片段）
+  # 极难被误判成新段头——要两个巧合同时发生：贴进来的正好是一长串等号线，
+  # 且它下一行正好是 [YYYY- 开头的日期行。这个概率可以接受。
+  # ★ 这一段与 12 ⑤ 的截取逻辑相同，改一处必须同步改另一处。
+  awk 'NR<=3 {print; next}
+       /^=+$/ && length($0) >= 10 {
+         hdr=$0
+         if ((getline nxt) > 0) {
+           if (nxt ~ /^\[[0-9][0-9][0-9][0-9]-/) exit
+           print hdr; print nxt; next
+         }
+         print hdr; next
+       }
+       {print}' "$FIXLOG" > /tmp/fixlog-top.txt
+  [ -s /tmp/fixlog-top.txt ] \
+    || { echo "FAIL: 账本开头不是标准段头，无法确定本次段落；head -5 看一眼"; head -5 "$FIXLOG"; exit 1; }
+
+  MISS=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -qF -- "$f" /tmp/fixlog-top.txt || { echo "MISS: $f 没写进本次段落"; MISS=1; }
+  done < /tmp/ai-touched.txt
+  [ "$MISS" -eq 0 ] || { echo "FAIL: 有文件改了没记账，补完再提交"; exit 1; }
+  echo "FIXLOG_COVERED（$(wc -l < /tmp/ai-touched.txt) 个文件都能在账本顶部找到）"
+  ```
+
+  **不要求数量相等**（一个文件可能有多条记录），只要求"AI 动过的文件 ⊆ 账本提到的文件"。
+  如果补写发生在提交之后，开一个新 commit，**不要 `--amend`**。
+
+### 9.4 `memory.txt` —— 跨轮经验（**必读，有经验才写**）
+
+三个记录文件记的是「这轮发生了什么」，`memory.txt` 记的是「下次别再踩的坑」。
+上下文会被压缩，压缩后只剩文件；不写下来，下一轮就要重新踩一遍。
+
+**什么时候写**：本轮出现过下面任一情况就写一条；一次都没出现就不写，不要为凑数写废话：
+
+- 做出过**非显而易见的判断**（「这个文件显示已修改，其实只是 CRLF」「这个提交不能当基线」）
+- 踩了坑并修好（构建报错、子模块缺失、路径转义、编码问题、分支回退）
+- 摸清了官方的某种**稳定结构**（参数定义在哪个条件块里、哪个目录是生成物不能改）
+- 找到本地定制点的**判定方法**（怎么断言水印还在、怎么确认更新页没被加回来）
+
+**写在哪**：文件最上方（和 `out.txt` / `$FIXLOG` 一样前插），固定四行：
+
+```text
+[YYYY-MM-DD] 类别 / 一句话标题
+现象：<看到什么>
+根因：<为什么会这样>
+结论：<下次怎么做，带可执行的判据>
+```
+
+类别只用这几个：`构建` / `环境` / `合并` / `官方结构` / `定制点` / `流程`。
+
+**硬约束**：
+
+- **只记会重复发生的**。一次性的 SHA、日期、本轮改了哪些文件属于 `out.txt` / `$FIXLOG`，不要写这里。
+- **总长不超过 300 行**。超过就把已失效的条目删掉或移到 `memory-archive.txt`，不要无限追加。
+- **`memory.txt` 里出现的文件名不参与定制判定**，定制只看账本里带 `[定制]` / `[修复]` 的段落（铁律 2）。
+- 不存在就跳过，不报错；**不要为了"跑通流程"凭空创建一个空文件**。
+
+三个文件全部写完后，回到第 10 步提交。**提交时 `git add` 必须排除 `patches/`、`bin/`、`obj/` 和中间产物**
+——直接 `git add -A` 会把它们一起提交进去，违反硬性约束 13。
+
+**提示词文件（`prompt*.md`）方向相反：本轮只要改过它，就必须一并进这个 commit**，既不留在工作区，
+也不另开 `docs(prompt):` 提交（理由见硬性约束 26）。
+
+## 10. 第 10 步：提交（**必须先把第 9 步的三个记录文件写完，再执行本步**）
+
+先跳到第 9 步写完 `action.txt` / `out.txt` / `$FIXLOG`，再回来一起提交
 （暂存时要用 pathspec 排除 `patches/`、`bin/`、`obj/`，见下面的命令块）。
 顺序颠倒会导致记录文件落在 commit 之外，工作区永远是脏的。
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_SHORT:?FAIL: UPSTREAM_SHORT 为空}" \
   "${FIXLOG:?FAIL: FIXLOG 为空}" "${BUILD_RESULT:?FAIL: BUILD_RESULT 为空}"
 cd "$REPO_ROOT" || exit 1
 
 # ---- 先确认三个记录文件都已写好 ----
 for f in action.txt out.txt "$FIXLOG"; do
-  [ -s "$f" ] || { echo "FAIL: $f 不存在或为空，先回 13 节写完再提交"; exit 1; }
+  [ -s "$f" ] || { echo "FAIL: $f 不存在或为空，先回第 9 步写完再提交"; exit 1; }
 done
 echo "三个记录文件就绪：action.txt / out.txt / $FIXLOG"
 
 # ---- 暂存：显式排除不该进库的东西 ----
-# 不要直接 git add -A：补丁产物、提示词文件、bin/obj 都会被一起提交
+# 不要直接 git add -A：补丁产物、bin/obj、中间文件都会被一起提交
+# ★ 提示词文件（prompt*.md）不要排除：它属于本轮改动的一部分，漏了就下一轮全错
 # ★ 先清掉写记录文件时可能残留的中间文件：上一块中途失败/被打断时，
 #   action.txt.lf / out.txt.tmp / out.txt.bak / out.txt.lf / $FIXLOG.tmp 会留在工作区，
 #   直接 add 就会被当成"新文件"提交进仓库，下次第 0 步又因为未跟踪文件被挡住。
@@ -2422,8 +3278,7 @@ git add -A -- . \
   ':(exclude)bin' ':(exclude)*/bin' \
   ':(exclude)obj' ':(exclude)*/obj' \
   ':(exclude)*.tmp' \
-  ':(exclude)action.txt.lf' ':(exclude)out.txt.lf' ':(exclude)out.txt.bak' \
-  ':(exclude)*.prompt.md' ':(exclude)prompt.md'
+  ':(exclude)action.txt.lf' ':(exclude)out.txt.lf' ':(exclude)out.txt.bak'
 
 # 保险：任何残留的可执行产物都踢出暂存区
 git reset -q -- patches 2>/dev/null || true
@@ -2467,10 +3322,28 @@ else
 fi
 ```
 
+**提示词文件必须一起进这个 commit**：`prompt*.md` 是仓库内容，本轮只要动过它，就必须和代码、
+记录文件同处一个提交，**不许**留在工作区，**不许**另开一个 `docs(prompt):` 提交——拆开会造成
+「代码是这次的、提示词还是上次的」错位，补丁也只带一半，下一轮读到的仍是旧规则。
+
+它天然会进补丁：`format-patch "$PATCH_BASE"..HEAD` 覆盖全部提交，只要提交里有它，补丁里就有。
+
+提交后立刻验一句（本轮没改提示词就跳过）：
+
+```bash
+git show --name-only --format= HEAD | grep '^prompt' || echo "MISS: 改了提示词却没进提交"
+git log -1 --format=%B | grep -q 'prompt' || true
+```
+
+`grep` 没命中就是漏网（多半是被某条 `:(exclude)` 规则挡了）：`git reset` 后重来。
+补丁通道再补一句：`grep -c '^diff --git a/prompt' patches/update.txt` 必须 ≥ 1。
+
 **提交后立刻验一次**（记录文件必须真的在这个 commit 里，不能只在工作区）：
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失"; exit 1; }
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?}" "${FIXLOG:?}"
 cd "$REPO_ROOT" || exit 1
 
@@ -2481,7 +3354,7 @@ for f in action.txt out.txt "$FIXLOG"; do
 done
 echo "COMMIT_OK: 记录文件已入库"
 
-# 工作区应当干净（patches/ 和提示词文件如果在仓库里，会在 .git/info/exclude 里被忽略）
+# 工作区应当干净（patches/ 由 .git/info/exclude 忽略；提示词本轮若改过，必须已在上面这个 commit 里）
 git status --porcelain | grep -vE '^(\?\? patches/)' | head -5
 echo "剩余未提交（上面为空才算干净）"
 ```
@@ -2493,22 +3366,24 @@ echo "剩余未提交（上面为空才算干净）"
   `git status --porcelain` 应为空、`grep` 冲突标记应为零、定制点断言仍通过。
   若 hook 改动了文件，检查它是否引入冲突标记或改坏定制；有问题就修完再补一个 commit（暂存时同样排除 patches/bin/obj，不要 `--amend`），
   并在汇报里注明「pre-commit hook 改动了 N 个文件」。
-- `git add` 前先确认不会把 `bin/`、`obj/`、`patches/`（补丁产物）、`/tmp` 下的中间文件、以及这份提示词文件本身加进去。
+- `git add` 前先确认不会把 `bin/`、`obj/`、`patches/`（补丁产物）、`/tmp` 下的中间文件加进去；
+  **提示词文件则相反，本轮改过就必须确认它已经在暂存区里**（`git diff --cached --name-only | grep '^prompt'`）。
 
-## 12. 第 10 步：推送到我自己的仓库（三重保险）
+## 11. 第 11 步：推送到我自己的仓库（三重保险）
 
 **先看 `PUSH_MODE` 决定走哪条路：**
 
 | PUSH_MODE | 行为 |
 |---|---|
-| `auto`（默认） | 执行本节全部三道；失败且是无权限 → 进 12.1 导出补丁 |
-| `direct` | 执行本节全部三道；**失败即停**，不进 12.1，如实报错 |
-| `patch` | **跳过本节**，直接执行 12.1 导出补丁 |
+| `auto`（默认） | 执行本节全部三道；失败且是无权限 → 进 11.1 导出补丁 |
+| `direct` | 执行本节全部三道；**失败即停**，不进 11.1，如实报错 |
+| `patch` | **跳过本节**，直接执行 11.1 导出补丁 |
 
 **第 1 道：推送前重新验 URL**（不要复用第 0 步的旧结论，中间的 pull 有可能改动 remote 配置）
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失或损坏，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 [ -n "$MY_REMOTE" ] && [ -n "$UPSTREAM_REMOTE" ] || { echo "FAIL: remote 变量为空，回第 0 步"; exit 1; }
@@ -2535,6 +3410,7 @@ echo "URL_OK"
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失或损坏，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 [ -n "$MY_REMOTE" ] && [ -n "$MY_BRANCH" ] || { echo "FAIL: 变量为空，回第 0 步"; exit 1; }
@@ -2556,15 +3432,15 @@ cat /tmp/push-dry.log
 | 预演输出（在 `push-dry.log` 里 grep） | 处理 |
 |---|---|
 | `DRY_EXIT=0`，或日志含 `Everything up-to-date` | 继续第 3 道（无新提交时第 3 道直接跳过） |
-| `could not read Username`、`Authentication failed`、`403`、`Permission denied`、`terminal prompts disabled`、`Invalid username or password`、`Repository not found`、`Permission to .* denied` | **判定无权限 → 进 12.1 导出补丁**，不要再试真推 |
+| `could not read Username`、`Authentication failed`、`403`、`Permission denied`、`terminal prompts disabled`、`Invalid username or password`、`Repository not found`、`Permission to .* denied` | **判定无权限 → 进 11.1 导出补丁**，不要再试真推 |
 | `non-fast-forward`、`[rejected]`、`fetch first` | 停下问我，不要强推 |
-| `Could not resolve host`、`timed out`、`Connection refused`、`GnuTLS`、`RPC failed`（且不含上面的认证关键字） | 进 12.2 代理探测 |
+| `Could not resolve host`、`timed out`、`Connection refused`、`GnuTLS`、`RPC failed`（且不含上面的认证关键字） | 进 11.2 代理探测 |
 | 其它非零退出 | **原样贴日志停下问我**，不要自己归类 |
 
 ⚠️ **判定顺序是「先认证、后网络」**：GitHub 的 `RPC failed; HTTP 403` 同时含 `403` 和 `RPC failed`，
 必须先判成无权限，否则会白跑两轮代理探测。
 
-⚠️ `PUSH_MODE=direct` 时，上表所有"进 12.1"的行都改成"停下并贴原始日志"。
+⚠️ `PUSH_MODE=direct` 时，上表所有"进 11.1"的行都改成"停下并贴原始日志"。
 
 ⚠️ 无权限的机器上，`--dry-run` 同样要认证，所以它经常就是**第一个暴露「没权限」的地方**。
 别把它当成"预演失败 = 不能推"就停住——认证类失败要直接走降级。
@@ -2573,6 +3449,7 @@ cat /tmp/push-dry.log
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失或损坏，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 [ -n "$MY_REMOTE" ] && [ -n "$MY_BRANCH" ] || { echo "FAIL: 变量为空，回第 0 步"; exit 1; }
@@ -2591,6 +3468,7 @@ cat /tmp/push.log
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 [ -n "$MY_REMOTE" ] && [ -n "$MY_BRANCH" ] || { echo "FAIL: 变量为空"; exit 1; }
@@ -2610,11 +3488,11 @@ echo "PUSH_VERIFIED"
 
 | 日志里的关键字 | 判定 | 处理 |
 |---|---|---|
-| `Authentication failed`、`403`、`Permission denied`、`could not read Username`、`terminal prompts disabled`、`Invalid username or password` | **无推送权限** | 进入 12.1 降级模式 |
+| `Authentication failed`、`403`、`Permission denied`、`could not read Username`、`terminal prompts disabled`、`Invalid username or password` | **无推送权限** | 进入 11.1 降级模式 |
 | `non-fast-forward`、`[rejected]`、`fetch first` | 远端有新提交 | 停下问我，不要强推 |
-| `Could not resolve host`、`timed out`、`Connection refused`、`early EOF`、`RPC failed`、`GnuTLS` | 网络问题 | 进入 12.2 代理探测，最多尝试 2 轮 |
+| `Could not resolve host`、`timed out`、`Connection refused`、`early EOF`、`RPC failed`、`GnuTLS` | 网络问题 | 进入 11.2 代理探测，最多尝试 2 轮 |
 
-### 12.1 降级模式：导出补丁（`PUSH_MODE=auto` 或 `patch` 时）
+### 11.1 降级模式：导出补丁（`PUSH_MODE=auto` 或 `patch` 时）
 
 **触发条件（满足任一即进入）：**
 - `PUSH_MODE=patch` —— 无条件进入，**跳过推送的前三道**；
@@ -2623,6 +3501,7 @@ echo "PUSH_VERIFIED"
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 [ -n "$MY_REMOTE" ] && [ -n "$MY_BRANCH" ] || { echo "FAIL: 变量为空"; exit 1; }
@@ -2731,6 +3610,7 @@ ls -lh patches/
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 [ -n "$PATCH_N" ] || { echo "FAIL: PATCH_N 未设置"; exit 1; }
@@ -2927,7 +3807,7 @@ update-last.txt  只有本次新增的提交，从 <PRE_MERGE_HEAD 短 SHA> 起
 「**推送未执行（原因），已导出补丁 `patches/update.txt`，共 N 个提交**」。
 绝对不许写成「已同步」或「已推送」。
 
-### 12.2 网络失败后的代理探测与自动恢复
+### 11.2 网络失败后的代理探测与自动恢复
 
 触发：`fetch` / `pull` / `push` 出现 DNS 超时、连接重置、`early EOF`、`RPC failed`、`GnuTLS` 等网络类错误。
 目标：**优先复用本机已有的代理**，而不是直接失败。最多尝试 2 轮。
@@ -2945,6 +3825,7 @@ git config --global --get http.proxy
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 
 # 超时别设太短：CONNECT 隧道 + TLS 握手常常超过 3 秒，真代理会被误判成不通。
 # 也别设太长：10 次探测定时会把用户晾在那里。5 秒 × 10 次 ≈ 最坏 50 秒。
@@ -2984,6 +3865,7 @@ scutil --proxy
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 [ -n "$PROXY" ] || { echo "FAIL: 没有可用代理（PROXY 为空），直接去第 ⑤ 步"; exit 1; }
@@ -3012,23 +3894,24 @@ git -c http.proxy="$PROXY" -c https.proxy="$PROXY" fetch "$UPSTREAM_REMOTE" "+re
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件 /tmp/upstream-sync.env 缺失，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
 cd "$REPO_ROOT" || exit 1
 git -c url."https://ghfast.top/https://github.com/".insteadOf="https://github.com/" \
     fetch "$UPSTREAM_REMOTE" "+refs/heads/*:refs/remotes/$UPSTREAM_REMOTE/*" --prune \
-  || { echo "FAIL: 镜像也不通，进 12.3 逐文件方案"; exit 1; }
+  || { echo "FAIL: 镜像也不通，进 11.3 逐文件方案"; exit 1; }
 ```
 
 - 镜像**只用于读取**（fetch / clone）。**推送绝不要走镜像**——认证与落库行为都不可控；
 - 已实测可用：`ghfast.top`（整仓 git）、`cdn.jsdelivr.net`（单文件）。
-- 若镜像也失败，或只能逐文件下载 → 进入 **12.3**。
+- 若镜像也失败，或只能逐文件下载 → 进入 **11.3**。
 
-**12.2 的硬性约束**：
+**11.2 的硬性约束**：
 - 代理只对单条命令生效，不许写进 `.gitconfig`，也不许拼进 remote URL；
 - 不许把带 token 的地址写进任何会被提交的文件；
 - 2 轮仍失败就停下报告，把试过的端口和错误原文列出来。
 
-### 12.3 jsDelivr 单文件下载（最后手段，只读快照）
+### 11.3 jsDelivr 单文件下载（最后手段，只读快照）
 
 **什么时候用**：git 协议（clone / fetch / push）完全不通，但 HTTPS 单文件请求还能走通。
 这是**只读快照**方案，拿不到 `.git` 历史，因此后面的合并、提交、推送都会受影响。
@@ -3039,6 +3922,7 @@ git -c url."https://ghfast.top/https://github.com/".insteadOf="https://github.co
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${UPSTREAM_BRANCH:?FAIL: UPSTREAM_BRANCH 为空，回第 0 步}"
 
 # 分支名里的斜杠要转义成 %2F，直接拼会被当成两个路径段
@@ -3070,6 +3954,7 @@ https://cdn.jsdelivr.net/gh/<owner>/<repo>@<COMMIT_SHA>/<path>
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失"; exit 1; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${SHA:?FAIL: SHA 为空，先执行上一步}"
 # ⚠️ 一律下载到 /tmp 快照目录，绝对不要 -o 到仓库里的同名文件：
 # 用相对路径 -o fixxed.txt 会把本地真实的记录文件直接覆盖成 CDN 上的旧版本。
@@ -3178,743 +4063,13 @@ C. 你在本地把仓库打成 zip 放到某个路径，告诉我路径，我直
   等 CI 结果是下一轮或用户自己的事。
 - `PUSH_EXIT = 0` 但 `ls-remote` 核对不一致 → 仍视为失败，如实报告，不许说「已同步」。
 
-## 13. 第 11 步：写记录文件（三个文件，缺一不可；**必须在第 9 步提交之前完成**）
-
-> **铁律 3 回扣**：`out.txt` 与 `$FIXLOG` 的新内容都写在**文件上方**，不是末尾。
-> 写完用 `head` 检查（不是 `tail`），确认新段落在最上面、旧内容紧随其后且完好。
-
-### 13.1 `action.txt` —— 同步进度锚点（用于下次同步）
-
-先把两个统计量算出来（**必须现算，不要凭印象填**）：
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${PRE_MERGE_HEAD:?FAIL: 锚点丢失，回第 6 步}"
-cd "$REPO_ROOT" || exit 1
-
-# 三个来源都要算：
-#   ① 工作区 vs 锚点（未暂存的改动）
-#   ② 索引 vs 锚点（AI 可能已经 git add 过）
-#   ③ 未跟踪的新文件（第 7 步新拷进来的上游新文件）
-# 少算 ② 或 ③ 的话，UPDATED_FILES 会偏小甚至为 0，而这个值会写进 action.txt 长期留存。
-{
-  git -c core.quotePath=false diff --no-renames --name-only "$PRE_MERGE_HEAD" || exit 1
-  git -c core.quotePath=false diff --no-renames --cached --name-only "$PRE_MERGE_HEAD" || exit 1
-  git ls-files --others --exclude-standard || exit 1
-} > /tmp/updated-raw.txt || { echo "FAIL: 统计改动文件失败，停下问我"; exit 1; }
-
-# 记录文件名里的 . 要转义，否则 fixxedXtxt 这类名字也会被误排除（见 13.3 同款注释）
-FIXLOG_RE=$(printf '%s' "${FIXLOG:-fixxed.txt}" | sed 's/\./\\./g')
-UPDATED_FILES=$(LC_ALL=C sort -u /tmp/updated-raw.txt \
-  | grep -vE "^(action\.txt|out\.txt|${FIXLOG_RE}|patches/.*)$" \
-  | wc -l | tr -d ' ')
-
-# CONFLICT_FILES 记的是"本次发生过冲突的文件数"（8.4 的 before 清单），
-# 不是"修完之后还剩多少"（7.1 会用重扫结果覆盖 conflict-files.txt，成功时恒为 0）。
-# 用 -f 判存在，不要写成 `$(wc -l < 文件 | tr -d ' ' || echo 0)`：
-# `<` 打不开时 wc 根本不执行，但它在管道左侧，整条管道的退出码由右侧 tr 决定（0），
-# || echo 0 永远不触发，捕获到的是空串 → 下面 case 报"冲突计数非法 []"。
-CONFLICT_FILES=0
-[ -f /tmp/conflict-files.before.txt ] && CONFLICT_FILES=$(wc -l < /tmp/conflict-files.before.txt | tr -d ' ')
-case "$CONFLICT_FILES" in ''|*[!0-9]*) echo "FAIL: 冲突计数非法 [$CONFLICT_FILES]"; exit 1 ;; esac
-case "$UPDATED_FILES"  in ''|*[!0-9]*) echo "FAIL: 文件计数非法 [$UPDATED_FILES]";  exit 1 ;; esac
-
-echo "UPDATED_FILES=$UPDATED_FILES  CONFLICT_FILES=$CONFLICT_FILES"
-if [ "$UPDATED_FILES" -eq 0 ]; then
-  echo "FAIL: 本次改动文件数为 0，说明前面没真正改到东西，停下问我"
-  exit 1
-fi
-{
-  echo "export UPDATED_FILES=$UPDATED_FILES"
-  echo "export CONFLICT_FILES=$CONFLICT_FILES"
-} >> /tmp/upstream-sync.env
-```
-
-口径写明：`UPDATED_FILES` **不含** `action.txt`/`out.txt`/`$FIXLOG` 这三个记录文件，否则每轮都会多出 3 个。
-
-**用下面的命令整文件覆写**（不要靠 AI 手写，字段多、容易漏；`heredoc` 不加引号，变量会展开）：
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
-cd "$REPO_ROOT" || exit 1
-
-[ -n "$UPSTREAM_HEAD" ] || { echo "FAIL: UPSTREAM_HEAD 为空，回第 3 步"; exit 1; }
-[ -n "$BASE" ]          || { echo "FAIL: BASE 为空，回第 4 步"; exit 1; }
-[ -n "$SYNCED_FROM_SHA" ] || { echo "FAIL: SYNCED_FROM_SHA 为空，回第 1 步"; exit 1; }
-[ -n "$BUILD_RESULT" ]  || { echo "FAIL: BUILD_RESULT 为空，第 8 步没落盘"; exit 1; }
-# MY_REMOTE / MY_BRANCH 也要断言：少一个就会写出 "SYNCED_FROM = my/ @ abc1234"
-# 这种看着像正常、实际缺了分支名的值，而且不会有任何报错。
-[ -n "$MY_REMOTE" ] && [ -n "$MY_BRANCH" ] \
-  || { echo "FAIL: MY_REMOTE / MY_BRANCH 为空，回第 0 步"; exit 1; }
-
-cat > action.txt <<EOF
-# 上游同步进度记录
-UPSTREAM_REPO   = https://github.com/ClassIsland/ClassIsland.git
-UPSTREAM_BRANCH = $UPSTREAM_BRANCH
-BRANCH_FALLBACK = ${BRANCH_FALLBACK:-0}
-LAST_SYNCED_SHA   = $UPSTREAM_HEAD
-LAST_SYNCED_SHORT = $UPSTREAM_SHORT
-LAST_SYNCED_AT    = $(date +%Y-%m-%dT%H:%M:%S%z)
-BASE_SHA          = $(git rev-parse --short "$BASE")
-SYNCED_FROM       = $MY_REMOTE/$MY_BRANCH @ $SYNCED_FROM_SHA
-MY_REMOTE_URL     = $MY_REMOTE_URL
-LOCAL_BRANCH      = $LOCAL_BRANCH
-UPDATED_FILES     = $UPDATED_FILES
-CONFLICT_FILES    = $CONFLICT_FILES
-BUILD_RESULT      = $BUILD_RESULT
-EOF
-
-# AI 在 Windows 上写文件可能带 CRLF。不转的话，下次 source 时
-# `LAST_SYNCED_AT = ...\r` 的值会带一个 \r，比对永远不等，而且看不出来。
-tr -d '\r' < action.txt > action.txt.lf && mv action.txt.lf action.txt \
-  || { echo "FAIL: action.txt 转 LF 失败（文件被占用？关掉编辑器重试）"; exit 1; }
-
-cat action.txt
-```
-
-字段含义（照这个自查，别写反）：
-
-```
-# 上游同步进度记录
-UPSTREAM_REPO   = https://github.com/ClassIsland/ClassIsland.git
-UPSTREAM_BRANCH = <本次实际使用的分支：develop/v2/misha-alpha 或回退后的 master>
-BRANCH_FALLBACK = <0 正常 / 1 已回退到 master>
-LAST_SYNCED_SHA   = <本次同步到的官方 commit 完整 SHA>
-LAST_SYNCED_SHORT = <前 7 位>
-LAST_SYNCED_AT    = <同步完成时间，ISO 8601 带时区>
-BASE_SHA          = <本次使用的合并基线短 SHA>
-SYNCED_FROM       = <MY_REMOTE 的实际名字>/<MY_BRANCH> @ <对齐后的短 SHA>
-MY_REMOTE_URL     = <第 0 步识别出的我仓库 URL>
-LOCAL_BRANCH      = <本地当前分支名>
-UPDATED_FILES     = <本次同步的文件总数>
-CONFLICT_FILES    = <冲突文件数量>
-BUILD_RESULT      = <构建结果：通过 / 失败 / 环境无 SDK 未执行>
-```
-
-**写完必须回读校验（第二道）：**
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_HEAD:?FAIL: UPSTREAM_HEAD 为空，回第 3 步}"
-cd "$REPO_ROOT" || exit 1
-
-[ -f action.txt ] || { echo "FAIL: action.txt 不存在"; exit 1; }
-
-# 真比较，不是打印出来让人肉眼看——40 位 SHA 肉眼比不出差异
-get_field() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" action.txt | head -1 | tr -d ' \r'; }
-
-GOT=$(get_field LAST_SYNCED_SHA)
-[ "$GOT" = "$UPSTREAM_HEAD" ] \
-  || { echo "FAIL: LAST_SYNCED_SHA 不一致"; echo "  文件里: [$GOT]"; echo "  应该是: [$UPSTREAM_HEAD]"; exit 1; }
-
-[ -n "$(get_field UPSTREAM_BRANCH)" ] || { echo "FAIL: UPSTREAM_BRANCH 为空"; exit 1; }
-[ -n "$(get_field BUILD_RESULT)" ]    || { echo "FAIL: BUILD_RESULT 为空"; exit 1; }
-[ -n "$(get_field UPDATED_FILES)" ]   || { echo "FAIL: UPDATED_FILES 为空"; exit 1; }
-grep -q $'\r' action.txt && { echo "FAIL: action.txt 里还有 \r"; exit 1; }
-echo "ACTION_OK: LAST_SYNCED_SHA=$GOT"
-```
-
-- `action.txt` 必须存在且已转 LF；
-- `LAST_SYNCED_SHA` 必须与 `$UPSTREAM_HEAD` **逐字符相等**（脚本会真比对，不靠肉眼）；
-- 其它必填字段（`UPSTREAM_BRANCH` / `BUILD_RESULT` / `UPDATED_FILES`）不能为空；
-- 任何一项不过就重写，写完再验一次，仍不过则停下来告诉我，不许带着错值提交。
-- **`out.txt` 和 `$FIXLOG` 在这一步还不需要检查**——它们分别在 13.2 / 13.3 才写。
-
-### 13.2 `out.txt` —— 历次同步的 Action 记录（**新记录插在最上面，旧记录往下压**）
-
-名称取 `.github/workflows/*.yml` 里 `name:` 字段的值；没有该字段就用文件名。
-
-**写入方式：前插（prepend），不是追加。** 每次同步的新段落插在表头之后、**旧记录之前**；
-旧记录整体下移，**内容一个字都不许改、不许重排、不许删除**。
-
-首次创建时的表头（表头永远在最顶部，不要动它）：
-
-```
-# ClassIsland 上游同步 · Action 变更记录
-（最新记录在最上方，越往下越旧）
-```
-
-**插入位置示意：**
-
-```
-# ClassIsland 上游同步 · Action 变更记录
-（最新记录在最上方，越往下越旧）
-
-================================================================
-## 2026-10-17 21:00:00  同步 fd83102      ← 这次新的插在这里
-================================================================
-================================================================
-## 2026-09-20 10:00:00  同步 a8af81ba      ← 上次的，被压到下面
-================================================================
-================================================================
-## 2026-08-30 09:00:00  同步 045901ad      ← 更早的，继续往下
-================================================================
-```
-
-**前插的写法（表头是前 2 行）：**
-
-**第一步：先把本次段落写成文件**（不要用 shell 变量传整段文本——跨 shell 会丢，
-`printf "$NEW_SECTION"` 输出两个空行照样会被当成"写成功"）：
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_SHORT:?FAIL: UPSTREAM_SHORT 为空}" \
-  "${BASE:?FAIL: BASE 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空}" "${LOCAL_BRANCH:?FAIL: LOCAL_BRANCH 为空}"
-cd "$REPO_ROOT" || exit 1
-
-# 非空 ≠ 能解析。下面 `git diff "$BASE" "$UPSTREAM_REF"` 是带 `|| :` 兜底的，
-# 解析失败时它会把 wf-status.txt 清空 → out.txt 写成"新增/修改/删除 全部(无)"，
-# 看起来像"本次没动 workflow"，实际是一个都没查。必须提前拦住。
-git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
-  || { echo "FAIL: BASE 解析不到（$BASE），回第 4 步"; exit 1; }
-git rev-parse --verify --quiet "$UPSTREAM_REF^{commit}" >/dev/null \
-  || { echo "FAIL: UPSTREAM_REF 解析不到（$UPSTREAM_REF），回第 3 步"; exit 1; }
-
-OUT_WF=".github/workflows"
-
-# ---- ① 工作流名称：优先 name: 字段，回退文件名 ----
-wf_name() {  # $1=ref  $2=path
-  # name: 后面可能带引号（name: "Build"）或行内注释（name: Build # 临时），
-  # 原样塞进 out.txt 会变成 build_release.yml ("Build") 这种脏格式，先剥干净。
-  # 只认「空白 + #」才是注释：name: a#b 里的 # 属于值本身，不能一起切掉。
-  _n=$(git show "$1:$2" 2>/dev/null | sed -n 's/^name:[[:space:]]*//p' | head -1 \
-       | sed -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//')
-  _n=${_n%\"}; _n=${_n#\"}
-  _n=${_n%\'}; _n=${_n#\'}
-  [ -n "$_n" ] || _n=$(basename "$2")
-  printf '%s' "$_n"
-}
-
-# 这里不能写 `2>/dev/null || : > 文件`：diff 一失败（BASE/UPSTREAM_REF 无效）就被吞成
-# "没有 workflow 变更"，out.txt 的「新增/修改/删除」全写 (无)，看不出任何异常。
-git -c core.quotePath=false diff --no-renames --name-status \
-  "$BASE" "$UPSTREAM_REF" -- "$OUT_WF" > /tmp/wf-status.txt 2>/tmp/wf-status.err \
-  || { echo "FAIL: 取 workflow 变更失败（BASE/UPSTREAM_REF 无效？）"; cat /tmp/wf-status.err; exit 1; }
-
-: > /tmp/wf-block.txt
-for pair in "新增:A" "修改:M" "删除:D"; do
-  label=${pair%%:*}; code=${pair##*:}
-  echo "${label}:" >> /tmp/wf-block.txt
-  cnt=0
-  while IFS=$'\t' read -r st f; do
-    [ "$st" = "$code" ] || continue
-    if [ "$code" = "D" ]; then _r="$BASE"; else _r="$UPSTREAM_REF"; fi
-    echo "  - $(basename "$f") ($(wf_name "$_r" "$f"))" >> /tmp/wf-block.txt
-    cnt=$((cnt+1))
-  done < /tmp/wf-status.txt
-  [ "$cnt" -eq 0 ] && echo "  - (无)" >> /tmp/wf-block.txt
-done
-
-echo "未变更:" >> /tmp/wf-block.txt
-# 同上：先落到 raw 再过滤，别让 ls-tree 的失败被 grep 的退出码掩盖
-git -c core.quotePath=false ls-tree -r --name-only "$UPSTREAM_REF" -- "$OUT_WF" > /tmp/wf-all.raw 2>/tmp/wf-all.err \
-  || { echo "FAIL: 列 workflow 文件失败（UPSTREAM_REF 无效？）"; cat /tmp/wf-all.err; exit 1; }
-grep -E '\.ya?ml$' /tmp/wf-all.raw > /tmp/wf-all.txt || true
-awk -F'\t' '{print $2}' /tmp/wf-status.txt | LC_ALL=C sort -u > /tmp/wf-changed.txt
-LC_ALL=C comm -23 <(LC_ALL=C sort /tmp/wf-all.txt) /tmp/wf-changed.txt > /tmp/wf-same.txt
-cnt=0
-while IFS= read -r f; do
-  [ -n "$f" ] || continue
-  echo "  - $(basename "$f")" >> /tmp/wf-block.txt
-  cnt=$((cnt+1))
-done < /tmp/wf-same.txt
-[ "$cnt" -eq 0 ] && echo "  - (无)" >> /tmp/wf-block.txt
-
-# ---- ② 提交列表：每条上游提交后面附「改动文件数」 ----
-#    手抄的话，提交标题里的反引号、$() 会在 heredoc 里被二次展开（C# 仓库标题里
-#    带 `ProfileService` 这种很常见），轻则缺字，重则真的执行一段命令。
-#    文件数按「相对第一父提交」算；merge commit 也能算出一个有意义的值。
-git rev-list "$BASE".."$UPSTREAM_REF" > /tmp/commit-shas.txt \
-  || { echo "FAIL: 取提交列表失败"; exit 1; }
-: > /tmp/commit-list.txt
-while IFS= read -r sha; do
-  [ -n "$sha" ] || continue
-  subj=$(git log -1 --format=%s "$sha") \
-    || { echo "FAIL: 读不到提交 $sha 的标题"; exit 1; }
-  if git rev-parse --verify --quiet "$sha^1" >/dev/null 2>&1; then
-    nf=$(git -c core.quotePath=false diff --no-renames --name-only "$sha^1" "$sha" | wc -l | tr -d ' ')
-  else
-    nf=$(git -c core.quotePath=false show --format= --name-only --root "$sha" | sed '/^$/d' | wc -l | tr -d ' ')
-  fi
-  printf '  - %s %s（%s 个文件）\n' "$(git rev-parse --short "$sha")" "$subj" "$nf" >> /tmp/commit-list.txt
-done < /tmp/commit-shas.txt
-CN=$(wc -l < /tmp/commit-list.txt | tr -d ' ')
-
-# 冲突修正统计：发生过多少、实际修正多少、残留多少（7.1 之后残留应为 0）
-# 与 13.1 的 CONFLICT_FILES 同一套写法：先 -f 判存在，再 wc。
-# 不要写 `cat 文件 | wc -l`：cat 打不开时 wc 照样输出 0，把
-# "文件缺失 / 没权限" 伪装成 "没有冲突"——而下面正是拿 0 去判「冲突修正 : 无」。
-CF_BEFORE=0
-if [ -f /tmp/conflict-files.before.txt ]; then
-  CF_BEFORE=$(wc -l < /tmp/conflict-files.before.txt | tr -d ' ')
-fi
-CF_AFTER=0
-if [ -f /tmp/conflict-files.txt ]; then
-  CF_AFTER=$(wc -l < /tmp/conflict-files.txt | tr -d ' ')
-fi
-case "$CF_BEFORE" in ''|*[!0-9]*) echo "FAIL: 冲突计数非法 [$CF_BEFORE]"; exit 1 ;; esac
-case "$CF_AFTER"  in ''|*[!0-9]*) echo "FAIL: 残留计数非法 [$CF_AFTER]";  exit 1 ;; esac
-if [ "$CF_BEFORE" -eq 0 ]; then
-  CF_LINE="冲突修正 : 无"
-else
-  CF_LINE="冲突修正 : 发生过 $CF_BEFORE 个文件，已修正 $((CF_BEFORE - CF_AFTER)) 个，残留 $CF_AFTER 个"
-fi
-
-cat > /tmp/new-out.txt <<BLOCK
-================================================================
-## $(date '+%Y-%m-%d %H:%M:%S')  同步 $UPSTREAM_SHORT
-上游目标 : ClassIsland/ClassIsland @ $UPSTREAM_BRANCH ($UPSTREAM_SHORT)
-本次基线 : $(git rev-parse --short "$BASE")
-本地分支 : $LOCAL_BRANCH  →  本地提交见本次 commit
-
-$(cat /tmp/wf-block.txt)
-
-本次同步的上游提交（$CN 个，全部列出，每条附改动文件数）:
-$(cat /tmp/commit-list.txt)
-$CF_LINE
-================================================================
-BLOCK
-
-# ---- ③ 校验：空段落、占位符残留、提交条数对不上，一律不许往下走 ----
-[ -s /tmp/new-out.txt ] || { echo "FAIL: 新段落为空"; exit 1; }
-grep -q '^## ' /tmp/new-out.txt || { echo "FAIL: 段落缺少 ## 标题行"; exit 1; }
-
-# 占位符统一按尖括号检：模板里出现过 <或写 (无)>、<短SHA> 等各种写法，
-# 只查 '<填：' 是查不到的。
-# ★ 不能简单写成 '<[^>]{1,40}>'：提交标题里出现 List<T> / Dictionary<string, object>
-#   这类泛型是常事，那样会把正常内容当成占位符，直接卡死整轮。
-#   这里只认两种"像占位符"的：尖括号里含非 ASCII（中文），或全大写标识符（TARGET_PROJ 这种）。
-# ★ LC_ALL=C 不能省：UTF-8 locale 下 grep 会把 " -~" 这个范围当成三个字面字符 {空格,-,~}，
-#   于是 [^ -~] 几乎匹配任何字母 → 满屏误报（连 List<T> 都命中）。C locale 下才是按字节判断。
-if tr -d '\r' < /tmp/new-out.txt | LC_ALL=C grep -nE '<[^>]*[^ -~][^>]*>|<[A-Z][A-Z0-9_]{2,}>'; then
-  echo "FAIL: 上面这些占位符没替换干净，改完再跑这一步"; exit 1
-fi
-
-GOT_CN=$(grep -c '^  - [0-9a-f]\{7,\} ' /tmp/new-out.txt || true)
-[ "$GOT_CN" -eq "$CN" ] \
-  || { echo "FAIL: 提交列表 $GOT_CN 条 != 实际 $CN 条"; exit 1; }
-
-echo "OK: 新段落 $(wc -l < /tmp/new-out.txt) 行，提交 $CN 条"
-```
-
-**第二步：插入（表头 2 行不动，新段落插在第 3 行位置）**：
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${UPSTREAM_SHORT:?FAIL: UPSTREAM_SHORT 为空}"
-cd "$REPO_ROOT" || exit 1
-[ -s /tmp/new-out.txt ] || { echo "FAIL: 新段落不存在，先做上一步"; exit 1; }
-grep -q -- "$UPSTREAM_SHORT" /tmp/new-out.txt \
-  || { echo "FAIL: 新段落里没有本次短 SHA，可能是上一轮的残留文件"; exit 1; }
-
-# 末尾必须有换行，否则 cat 时新段最后一行会和旧文件第 3 行粘成一行，
-# 行数守恒校验会失败，报的却是"旧记录被吞"——排查方向直接跑偏。
-if [ -n "$(tail -c 1 /tmp/new-out.txt)" ]; then printf '\n' >> /tmp/new-out.txt; fi
-
-# 只转新段落的 CR，旧 out.txt 逐字节保留：
-# 旧文件若本来就是 CRLF，对整份文件 tr -d '\r' 会把旧记录每一行都改掉，
-# 违反"旧内容一个字都不许改"。FIXLOG 那边也是只转新段。
-tr -d '\r' < /tmp/new-out.txt > /tmp/new-out.lf \
-  || { echo "FAIL: 新段落转 LF 失败"; exit 1; }
-NEW_N=$(wc -l < /tmp/new-out.lf | tr -d ' ')
-
-if [ -f out.txt ]; then
-  # 表头必须是那两行。只查首行不够：如果文件是旧版（只有 1 行表头），
-  # head -2 + tail -n +3 会把第 2 行的旧记录挤掉，历史就少一条。
-  head -1 out.txt | grep -q '^# ClassIsland 上游同步' \
-    || { echo "FAIL: out.txt 首行不是预期表头，停下问我"; exit 1; }
-  sed -n '2p' out.txt | grep -q '最新记录在最上方' \
-    || { echo "FAIL: out.txt 第 2 行不是说明行（可能是旧版格式），停下问我"; head -3 out.txt; exit 1; }
-
-  cp out.txt out.txt.bak || { echo "FAIL: 备份 out.txt 失败"; exit 1; }
-  OLD_N=$(wc -l < out.txt | tr -d ' ')
-
-  { head -2 out.txt; echo; cat /tmp/new-out.lf; tail -n +3 out.txt; } > out.txt.tmp \
-    || { echo "FAIL: 拼接失败"; rm -f out.txt.tmp; exit 1; }
-  [ -s out.txt.tmp ] || { echo "FAIL: 拼接结果为空，旧记录丢了"; exit 1; }
-
-  # 行数守恒：旧 + 新 + 1（中间那个空行）。少了就是旧记录被吞
-  EXP=$((OLD_N + NEW_N + 1))
-  GOT=$(wc -l < out.txt.tmp | tr -d ' ')
-  [ "$GOT" -eq "$EXP" ] \
-    || { echo "FAIL: 行数 $GOT != 预期 $EXP（旧 $OLD_N + 新 $NEW_N + 1）"; rm -f out.txt.tmp; exit 1; }
-
-  # 新段落已在上一步转成 LF；这里不再对整份文件做 tr，旧内容保持原字节
-  mv out.txt.tmp out.txt || { echo "FAIL: 覆盖 out.txt 失败（文件被占用？）"; exit 1; }
-else
-  # 首次：表头用两个参数要写两条格式串，否则 printf 会把格式串复用两遍变成 4 行
-  printf '%s\n%s\n\n' '# ClassIsland 上游同步 · Action 变更记录' '（最新记录在最上方，越往下越旧）' > out.txt
-  cat /tmp/new-out.lf >> out.txt
-fi
-
-# 结构断言：新段落必须紧跟在表头下方（表头 2 行 + 1 空行，第 4 行应是 ====）
-head -4 out.txt | tail -1 | grep -q '^====' \
-  || { echo "FAIL: 新段没插在表头下方（可能是追加到了末尾）"; head -8 out.txt; exit 1; }
-echo "OUT_OK: 总行数 $(wc -l < out.txt)，新段 $(echo "$NEW_N") 行在最上方"
-```
-
-- 文件不存在时：先写表头 + 新段落；
-- 文件存在时：前 2 行表头保持不动，新段落插在第 3 行位置，旧内容全部往后推。
-- **不要用 `>>` 追加到末尾**：那会把新记录压到文件最后，旧记录反而跑到上面。
-
-每次同步**插到最上方**的段落（照此格式，**标题、字段名、缩进都保持一致**）：
-
-```
-================================================================
-## <YYYY-MM-DD HH:mm:ss>  同步 <短SHA>
-上游目标 : ClassIsland/ClassIsland @ <UPSTREAM_BRANCH> (<短 SHA>)
-本次基线 : <BASE 短SHA>
-本地分支 : <LOCAL_BRANCH>  →  本地提交见本次 commit
-
-新增:
-  - (无)
-修改:
-  - build_release.yml (Build)
-删除:
-  - (无)
-未变更:
-  - close_stale_issues.yml (Close inactive issues)
-  - issues_similarity_analysis.yml (Issues Similarity Analysis)
-  - qodana_code_quality.yml (Qodana)
-
-本次同步的上游提交（<N> 个，全部列出，每条附改动文件数）:
-  - fd83102d feat(ui): 支持通过滑动消除界面 toast（1 个文件）
-  - 9650fb0c feat(profile): 日程课表调课功能（3 个文件）
-  - d8e5f012 feat(ui/profile-editor): 优化档案编辑器在日程模式和经典模式下的行为（2 个文件）
-  - ……（本次共有多少个就继续列多少行，一条不省）
-冲突修正 : 无
-================================================================
-```
-
-格式要点（这几条决定文件好不好读）：
-- `新增 / 修改 / 删除 / 未变更` 四节**固定顺序**，每节下的条目**一行一个**，不要用逗号挤在同一行；
-- 名称统一写成 `文件名 (workflow 的 name 字段)`；`name` 缺失时只写文件名；
-- 某节为空写 `(无)`，但**不要删掉这一节**；
-- 提交列表标题里写明总条数，正文逐条列全，不写「其余 N 个见 git log」。
-- 每条上游提交后面必须写 `（N 个文件）`，N 是该提交相对第一父提交改动的文件数（rename 按删除+新增计，和全流程 `--no-renames` 口径一致）。
-- 段末必须有 `冲突修正 : …` 一行：无冲突写 `无`；有冲突写 `发生过 N 个文件，已修正 M 个，残留 K 个`。
-- `本地提交` 一栏写「见本次 commit」——因为本文件在提交之前生成，此时还没有 commit SHA。
-
-若本次完全没有涉及 workflow 变更，`新增/修改/删除` 三节都写 `(无)`，并在段落末尾加一行 `本次无 Action 变更`——
-**不要自己编造名字**。提交列表必须真实，取自 `git rev-list "$BASE".."$UPSTREAM_REF"`；文件数用 `git diff --name-only <sha>^ <sha> | wc -l`（见上面的生成块），不要手估。
-
-**提交列表必须逐条列全，不许省略。** 本次有多少个提交就写多少行（43 个就写 43 行），
-禁止出现「其余 N 个见 git log」「...」「（略）」这类写法——这份文件是给人看的，不是索引。
-
-**前插完成后回读校验**：`head -70 out.txt` 必须能看到刚写的那一段，**且它在表头正下方、所有旧记录之上**；
-段头的短 SHA 与 `UPSTREAM_HEAD` 一致。若发现新段落跑到了文件末尾，说明用了追加，改回来重写。
-
-### 13.3 改动账本（**新段落插在最前面，旧内容原样下移，不覆写**）
-
-**直接用第 2 步探测出的 `$FIXLOG`，不要在这里重新判断一次**（重新判断有可能因为期间新增/删除文件而落到另一个文件上）。
-若 `$FIXLOG` 为空，说明第 2 步漏执行了，停下来回头补。
-
-- 两个相似文件同时存在时**只写 `fixxed.txt`**（即 `$FIXLOG` 指向的那个），并在汇报里告诉我「发现 fixed.txt 与 fixxed.txt 并存」，不要合并、不要删除任何一个。
-- 日志文件原本不存在时，本步骤负责创建 `$FIXLOG`（默认 `fixxed.txt`），并在汇报里标注「首次建立改动日志」。
-
-**文件已存在时**（绝大多数情况），里面是我此前改动的记录。你要：
-1. 先**完整读一遍**，理解已有格式（标题层级、字段名、书写习惯）；
-2. 把新段落**插到文件最开头**（旧内容整体下移），格式与已有内容保持一致；
-3. 旧内容**一行都不许改、不许重排、不许删除**。
-
-**第一步：先把本次段落写成文件**（理由同 13.2——跨 shell 传整段文本必丢）：
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${FIXLOG:?FAIL: FIXLOG 为空，回第 2 步探测}" \
-  "${UPSTREAM_SHORT:?FAIL: UPSTREAM_SHORT 为空}" "${BASE:?FAIL: BASE 为空}" "${UPSTREAM_REF:?FAIL: UPSTREAM_REF 为空}" \
-  "${UPSTREAM_REMOTE:?FAIL: UPSTREAM_REMOTE 为空}" "${UPSTREAM_BRANCH:?FAIL: UPSTREAM_BRANCH 为空}"
-cd "$REPO_ROOT" || exit 1
-
-# 变量非空不等于能解析：这里有两个值要真的参与计算，解析不到就会在账本里留下空白
-# （"上游  个提交"、"基线 "），看起来像同步成功，实际什么都没算。
-git rev-parse --verify --quiet "$UPSTREAM_REF^{commit}" >/dev/null \
-  || { echo "FAIL: UPSTREAM_REF 解析不到（$UPSTREAM_REF），回第 3 步"; exit 1; }
-git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
-  || { echo "FAIL: BASE 解析不到（$BASE），回第 4 步"; exit 1; }
-
-# 构建结果也要断言：缺了的话模板会写出 "构建:  → "，占位符检查只会报"占位符没替换"，
-# 排查方向跑偏（真正的问题是第 8 步没落盘）。
-[ -n "$BUILD_RESULT" ] || { echo "FAIL: BUILD_RESULT 为空，第 8 步没落盘，回去补"; exit 1; }
-[ -n "$TARGET_PROJ" ]  || { echo "FAIL: TARGET_PROJ 为空，回第 0 步"; exit 1; }
-
-if [ -f "$FIXLOG" ]; then echo "FIXLOG=$FIXLOG（已存在，$(wc -l < "$FIXLOG") 行）"; else echo "FIXLOG=$FIXLOG（不存在，将新建）"; fi
-
-# 几份"边做边记"的日志如果本轮没写过，就补一行占位，避免 heredoc 拼出空段落
-[ -s /tmp/extra-log.md ]     || echo "- 本次无其他调整。" > /tmp/extra-log.md
-[ -s /tmp/clean-merge-log.md ] || echo "- 本次无干净三方合并。" > /tmp/clean-merge-log.md
-[ -s /tmp/conflict-log.md ]  || echo "- 本次无冲突需要修正。" > /tmp/conflict-log.md
-[ -s /tmp/buildfix-log.md ]  || {
-  case "${BUILD_RESULT%%（*}" in
-    通过)   echo "- 无，构建一次通过。" > /tmp/buildfix-log.md ;;
-    未执行) echo "- 构建未执行（${BUILD_RESULT}），本轮没有修复记录。" > /tmp/buildfix-log.md ;;
-    *)      echo "- 构建未通过（${BUILD_RESULT}），详见 action.txt。" > /tmp/buildfix-log.md ;;
-  esac
-}
-
-# 冲突标记残留数直接从 7.1 的重扫结果取，不靠 AI 数
-# 同 13.1：用 -f 判存在，别让"< 打不开"被管道吞成空串
-# （空串写进账本就是"上游  个文件"，看起来像统计坏了）
-cnt() { if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
-CM=$(cnt /tmp/conflict-files.txt)
-UPN=$(cnt /tmp/up-files.txt)
-BN=$(cnt /tmp/both-files.txt)
-LN=$(cnt /tmp/local-files.txt)
-
-# heredoc 不加引号：下面 $(cat ...) 需要展开，把四份边做边记的日志直接拼进来，不靠回忆。
-# ★ 账本只记「改了哪些文件、每个文件怎么处理的」，不写冲突细节、不贴代码。
-#   用户要求过：文件必须列全，代码怎么改的不写。
-#   处理方式只有四种：取上游 / 三方合并 / 冲突修正 / 保留本地。
-git -c core.quotePath=false diff --no-renames --name-only "$PRE_MERGE_HEAD" > /tmp/fixlog-all.raw \
-  || { echo "FAIL: 取改动清单失败（PRE_MERGE_HEAD 无效？）"; exit 1; }
-git -c core.quotePath=false diff --no-renames --cached --name-only "$PRE_MERGE_HEAD" >> /tmp/fixlog-all.raw \
-  || { echo "FAIL: 取暂存改动清单失败"; exit 1; }
-LC_ALL=C sort -u /tmp/fixlog-all.raw \
-  | grep -vE '^(action\.txt|out\.txt|patches/.*)$' \
-  | grep -vxF -- "$FIXLOG" > /tmp/fixlog-changed.txt || true
-# grep 无匹配时退出码是 1，不是错误；但清单为空要当错误处理（一个文件都没改却写账本，肯定是操作错了）
-[ -s /tmp/fixlog-changed.txt ] || { echo "FAIL: 改动清单为空，检查 PRE_MERGE_HEAD 和暂存状态"; exit 1; }
-
-: > /tmp/fixlog-files.md
-while IFS= read -r f; do
-  [ -n "$f" ] || continue
-  if   [ -f /tmp/conflict-files.before.txt ] && grep -Fxq -- "$f" /tmp/conflict-files.before.txt; then how="冲突修正"
-  elif [ -f /tmp/clean-merge-files.txt ]     && grep -Fxq -- "$f" /tmp/clean-merge-files.txt;     then how="三方合并"
-  elif [ -f /tmp/custom-kept.txt ]           && grep -Fq  -- "$f" /tmp/custom-kept.txt;           then how="保留本地"
-  else how="取上游"
-  fi
-  printf -- '- %s — %s\n' "$f" "$how" >> /tmp/fixlog-files.md
-done < /tmp/fixlog-changed.txt
-
-cat > /tmp/new-fixlog.txt <<BLOCK
-================================================
-[$(date '+%Y-%m-%d %H:%M')] 同步 $UPSTREAM_REMOTE/$UPSTREAM_BRANCH @ $UPSTREAM_SHORT
-================================================
-
-范围：基线 $(git rev-parse --short "$BASE") → $UPSTREAM_SHORT，上游 $(git rev-list --count "$BASE".."$UPSTREAM_REF") 个提交，改动 $(cnt /tmp/fixlog-changed.txt) 个文件。
-处理：冲突 ${CONFLICT_FILES:-0} 个（残留 $CM 个）；本地定制 $LN 个文件保留未动；分支回退 ${BRANCH_FALLBACK:-0}。
-构建：$TARGET_PROJ → $BUILD_RESULT
-
-改动的文件
-----------
-$(cat /tmp/fixlog-files.md)
-BLOCK
-
-[ -s /tmp/new-fixlog.txt ] || { echo "FAIL: 新段落为空"; exit 1; }
-# 必须精确到日期行。只写 '^\[' 的话，正文里随手一行 [改上游] / [issue #123] 就能骗过检查，
-# 真漏了标题行也照样通过——而下一轮 13.3 的 awk 截段要靠 [YYYY- 开头，那时才发现账本坏了。
-grep -qE '^\[[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] ' /tmp/new-fixlog.txt \
-  || { echo "FAIL: 段落缺少 [YYYY-MM-DD HH:MM] 标题行"; exit 1; }
-grep -q -- "$UPSTREAM_SHORT" /tmp/new-fixlog.txt \
-  || { echo "FAIL: 段落里没有本次短 SHA"; exit 1; }
-
-# 占位符统一按尖括号检。模板里可能残留 <文件:行号> / <0 或 数量> / <TARGET_PROJ> 等，
-# 只查 '<填：' 是查不到的（本模板里根本没有 '<填：' 这种写法）。
-# ★ 同样不能写成 '<[^>]{1,60}>'：账本里贴 C# 泛型（List<Profile>、Dictionary<string,int>）
-#   太正常了，宽匹配会把真实内容判成占位符，逼着 AI 去"修"一段本来正确的内容。
-# ★ LC_ALL=C 必须加：UTF-8 locale 下 " -~" 这个范围会被当成字面字符集，
-#   [^ -~] 变成"不是空格/减号/波浪号"，几乎匹配所有字母，检查直接失效（全误报）。
-if tr -d '\r' < /tmp/new-fixlog.txt | LC_ALL=C grep -nE '<[^>]*[^ -~][^>]*>|<[A-Z][A-Z0-9_]{2,}>'; then
-  echo "FAIL: 上面这些尖括号占位符没替换，改完再跑这一步"; exit 1
-fi
-
-echo "OK: 新段落 $(wc -l < /tmp/new-fixlog.txt) 行"
-```
-
-**第二步：插到文件最开头（旧内容原样下移，一个字都不许改）**：
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${FIXLOG:?FAIL: FIXLOG 为空}"
-cd "$REPO_ROOT" || exit 1
-[ -s /tmp/new-fixlog.txt ] || { echo "FAIL: 新段落不存在，先做上一步"; exit 1; }
-
-# 新段落自己先转 LF（只动新段，绝不动旧内容——旧文件如果本来用 CRLF，
-# 对它做 tr -d 会把每一行都改掉，正好违反"旧内容一个字都不许改"）
-tr -d '\r' < /tmp/new-fixlog.txt > /tmp/new-fixlog.lf && mv /tmp/new-fixlog.lf /tmp/new-fixlog.txt \
-  || { echo "FAIL: 新段落转 LF 失败"; exit 1; }
-
-# ★ 末尾必须有换行。没有的话 cat 新段+旧文件时，新段最后一行会和旧文件第一行粘成一行：
-#   行数校验会失败，但报的是"旧内容被改动了"，很容易被误判成"手滑改到旧内容"。
-if [ -n "$(tail -c 1 /tmp/new-fixlog.txt)" ]; then printf '\n' >> /tmp/new-fixlog.txt; fi
-
-NEW_N=$(wc -l < /tmp/new-fixlog.txt | tr -d ' ')
-
-if [ -f "$FIXLOG" ]; then
-  # 先留一份原件，用于逐字节比对（行数相等不代表内容没被换掉）
-  cp "$FIXLOG" /tmp/fixlog.old || { echo "FAIL: 备份 FIXLOG 失败"; exit 1; }
-  OLD_N=$(wc -l < "$FIXLOG" | tr -d ' ')
-  cat /tmp/new-fixlog.txt "$FIXLOG" > "$FIXLOG.tmp" \
-    || { echo "FAIL: 拼接失败"; rm -f "$FIXLOG.tmp"; exit 1; }
-
-  # 行数守恒
-  GOT=$(wc -l < "$FIXLOG.tmp" | tr -d ' ')
-  EXP=$((NEW_N + OLD_N))
-  [ "$GOT" -eq "$EXP" ] \
-    || { echo "FAIL: 行数 $GOT != 旧 $OLD_N + 新 $NEW_N = $EXP"; rm -f "$FIXLOG.tmp"; exit 1; }
-
-  # ★ 逐字节验证"旧内容原样下移"——比行数更可靠：
-  # 把 tmp 跳过前 NEW_N 行后的部分，跟备份原件逐字节比较。
-  tail -n +$((NEW_N + 1)) "$FIXLOG.tmp" | cmp -s - /tmp/fixlog.old \
-    || { echo "FAIL: 旧内容被改动了（不只是行数问题）"; rm -f "$FIXLOG.tmp"; exit 1; }
-else
-  OLD_N=0
-  cp /tmp/new-fixlog.txt "$FIXLOG.tmp" || { echo "FAIL: 建文件失败"; exit 1; }
-fi
-
-[ -s "$FIXLOG.tmp" ] || { echo "FAIL: 结果为空"; exit 1; }
-mv "$FIXLOG.tmp" "$FIXLOG" || { echo "FAIL: 覆盖 $FIXLOG 失败（文件被占用？关掉编辑器重试）"; exit 1; }
-
-head -5 "$FIXLOG"
-echo "旧 $OLD_N 行 → 新 $(wc -l < "$FIXLOG") 行"
-```
-
-- **为什么删掉了"旧文件末尾补换行"**：新段落在前、旧内容在后，所以新旧之间会不会粘连，
-  取决于**新段落**末尾有没有换行，跟旧文件末尾无关。旧文件末尾补换行反而改动了旧内容。
-- **为什么用 `cmp` 而不是只比行数**：行数相等时，"旧内容被换成另一段等行数的内容"照样能过。
-  `cmp` 是逐字节比对，能把这类静默损坏抓住。
-
-**结构断言**（不要只看 `head -20`——新段落可能比它更长，看一半判断不了）：
-
-```
-source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-: "${REPO_ROOT:?FAIL: REPO_ROOT 为空，回第 0 步重建环境文件}"
-cd "$REPO_ROOT" || exit 1
-[ -n "$FIXLOG" ] || { echo "FAIL: FIXLOG 为空"; exit 1; }
-
-[ -n "$UPSTREAM_SHORT" ] || { echo "FAIL: UPSTREAM_SHORT 为空"; exit 1; }
-
-# 第一行应是本次新段的分隔线
-head -1 "$FIXLOG" | grep -q '^====' \
-  || { echo "FAIL: 第 1 行不是分隔线，新段没插在最前面"; head -3 "$FIXLOG"; exit 1; }
-
-# 前 3 行必须含本次短 SHA（否则可能是上一轮的残留段落）
-head -3 "$FIXLOG" | grep -q -- "$UPSTREAM_SHORT" \
-  || { echo "FAIL: 前 3 行没有本次短 SHA（$UPSTREAM_SHORT），可能插错位置"; head -3 "$FIXLOG"; exit 1; }
-
-echo "FIXLOG_OK: 新段在最顶部，含 $UPSTREAM_SHORT"
-```
-
-**关于格式**：新段落由上面第一步的 heredoc 统一生成，只有四块：
-
-```
-================================================
-[2026-10-24 13:20] 同步 upstream/develop/v2/misha-alpha @ 329bf4b1
-================================================
-
-范围：基线 41fc7035 → 329bf4b1，上游 1 个提交，改动 50 个文件。
-处理：冲突 0 个（残留 0 个）；本地定制 25 个文件保留未动；分支回退 0。
-构建：ClassIsland.Desktop → 通过（0 errors / 1294 warnings）
-
-改动的文件
-----------
-- ClassIsland/Views/MainView.axaml — 取上游
-- ClassIsland/Views/MainView.axaml.cs — 取上游
-- ClassIsland.Core/Controls/VerticalDrawer.axaml.cs — 冲突修正
-```
-
-规则只有三条：
-
-- **文件必须列全**：`git diff` 里出现过的代码文件，一个都不能漏（三个记录文件自身和 `patches/` 除外）；
-- **每个文件只写一句处理方式**，只允许四种：`取上游` / `三方合并` / `冲突修正` / `保留本地`；
-- **不写冲突是怎么合的、不写代码是怎么改的、不贴片段、不写行号**。
-
-为什么不写细节：账本是给"下一次同步"看的，它只需要知道"这个文件上次被动过、是怎么处理的"。
-真要看清改了什么，`git log -p` 和文件本身比账本准得多。把细节塞进账本只会让它越来越长，
-读到后面全是噪音，反而没人看。
-
-- **凡是你动过的文件，一个都不能漏。** 冲突合并、构建修复、防御性补强、格式调整——只要在 `git diff` 里出现，就必须列进来。
-- 每条写全五要素：**位置（文件:行号）、原状、改后、理由、影响面**。
-- **能贴 diff 就贴 diff**：每处改动附 3–10 行前后对照或 `diff` 片段，让我不翻仓库就能看懂改了什么。
-- 修改方式要写到「可复现」的程度。反例：「调整了错误处理」。正例：「把 `catch (Exception)` 改为 `catch (IOException ex)`，并在 catch 内 `logger.LogError(ex, ...)` 后 `throw`」。
-- 禁止只写「已修复」「已处理」「已同步」这类没有信息量的话。
-- 若本次没有任何 AI 改动，写一行 `本次无需 AI 修正的改动。`，段落仍然要插入。
-- **收尾反查（必做）**：本节在 `git add`/`commit` **之前**执行，此时 `HEAD` 还等于 `PRE_MERGE_HEAD`，
-  写 `git diff "$PRE_MERGE_HEAD" HEAD` 会恒为空、把每次同步都误判成"没改文件"。
-
-  **口径要说清**：和 `fixxed.txt` 比对的，既不是"全部改动"也不是"工作区全部"，
-  而是**只有 AI 亲自动过的文件**。因为 `git diff "$PRE_MERGE_HEAD"` 里必然还混着：
-  ① 三个记录文件自己；② 8.3 用 `git checkout` 覆盖进来的全部「仅上游改动」文件。
-  拿它们去和账本比，永远对不上，AI 只能靠编条目来凑数。
-
-  ```
-  source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-  : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${PRE_MERGE_HEAD:?FAIL: 锚点丢失，回第 6 步}"
-  cd "$REPO_ROOT" || exit 1
-
-  # ① 本次全部改动（工作区 + 索引 + 未跟踪）
-  # ★ 先写 raw 再排序，不要写成 `{ ...; } | sort -u > 目标`：管道左侧跑在子 shell 里，
-  #   里面任何一步失败都传不出来，而 sort 永远返回 0 —— 清单会"看起来正常"，实际是空或残缺的。
-  {
-    git -c core.quotePath=false diff --no-renames --name-only "$PRE_MERGE_HEAD"
-    git -c core.quotePath=false diff --no-renames --cached --name-only "$PRE_MERGE_HEAD"
-    git ls-files --others --exclude-standard
-  } > /tmp/all-changed.raw.txt || { echo "FAIL: 取改动清单失败，停下问我"; exit 1; }
-  LC_ALL=C sort -u /tmp/all-changed.raw.txt > /tmp/all-changed.txt \
-    || { echo "FAIL: 排序失败"; exit 1; }
-
-  # ② 剔除三个记录文件。FIXLOG 里的 . 要转义，否则 fixxedXtxt 这种也会被误排除；
-  #    不转义不会误伤当前两个文件名，但换个日志名就可能中招。
-  FIXLOG_RE=$(printf '%s' "${FIXLOG:-fixxed.txt}" | sed 's/\./\\./g')
-  grep -vE "^(action\.txt|out\.txt|${FIXLOG_RE}|patches/.*)$" /tmp/all-changed.txt > /tmp/code-changed.txt
-
-  # ③ 再剔除「仅上游改动」的文件（那些是 8.3 批量覆盖的，不属于 AI 的手工改动）
-  cut -f2 /tmp/up-only-status.txt 2>/dev/null | LC_ALL=C sort -u > /tmp/up-only-paths.txt
-  LC_ALL=C comm -23 /tmp/code-changed.txt /tmp/up-only-paths.txt > /tmp/ai-touched.txt
-
-  echo "全部代码改动 $(wc -l < /tmp/code-changed.txt) 个，其中 AI 手工动过的 $(wc -l < /tmp/ai-touched.txt) 个"
-  ```
-
-  **④ 拿 `/tmp/ai-touched.txt` 逐行比对账本——必须只比"顶部这一段"**：
-
-  ```
-  source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-  : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${FIXLOG:?FAIL: FIXLOG 为空}"
-  cd "$REPO_ROOT" || exit 1
-
-  # 直接 grep -qF "$f" "$FIXLOG" 扫整个文件是无效检查：旧段落里提过的文件名会"匹配成功"，
-  # 本轮漏记账照样能过（等于把硬性约束 16 做成摆设）。
-  # 段头固定是「==== / [日期] / ====」，所以遇到等号线时往后看一行：
-  # 下一行是 [YYYY- 才算下一段开始。账本内容里贴的分隔线（conflict-log.md 常贴 diff 片段）
-  # 极难被误判成新段头——要两个巧合同时发生：贴进来的正好是一长串等号线，
-  # 且它下一行正好是 [YYYY- 开头的日期行。这个概率可以接受。
-  # ★ 这一段与 13.9 ⑤ 的截取逻辑相同，改一处必须同步改另一处。
-  awk 'NR<=3 {print; next}
-       /^=+$/ && length($0) >= 10 {
-         hdr=$0
-         if ((getline nxt) > 0) {
-           if (nxt ~ /^\[[0-9][0-9][0-9][0-9]-/) exit
-           print hdr; print nxt; next
-         }
-         print hdr; next
-       }
-       {print}' "$FIXLOG" > /tmp/fixlog-top.txt
-  [ -s /tmp/fixlog-top.txt ] \
-    || { echo "FAIL: 账本开头不是标准段头，无法确定本次段落；head -5 看一眼"; head -5 "$FIXLOG"; exit 1; }
-
-  MISS=0
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    grep -qF -- "$f" /tmp/fixlog-top.txt || { echo "MISS: $f 没写进本次段落"; MISS=1; }
-  done < /tmp/ai-touched.txt
-  [ "$MISS" -eq 0 ] || { echo "FAIL: 有文件改了没记账，补完再提交"; exit 1; }
-  echo "FIXLOG_COVERED（$(wc -l < /tmp/ai-touched.txt) 个文件都能在账本顶部找到）"
-  ```
-
-  **不要求数量相等**（一个文件可能有多条记录），只要求"AI 动过的文件 ⊆ 账本提到的文件"。
-  如果补写发生在提交之后，开一个新 commit，**不要 `--amend`**。
-
-三个文件全部写完后，回到第 9 步提交。**提交时 `git add` 必须排除提示词文件、`patches/`、`bin/`、`obj/`**
-——直接 `git add -A` 会把它们一起提交进去，违反硬性约束 13。
-
-## 13.9 第 13 步：定制开发（可选；`CUSTOM_TASK` 非空或我提了需求时必做）
+## 12. 第 12 步：定制开发（可选；`CUSTOM_TASK` 非空或我提了需求时必做）
 
 **先确认该不该做**：参数区 `CUSTOM_TASK` 非空，或我在这轮对话里提了**要动仓库**的诉求
-（新功能、改文案、换图标、调默认值、加配置项——判断口径见 1.5）。
+（新功能、改文案、换图标、调默认值、加配置项——判断口径见 B.5）。
 两个都没有 → **整节跳过**，不要顺手加东西（那是"擅自扩大改动范围"，违反硬性约束 10）。
 
-顺序和红线见 **1.5**：必须先同步、后定制；`action.txt` / `out.txt` 一个字都不许碰。下面只讲怎么做。
+顺序和红线见 **B.5**：必须先同步、后定制；`action.txt` / `out.txt` 一个字都不许碰。下面只讲怎么做。
 
 ### ① 三道门（缺一条都不许动代码）
 
@@ -3932,16 +4087,17 @@ if [ -n "$DIRTY" ]; then
   exit 1
 fi
 
-# 门 2：同步必须已经处理过。三种合法状态：
+# 门 2：同步必须已经处理过。四种合法状态：
 #   a) 本轮判定 NO_UPDATE —— 官方没新提交，同步本来就不需要做
 #   b) HEAD 附近有 chore(sync) 提交 —— 同步已提交（允许 pre-commit hook 补的追加提交）
-#   c) 我明确说了"这次别同步" —— 只有这种情形才允许 CUSTOM_ONLY=1（见 1.5 情形 C）
+#   c) 我明确说了"这次别同步" —— 只有这种情形才允许 CUSTOM_ONLY=1（见 B.5 情形 C）
+#   d) NO_OP_FALLBACK —— 分支回退后与本地内容一致，本轮本来就没有代码要同步（不会有 chore 提交）
 if [ "${CUSTOM_ONLY:-0}" = "1" ]; then
   echo "NOTE: CUSTOM_ONLY=1，按我的要求跳过同步（汇报里必须写明）"
-elif [ "${SYNC_VERDICT:-}" != "NO_UPDATE" ]; then
+elif [ "${SYNC_VERDICT:-}" != "NO_UPDATE" ] && [ "${SYNC_VERDICT:-}" != "NO_OP_FALLBACK" ]; then
   git log -20 --format=%s | grep -q '^chore(sync):' || {
     echo "FAIL: 没看到同步提交（SYNC_VERDICT=${SYNC_VERDICT:-空}）"
-    echo "      先回第 9 步把同步提交做完，再回来定制"
+    echo "      先回第 10 步把同步提交做完，再回来定制"
     exit 1; }
 fi
 
@@ -3993,25 +4149,25 @@ printf '%s\n' '给设置页加自动重启开关' > /tmp/custom-title.txt
   `- 路径 — 新增` / `- 路径 — 修改` / `- 路径 — 删除`，一行一个文件，**不写行号、不写改法、不贴代码**。
   想补一句作用就写在破折号后面（`- src/A.cs — 新增，负责 X`），但不要展开成段落。
 - 每个新增的公开方法/事件都要能回答"谁调用它"；只写不接的代码等于没做。
-- 防御性要求与 10.3 完全一致：判空、边界、异常处理、资源释放（`using` / `Dispose`）。
+- 防御性要求与 8.3 完全一致：判空、边界、异常处理、资源释放（`using` / `Dispose`）。
   同样禁止"糊过去"的六种手段（注释报错代码 / 空 `catch` / 关 `TreatWarningsAsErrors` /
   `#nullable disable` / 改 `TargetFramework` 绕过 / 删测试）。
-- **构建：把 10.2 的构建块原样再跑一次**（命令不要改，`FAST` 规则也不变），然后另存结果：
+- **构建：把 8.2 的构建块原样再跑一次**（命令不要改，`FAST` 规则也不变），然后另存结果：
 
-  > ⚠️ 10.2 那个块会**覆盖** `BUILD_RESULT`（它内部 `echo "export BUILD_RESULT=..." >> env`），
+  > ⚠️ 8.2 那个块会**覆盖** `BUILD_RESULT`（它内部 `echo "export BUILD_RESULT=..." >> env`），
   > 这是预期的：同步阶段的结论早已写进 `action.txt` 并提交，不会被它改动；
   > 下面读到的 `BUILD_RESULT` **就是定制阶段这次构建的结果**。别去"恢复"它，也别回写 `action.txt`。
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失"; exit 1; }
-: "${BUILD_RESULT:?FAIL: BUILD_RESULT 为空，说明 10.2 的构建块没跑}"
+: "${BUILD_RESULT:?FAIL: BUILD_RESULT 为空，说明 8.2 的构建块没跑}"
 echo "export CUSTOM_BUILD_RESULT='$BUILD_RESULT'" >> /tmp/upstream-sync.env
 echo "定制阶段构建：$BUILD_RESULT"
 ```
 
-- **构建失败时用下面这个定制专用循环，不要用 10.3 那个块**。两个原因：
-  10.3 的 `FIX_ROUND` 是同步阶段共用的（同步可能已经用掉 3 轮，你一轮都开不了）；
-  10.3 还按 `PRE_MERGE_HEAD` 把错误分成 A/B 类，而定制阶段的错误只有一类——**你刚写的代码**，
+- **构建失败时用下面这个定制专用循环，不要用 8.3 那个块**。两个原因：
+  8.3 的 `FIX_ROUND` 是同步阶段共用的（同步可能已经用掉 3 轮，你一轮都开不了）；
+  8.3 还按 `PRE_MERGE_HEAD` 把错误分成 A/B 类，而定制阶段的错误只有一类——**你刚写的代码**，
   不需要"这算不算官方自带"的判断。
 
 ```
@@ -4087,12 +4243,12 @@ head -3 /tmp/new-fixlog.txt | grep -q -- "$UPSTREAM_SHORT" || { echo "FAIL: 段�
 echo "OK: 定制段 $(wc -l < /tmp/new-fixlog.txt) 行"
 ```
 
-生成完 `/tmp/new-fixlog.txt` 后，**把 13.3 的「第二步：插到文件最开头」和「结构断言」原样再跑一遍**
+生成完 `/tmp/new-fixlog.txt` 后，**把 9.3 的「第二步：插到文件最开头」和「结构断言」原样再跑一遍**
 （它们只认 `$FIXLOG` 和 `/tmp/new-fixlog.txt`，不关心里面是同步段还是定制段）。
 结构断言要求前 3 行含 `$UPSTREAM_SHORT`，上面的段头第 2 行就是它，能过。
 
 > 这是**第二次**往同一个文件前插。插完的效果是：`[定制]` 在最上面，`[同步]` 那一段被压到第二位，更早的继续往下。
-> 顺序正确（最近的在上），旧内容仍然逐字节没动——13.3 的 `cmp` 会证明这一点。
+> 顺序正确（最近的在上），旧内容仍然逐字节没动——9.3 的 `cmp` 会证明这一点。
 
 ### ⑤ 提交（**单独一个 commit**，不许和同步合并）
 
@@ -4102,7 +4258,7 @@ source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，
 cd "$REPO_ROOT" || exit 1
 
 # ---- 改了哪些文件（工作区 + 已暂存 + 未跟踪）----
-# 与 10.3 ① / 13.3 收尾同一套写法：先写 raw 再排序。管道会把左侧的失败吞掉，
+# 与 8.3 ① / 9.3 收尾同一套写法：先写 raw 再排序。管道会把左侧的失败吞掉，
 # sort 永远返回 0，清单可能"看起来正常"其实是空的。
 {
   git -c core.quotePath=false diff --no-renames --name-only "$CUSTOM_BASE"
@@ -4111,9 +4267,10 @@ cd "$REPO_ROOT" || exit 1
 } > /tmp/custom-all.raw.txt || { echo "FAIL: 取改动清单失败"; exit 1; }
 LC_ALL=C sort -u /tmp/custom-all.raw.txt > /tmp/custom-all.txt || { echo "FAIL: 排序失败"; exit 1; }
 
-# 去掉记录文件与补丁产物，剩下的才是本次真正写的代码（FIXLOG 的 . 要转义）
+# 去掉记录文件、提示词与补丁产物，剩下的才是本次真正写的代码（FIXLOG 的 . 要转义）
+# 提示词改动要进提交，但不算定制代码、不写 [定制] 段（见硬性约束 26）
 FIXLOG_RE=$(printf '%s' "${FIXLOG:-fixxed.txt}" | sed 's/\./\\./g')
-grep -vE "^(action\.txt|out\.txt|${FIXLOG_RE}|patches/.*)$" /tmp/custom-all.txt > /tmp/custom-code.txt
+grep -vE "^(action\.txt|out\.txt|${FIXLOG_RE}|prompt[^/]*\.md|patches/.*)$" /tmp/custom-all.txt > /tmp/custom-code.txt
 if [ ! -s /tmp/custom-code.txt ]; then
   # 不直接 FAIL：确实存在"只补一条历史记录"这类需求（定制文档/账本，没有代码）。
   # 但也不能默默放过去——多数情况下是改动没落盘、或路径算错（比如全被上面的 exclude 过滤了）。
@@ -4133,7 +4290,7 @@ fi
 #   所以遇到等号线时往后看一行，下一行是 [日期] 才算新段开始。
 # 这样 /tmp/custom-log.md 里贴进来的分隔线（哪怕正好是 ==========）极难造成误截断
 # （需要它下一行恰好是 [YYYY- 日期行），不会出现"明明记了却报 MISS"的假失败。
-# ★ 这一段与 13.3 收尾反查的截取逻辑相同，改一处必须同步改另一处。
+# ★ 这一段与 9.3 收尾反查的截取逻辑相同，改一处必须同步改另一处。
 # 顺带说明：这里不能用 ^={40,}$，mawk 默认不认区间量词，会一个都不匹配。
 awk 'NR<=3 {print; next}
      /^=+$/ && length($0) >= 10 {
@@ -4158,7 +4315,7 @@ while IFS= read -r f; do
 done < /tmp/custom-code.txt
 [ "$MISS" -eq 0 ] || { echo "FAIL: 有文件改了没记账，补完再提交"; exit 1; }
 
-# ---- 暂存：规则与第 9 步完全一致 ----
+# ---- 暂存：规则与第 10 步完全一致 ----
 # 同样先清掉写记录文件时可能残留的中间文件（否则会被算成"代码改动"，还报 MISS 误导人）
 rm -f action.txt.lf out.txt.tmp out.txt.lf out.txt.bak "$FIXLOG.tmp" 2>/dev/null || true
 
@@ -4167,8 +4324,7 @@ git add -A -- . \
   ':(exclude)bin' ':(exclude)*/bin' \
   ':(exclude)obj' ':(exclude)*/obj' \
   ':(exclude)*.tmp' \
-  ':(exclude)action.txt.lf' ':(exclude)out.txt.lf' ':(exclude)out.txt.bak' \
-  ':(exclude)*.prompt.md' ':(exclude)prompt.md'
+  ':(exclude)action.txt.lf' ':(exclude)out.txt.lf' ':(exclude)out.txt.bak'
 git reset -q -- patches 2>/dev/null || true
 git diff --cached --name-only | grep -qE '(^|/)(bin|obj)/' \
   && { echo "FAIL: bin/obj 进了暂存区，先修 .gitignore"; exit 1; }
@@ -4211,12 +4367,12 @@ echo "CUSTOM_COMMIT_OK（工作区已确认干净）"
   本轮是 `NO_UPDATE` / `CUSTOM_ONLY` 时本来就没有同步 commit，只有 `feat(custom):` 一个，这是合法的。
 - 提交信息里的 body 沿用同样的思路（说清基于哪个同步点、改了什么、构建结果），不要空 body。
 
-### ⑥ 推送（规则与第 10 步一模一样，不另起一套）
+### ⑥ 推送（规则与第 11 步一模一样，不另起一套）
 
 | 情况 | 怎么做 |
 |---|---|
 | 同步那轮**已经推成功** | 从第 1 道（重验 URL）到第 3 道（真推）**再完整走一遍**；别只跑最后那条 `git push` |
-| 同步那轮**走了补丁模式** | **重新执行 12.1**。`PATCH_BASE` 是按远端真实状态算的，会把同步 + 定制两个 commit 一起打进 `patches/update.txt`；**不要**手工拼补丁，也不要新增 `update-2.txt`。⚠️ 12.1 有**两块**（`update.txt` 和 `apply.txt`），两块都要重跑——只跑前一块会让 `apply.txt` 里写的提交数还是旧的 |
+| 同步那轮**走了补丁模式** | **重新执行 11.1**。`PATCH_BASE` 是按远端真实状态算的，会把同步 + 定制两个 commit 一起打进 `patches/update.txt`；**不要**手工拼补丁，也不要新增 `update-2.txt`。⚠️ 11.1 有**两块**（`update.txt` 和 `apply.txt`），两块都要重跑——只跑前一块会让 `apply.txt` 里写的提交数还是旧的 |
 | 同步那轮 `PUSH_MODE=direct` 且失败 | 定制做完后同样按 `direct` 再试一次；仍失败就如实报错，**不许偷偷降级成补丁模式** |
 
 推送前仍要过"目标 URL 必须含 `NLCLI`"那道断言。推送成功后 `build_release.yml` 会再跑一遍，这是正常的。
@@ -4238,10 +4394,7 @@ echo "CUSTOM_COMMIT_OK（工作区已确认干净）"
 「工作区有 N 个未提交文件，下次运行前先让我处理（提交或撤销）」——否则下一轮第 0 步会直接挡住你，
 而用户不知道为什么。
 
-## 14. 第 12 步：向我汇报（用中文，结构化）
-
-> 编号说明：这一步编号是 12，但**实际最后执行**（13.9 的定制、以及定制后的推送都在它前面）。
-> 编号按章节顺序排，不按时间排——看到「第 12 步」不要以为是定制之前就要汇报。
+## 13. 第 13 步：向我汇报（用中文，结构化）
 
 ```text
 （下面是汇报格式，不是命令，不要执行）
@@ -4263,7 +4416,7 @@ echo "CUSTOM_COMMIT_OK（工作区已确认干净）"
 ## 同步结果
 - 同步是否跳过: 否 / 是（按你的要求 `CUSTOM_ONLY=1`；`action.txt` / `out.txt` 未改动）
 - 官方: ClassIsland/ClassIsland @ <UPSTREAM_BRANCH>
-- 分支回退: 否 / 是（develop/v2/misha-alpha → master），回退原因
+- 分支回退: 否 / 是（`<原 UPSTREAM_BRANCH>` → `<UPSTREAM_BRANCH_FB>`），回退原因；回退后是否 NO_OP（内容一致、本轮无操作）
 - 离线模式: 否 / 是（`UPSTREAM_OFFLINE=1`：fetch 不到官方仓库，账本参照点用的是本地 HEAD <短SHA>）
 - 基线: <BASE 短SHA>  →  目标: <UPSTREAM 短SHA>
 - 基线是否重算: 否 / 是（`BASELINE_REBUILT=1`；写明原因：分支回退 / action.txt 基线失效 / 不在官方历史）
@@ -4309,7 +4462,7 @@ echo "CUSTOM_COMMIT_OK（工作区已确认干净）"
 - <名称列表>
 
 ## 生成的文件
-- action.txt / out.txt / <日志文件名>（说明各自写入的内容要点）
+- action.txt / out.txt / <日志文件名> / memory.txt（本轮有经验才写）（说明各自写入的内容要点）
 - 日志文件状态: 沿用已有 / 首次建立 / 发现多个疑似文件（列出）
 
 ## 需要我确认的事项
@@ -4325,39 +4478,40 @@ echo "CUSTOM_COMMIT_OK（工作区已确认干净）"
   cd 你的仓库 && git am update.txt && git push <含 NLCLI 的 remote> HEAD:<分支名>
 ```
 
-汇报前，逐条对照 15 节的硬性约束自检一遍；任何一条不满足，先修正再汇报。
+汇报前，逐条对照第 14 步的硬性约束自检一遍；任何一条不满足，先修正再汇报。
 
-## 15. 硬性约束（违反即任务失败）
+## 14. 硬性约束（违反即任务失败）
 
 1. **remote 身份以 URL 为准，不以名字为准**：URL 含 `NLCLI` 的一定是我自己的仓库（推送终点），含 `ClassIsland` 的一定是官方（只读）。名字叫反了要自动纠正，不许将错就错。
 2. 绝不 push 到官方 remote；推送前必须再确认一次目标 URL 含 `NLCLI`。
 3. 不许 `git push --force` / `--force-with-lease` / `--no-verify`。
 4. 不许丢掉我在 `fixxed.txt` 中记录的定制——冲突时「保留我的改动」优先级高于「吸收官方」。
-5. 不许自创 `fixxed.txt` 的格式；统一按 13.3 的**文件清单**写（一行一个文件，只写处理方式）。
+5. 不许自创 `fixxed.txt` 的格式；统一按 9.3 的**文件清单**写（一行一个文件，只写处理方式）。
    **新段落插在文件最前面**；旧内容默认原样下移，但**我明确要求改格式时，历史段也要一起改**——
    留着几段几十行的旧格式，只会拖长上下文、让后面的 AI 读不出重点。
 6. 不许伪造记录文件内容；`out.txt` 里的工作流名称和提交列表必须真实来自仓库。
 7. 不许在语义互斥、无法两全的冲突上擅自决定，必须停下来问我。
-8. **构建验证不通过（或未执行而谎报通过）即视为任务失败**。构建失败必须走 10.3 的修复流程，最多修 3 轮；
-   定制阶段的构建失败走 13.9 ③ 的专用循环（`CUSTOM_FIX_ROUND`，独立计数，同样 3 轮上限）。
+8. **构建验证不通过（或未执行而谎报通过）即视为任务失败**。构建失败必须走 8.3 的修复流程，最多修 3 轮；
+   定制阶段的构建失败走 12 ③ 的专用循环（`CUSTOM_FIX_ROUND`，独立计数，同样 3 轮上限）。
    两种情况都不许带着失败状态提交或推送。
-9. 修复编译错误时**禁止糊弄**：不许注释报错代码、不许空 `catch`、不许关 `TreatWarningsAsErrors`、不许 `#nullable disable`、不许删测试。新增代码必须符合 10.3 的防御性编程清单。
-10. 除 13.9 明确要求实现的功能之外，不许顺手改动与本次任务无关的文件，不许做格式化 / 重排 / 删注释这类"顺手清理"。
+9. 修复编译错误时**禁止糊弄**：不许注释报错代码、不许空 `catch`、不许关 `TreatWarningsAsErrors`、不许 `#nullable disable`、不许删测试。新增代码必须符合 8.3 的防御性编程清单。
+10. 除 12 明确要求实现的功能之外，不许顺手改动与本次任务无关的文件，不许做格式化 / 重排 / 删注释这类"顺手清理"。
 11. **不许因为官方无更新就跳过与我自己的仓库对齐**，也不许因为我自己的仓库有更新就误判官方也有更新；两者必须分别判断、分别处理。
 12. 每一步执行完都要在对话里简短说明做了什么，关键命令的原始输出要贴出来（尤其是 `git remote -v`、`git status`、`git rev-list --left-right --count`、`git diff --stat`、构建错误、冲突文件的差异）。
-13. 工作区里若放着这份提示词文件、`patches/`、其它临时笔记，都不属于同步内容：
+13. `patches/`、`bin/`、`obj/`、其它临时笔记都不属于同步内容：
     `git add` 时必须用 pathspec 排除（`':(exclude)patches'` 等），**不许直接 `git add -A` 然后指望 .gitignore**。
     写记录文件时产生的中间产物（`action.txt.lf`、`out.txt.tmp`、`out.txt.lf`、`out.txt.bak`、`$FIXLOG.tmp`）
     同样不许入库：暂存前先 `rm -f`，并保留 `':(exclude)*.tmp'` 等排除项。
-14. **1.3 节里标注为"必做"的双重校验，一项都不许省**；标注为"`FAST=1` 可省"的（第 7 项的
-    `--no-incremental` 复验、YAML 语法校验）按 1.4 的规则执行，不算违反本条。
+    **唯独提示词文件（`prompt*.md`）不在此列**：它和源码一样是仓库内容，改了就得随本轮一起提交。
+14. **B.3 节里标注为"必做"的双重校验，一项都不许省**；标注为"`FAST=1` 可省"的（第 7 项的
+    `--no-incremental` 复验、YAML 语法校验）按 B.4 的规则执行，不算违反本条。
     任何一项不过都要停下来，不许"大概没问题"就继续。
 15. 汇报里的每个结论都必须有对应的命令输出支撑。凡是没实际跑过的检查，**不许写成"通过"**；
     跳过就说"未执行（原因）"，不确定就说"未确认"。
 16. **凡是 AI 亲自动过的文件，必须在 `$FIXLOG` 新增段落里逐行列出**，每行只写「路径 — 处理方式」，
     处理方式只有四种：取上游 / 三方合并 / 冲突修正 / 保留本地。**不写冲突细节、不贴代码、不写行号。**
-    口径是「AI 动过的文件 ⊆ 账本列出的文件」，不是数量相等——用第 13.3 节的 `/tmp/ai-touched.txt` 逐个 grep。
-    **三个记录文件本身、以及 `patches/` 下的产物，不计入这个要求。**
+    口径是「AI 动过的文件 ⊆ 账本列出的文件」，不是数量相等——用第 9.3 节的 `/tmp/ai-touched.txt` 逐个 grep。
+    **三个记录文件本身、提示词文件（`prompt*.md`）、以及 `patches/` 下的产物，不计入这个要求。**
 17. 写入的日志文件必须是第 2 步探测到的那个（`fixxed.txt` 优先，其次 `fixed.txt`，再其次递归找），
     不许凭记忆自建一个同名文件。
 18. **同步那个 commit 之前，三个记录文件必须都已写完并通过回读校验**（`action.txt` 真比对 SHA、
@@ -4373,7 +4527,20 @@ echo "CUSTOM_COMMIT_OK（工作区已确认干净）"
     定制阶段**不许改** `action.txt` 和 `out.txt`；`action.txt` 的 `LAST_SYNCED_SHA` 永远只由同步那一步写。
 22. **定制也要记账**：`$FIXLOG` 顶部必须有 `[定制]` 段，覆盖每个改动文件；标出哪些是 `[改上游]` 文件、
     下次同步会在哪冲突。没记账就提交＝任务失败（同第 16 条口径）。
+    **提示词文件（`prompt*.md`）例外：照常进提交，但不写进 `[定制]` 段、不计入改动清单。**
 23. **定制必须重新构建**，不许拿同步那轮的构建结论当定制的结果；失败同样 3 轮上限，未通过不许提交。
     构建结果写 `CUSTOM_BUILD_RESULT`，**不许回写 `action.txt`**。
 24. **不许为了好实现就删/回退刚同步进来的上游代码**，也不许重复实现上游已经有的功能——
     命中就先问我。定制只做我要求的那一件事，不加"顺便优化"。
+
+25. **`memory.txt` 只记"下次还会遇到"的东西**：不写一次性 SHA、不写本轮文件清单、不超过 300 行。
+    它**不参与定制判定**——账本里标「取上游 / 三方合并」的文件，哪怕在 `memory.txt` 里被提到过，也不算定制。
+26. **提示词的改动：必须进提交和补丁，但一律不写进账本**。
+    - 进提交：`prompt*.md` 本轮改了，就必须出现在同一个 `chore(sync):` / `feat(custom):` 提交里。
+      **不许**留在工作区、**不许**另开 commit 拆分。漏一次，下一轮整套判断都按旧规则跑。
+    - 进补丁：`format-patch` 覆盖全部提交，只要提交里有它，补丁里就有。
+    - **不进账本**：`$FIXLOG`（`fixxed.txt`）里**不写**提示词段落，`out.txt` 也不提；
+      `$FIXLOG` 只记代码与上游冲突，提示词是工具本身，写进去会让下一轮的定制判定把 `prompt*.md` 当成"我的定制"。
+    - 自检：`git show --name-only --format= HEAD | grep '^prompt'` 必须命中（本轮改过的话）；
+      同时 `head -20 "$FIXLOG" | grep -q 'prompt'` 必须**不命中**（命中了就是写错了账本，删掉那段再提交）；
+      走补丁通道再加 `grep -c '^diff --git a/prompt' patches/update.txt` 必须 ≥ 1。
