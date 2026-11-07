@@ -372,5 +372,8 @@ cipx/
 **/.idea/avalonia.xml
 **/.idea/copilot.*
 
-# 同步提示词导出的补丁，不入库
 patches/
+patches.zip
+out/
+out.zip
+dist/
