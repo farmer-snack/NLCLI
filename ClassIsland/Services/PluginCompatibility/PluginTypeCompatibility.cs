@@ -8,8 +8,13 @@ using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using Avalonia.Data;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
 using ClassIsland.Core;
+using ClassIsland.Core.Compatibility;
 using Cecil = Mono.Cecil;
+using CecilIL = Mono.Cecil.Cil;
 
 namespace ClassIsland.Services.PluginCompatibility;
 
@@ -53,6 +58,11 @@ internal static class PluginTypeCompatibility
         Path.Combine(CommonDirectories.AppCacheFolderPath, "PluginCompatibility");
 
     /// <summary>
+    /// 兼容规则的版本号。重写逻辑发生变化时必须递增，否则旧缓存会被继续复用。
+    /// </summary>
+    private const int CompatibilityVersion = 3;
+
+    /// <summary>
     /// 宿主当前 Avalonia 的主版本号。用于判断插件是否需要兼容处理。
     /// </summary>
     private static readonly Lazy<int> HostAvaloniaMajor = new(() =>
@@ -72,6 +82,20 @@ internal static class PluginTypeCompatibility
     /// </summary>
     private static readonly Lazy<HostTypeIndex> HostTypes =
         new(HostTypeIndex.Build, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>
+    /// Avalonia 12 中已经彻底移除、只能改名到新类型的旧类型。
+    /// 这些名字无法从宿主类型表里反推（新旧名字没有包含关系），因此显式列出。
+    /// </summary>
+    private static readonly Dictionary<string, (string Namespace, string Name, string Assembly)> RemovedTypeAliases =
+        new(StringComparer.Ordinal)
+        {
+            ["Avalonia.Data.IBinding"] = ("Avalonia.Data", "BindingBase", "Avalonia.Base"),
+            ["Avalonia.Controls.SystemDecorations"] = ("Avalonia.Controls", "WindowDecorations", "Avalonia.Controls"),
+            ["Avalonia.Input.IDataObject"] = ("Avalonia.Input", "IDataTransfer", "Avalonia.Base"),
+            ["Avalonia.Input.DataObject"] = ("Avalonia.Input", "DataTransfer", "Avalonia.Base"),
+        };
+
 
     /// <summary>
     /// 判断并（在必要时）生成兼容改写后的程序集。
@@ -187,7 +211,7 @@ internal static class PluginTypeCompatibility
             hash = Convert.ToHexString(SHA256.HashData(stream))[..16];
         }
 
-        var directory = Path.Combine(CacheRoot, $"{hash}-v{hostMajor}");
+        var directory = Path.Combine(CacheRoot, $"{hash}-v{hostMajor}-c{CompatibilityVersion}");
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, Path.GetFileName(assemblyPath));
     }
@@ -204,9 +228,21 @@ internal static class PluginTypeCompatibility
     {
         failure = null;
         Cecil.AssemblyDefinition assembly;
+        using var resolver = new Cecil.DefaultAssemblyResolver();
+        resolver.AddSearchDirectory(AppContext.BaseDirectory);
+        var pluginDirectory = Path.GetDirectoryName(sourcePath);
+        if (!string.IsNullOrEmpty(pluginDirectory))
+        {
+            resolver.AddSearchDirectory(pluginDirectory);
+        }
+
         try
         {
-            assembly = Cecil.AssemblyDefinition.ReadAssembly(sourcePath, new Cecil.ReaderParameters { ReadSymbols = false });
+            assembly = Cecil.AssemblyDefinition.ReadAssembly(sourcePath, new Cecil.ReaderParameters
+            {
+                ReadSymbols = false,
+                AssemblyResolver = resolver
+            });
         }
         catch (Exception ex)
         {
@@ -228,6 +264,10 @@ internal static class PluginTypeCompatibility
                 module.Attributes &= ~Cecil.ModuleAttributes.StrongNameSigned;
                 changes.Add("已移除程序集的强名称签名标记（.NET 运行时不校验签名）。");
             }
+            RewriteMembers(module, changes);
+            ApplyTypeAliases(module, changes);
+            FixInstructionOperands(module, changes);
+
             var index = HostTypes.Value;
             var unresolved = new List<string>();
 
@@ -356,6 +396,613 @@ internal static class PluginTypeCompatibility
             return true;
         }
     }
+
+    /// <summary>
+    /// 重写插件里对 Avalonia 11 成员的引用。类型别名由 <see cref="ApplyTypeAliases"/> 统一处理，
+    /// 这里只处理签名或调用形态发生变化的成员。
+    /// </summary>
+    private static void RewriteMembers(Cecil.ModuleDefinition module, List<string> changes)
+    {
+        foreach (var member in module.GetMemberReferences().ToList())
+        {
+            switch (member)
+            {
+                case Cecil.MethodReference method:
+                    RewriteMethod(module, method, changes);
+                    break;
+                case Cecil.FieldReference field:
+                    RewriteField(module, field, changes);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 重写单个方法引用。映射只针对 Avalonia 12 中确实发生变化、且无法靠类型别名解决的成员。
+    /// </summary>
+    private static void RewriteMethod(Cecil.ModuleDefinition module, Cecil.MethodReference method, List<string> changes)
+    {
+        // 泛型方法调用在元数据里是 MethodSpecification，它本身不允许改 DeclaringType 等成员，
+        // 必须改它指向的 ElementMethod。
+        if (method is Cecil.MethodSpecification specification)
+        {
+            method = specification.ElementMethod;
+        }
+
+        if (method.DeclaringType == null)
+        {
+            return;
+        }
+
+        var declaring = GetElementTypeFullName(method.DeclaringType);
+        var name = method.Name;
+        var parameterCount = method.Parameters.Count;
+
+        // Profile 的集合属性已改为 ObservableOrderedDictionary<TKey, TValue>（派生自原类型）。
+        if (declaring.Equals("ClassIsland.Shared.Models.Profile.Profile", StringComparison.Ordinal) &&
+            parameterCount == 0 &&
+            name is "get_ClassPlans" or "get_TimeLayouts" or "get_Subjects")
+        {
+            if (TryMakeOrderedDictionary(module, method.ReturnType, out var ordered))
+            {
+                method.ReturnType = ordered;
+                changes.Add($"{declaring}::{name} 返回类型 → ObservableOrderedDictionary");
+            }
+
+            return;
+        }
+
+        // XAML 扩展在 Avalonia 12 中返回 BindingBase / ReflectionBinding。
+        if (declaring == "Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension" &&
+            name == "ProvideValue")
+        {
+            method.ReturnType = MakeTypeReference(module, "Avalonia.Data", "BindingBase", "Avalonia.Base");
+            return;
+        }
+
+        if (declaring == "Avalonia.Markup.Xaml.MarkupExtensions.ReflectionBindingExtension" &&
+            name == "ProvideValue")
+        {
+            method.ReturnType = MakeTypeReference(module, "Avalonia.Data", "ReflectionBinding", "Avalonia.Base");
+            return;
+        }
+
+        if (declaring == "Avalonia.Data.TemplateBinding" && name == "ProvideValue")
+        {
+            method.ReturnType = MakeTypeReference(module, "Avalonia.Data", "BindingBase", "Avalonia.Base");
+            return;
+        }
+
+        // IBinding 已并入 BindingBase。
+        if (declaring == "Avalonia.Controls.DataGridBoundColumn" && name is "get_Binding" or "set_Binding")
+        {
+            if (name == "get_Binding")
+            {
+                method.ReturnType = MakeTypeReference(module, "Avalonia.Data", "BindingBase", "Avalonia.Base");
+            }
+            else if (parameterCount == 1)
+            {
+                method.Parameters[0].ParameterType =
+                    MakeTypeReference(module, "Avalonia.Data", "BindingBase", "Avalonia.Base");
+            }
+
+            return;
+        }
+
+        if (declaring == "Avalonia.AvaloniaObjectExtensions" && name == "ToBinding" && parameterCount == 1)
+        {
+            method.ReturnType = MakeTypeReference(module, "Avalonia.Data", "BindingBase", "Avalonia.Base");
+            return;
+        }
+
+        if (declaring == "Avalonia.AvaloniaObject" &&
+            parameterCount == 2 &&
+            name is "Bind" or "set_Item" &&
+            GetElementTypeFullName(method.Parameters[1].ParameterType) == "Avalonia.Data.IBinding")
+        {
+            method.Parameters[1].ParameterType =
+                MakeTypeReference(module, "Avalonia.Data", "BindingBase", "Avalonia.Base");
+            changes.Add($"{declaring}::{name} 的绑定参数 → BindingBase");
+            return;
+        }
+
+        // 静态扩展 Bind 在 Avalonia 12 中已移除，转到宿主垫片。
+        if (declaring == "Avalonia.AvaloniaObjectExtensions" && name == "Bind" && parameterCount == 4)
+        {
+            method.DeclaringType = ShimType(module);
+            method.HasThis = false;
+            method.Parameters[2].ParameterType =
+                MakeTypeReference(module, "Avalonia.Data", "BindingBase", "Avalonia.Base");
+            changes.Add($"{declaring}::Bind → Avalonia12Compatibility.Bind");
+            return;
+        }
+
+        // Avalonia 12 没有 Binding(string, BindingMode) 构造函数。
+        if (declaring == "Avalonia.Data.Binding" &&
+            name == ".ctor" &&
+            parameterCount == 2 &&
+            GetElementTypeFullName(method.Parameters[0].ParameterType) == "System.String" &&
+            GetElementTypeFullName(method.Parameters[1].ParameterType) == "Avalonia.Data.BindingMode")
+        {
+            method.DeclaringType = ShimType(module);
+            method.Name = "CreateBinding";
+            method.HasThis = false;
+            method.ReturnType = MakeTypeReference(module, "Avalonia.Data", "Binding", "Avalonia.Markup");
+            changes.Add("Binding(string, BindingMode) → Avalonia12Compatibility.CreateBinding");
+            return;
+        }
+
+        // Mode 属性在 Avalonia 12 中下移到 ReflectionBinding 上。
+        if (declaring == "Avalonia.Data.BindingBase" && name == "set_Mode" && parameterCount == 1)
+        {
+            method.DeclaringType = MakeTypeReference(module, "Avalonia.Data", "ReflectionBinding", "Avalonia.Base");
+            changes.Add("BindingBase.Mode → ReflectionBinding.Mode");
+            return;
+        }
+
+        // 拖放数据 API：IDataObject / DataObject → IDataTransfer / DataTransfer。
+        if (declaring == "Avalonia.Input.DragEventArgs" && name == "get_Data" && parameterCount == 0)
+        {
+            method.Name = "get_DataTransfer";
+            method.ReturnType = MakeTypeReference(module, "Avalonia.Input", "IDataTransfer", "Avalonia.Base");
+            changes.Add("DragEventArgs.Data → DragEventArgs.DataTransfer");
+            return;
+        }
+
+        if (declaring == "Avalonia.Input.IDataObject" && name is "Contains" or "Get")
+        {
+            RetargetToShim(module, method, name, "Avalonia.Input", "IDataTransfer", "Avalonia.Base");
+            changes.Add($"IDataObject.{name} → Avalonia12Compatibility.{name}");
+            return;
+        }
+
+        if (declaring == "Avalonia.Input.DataObject" && name == "Set" && parameterCount == 2)
+        {
+            RetargetToShim(module, method, "Set", "Avalonia.Input", "DataTransfer", "Avalonia.Base");
+            changes.Add("DataObject.Set → Avalonia12Compatibility.Set");
+            return;
+        }
+
+        if (declaring == "Avalonia.Input.DragDrop" && name == "DoDragDrop" && parameterCount == 3)
+        {
+            method.Name = "DoDragDropAsync";
+            method.Parameters[1].ParameterType =
+                MakeTypeReference(module, "Avalonia.Input", "IDataTransfer", "Avalonia.Base");
+            changes.Add("DragDrop.DoDragDrop → DragDrop.DoDragDropAsync");
+            return;
+        }
+
+        if (declaring == "Avalonia.Controls.Window" &&
+            name == "set_SystemDecorations" &&
+            parameterCount == 1 &&
+            GetElementTypeFullName(method.Parameters[0].ParameterType) == "Avalonia.Controls.SystemDecorations")
+        {
+            method.Parameters[0].ParameterType =
+                MakeTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
+            changes.Add("Window.SystemDecorations → WindowDecorations");
+            return;
+        }
+
+        // 剪贴板文本 API 在 Avalonia 12 中改为扩展方法。
+        if (declaring == "Avalonia.Input.Platform.IClipboard" && name is "SetTextAsync" or "GetTextAsync")
+        {
+            method.DeclaringType =
+                MakeTypeReference(module, "Avalonia.Input.Platform", "ClipboardExtensions", "Avalonia.Base");
+            method.HasThis = false;
+            method.Parameters.Insert(0, new Cecil.ParameterDefinition(
+                MakeTypeReference(module, "Avalonia.Input.Platform", "IClipboard", "Avalonia.Base")));
+            if (name == "GetTextAsync")
+            {
+                method.Name = "TryGetTextAsync";
+            }
+
+            changes.Add($"IClipboard.{name} → ClipboardExtensions");
+        }
+    }
+
+    /// <summary>
+    /// 重写字段引用的类型。字段本身仍然存在，只是类型变了。
+    /// </summary>
+    private static void RewriteField(Cecil.ModuleDefinition module, Cecil.FieldReference field, List<string> changes)
+    {
+        if (field.DeclaringType == null)
+        {
+            return;
+        }
+
+        var declaring = GetElementTypeFullName(field.DeclaringType);
+        if (declaring == "Avalonia.Controls.Window" && field.Name == "WindowStateProperty")
+        {
+            var window = MakeTypeReference(module, "Avalonia.Controls", "Window", "Avalonia.Controls");
+            var state = MakeTypeReference(module, "Avalonia.Controls", "WindowState", "Avalonia.Controls");
+            field.FieldType = MakeGenericType(module, "Avalonia", "DirectProperty`2", "Avalonia.Base", window, state);
+            changes.Add("Window.WindowStateProperty → DirectProperty<Window, WindowState>");
+        }
+    }
+
+    /// <summary>
+    /// 把实例方法的目标改为宿主垫片上的静态方法，并把原实例补成第一个参数。
+    /// </summary>
+    private static void RetargetToShim(
+        Cecil.ModuleDefinition module,
+        Cecil.MethodReference method,
+        string name,
+        string instanceNamespace,
+        string instanceType,
+        string instanceAssembly)
+    {
+        method.Name = name;
+        method.DeclaringType = ShimType(module);
+        method.HasThis = false;
+        method.Parameters.Insert(0, new Cecil.ParameterDefinition(
+            MakeTypeReference(module, instanceNamespace, instanceType, instanceAssembly)));
+    }
+
+    /// <summary>
+    /// 把 <c>ObservableDictionary&lt;TKey, TValue&gt;</c> 的返回类型换成派生类型
+    /// <c>ObservableOrderedDictionary&lt;TKey, TValue&gt;</c>，泛型参数保持不变。
+    /// </summary>
+    private static bool TryMakeOrderedDictionary(
+        Cecil.ModuleDefinition module,
+        Cecil.TypeReference type,
+        out Cecil.TypeReference result)
+    {
+        if (type is Cecil.GenericInstanceType generic && generic.GenericArguments.Count == 2)
+        {
+            var scope = generic.ElementType.Scope ?? ResolveAssemblyReference(module, "ClassIsland.Shared");
+            var element = new Cecil.TypeReference(
+                "ClassIsland.Shared.ComponentModels",
+                "ObservableOrderedDictionary`2",
+                module,
+                scope);
+            var replacement = new Cecil.GenericInstanceType(element);
+            foreach (var argument in generic.GenericArguments)
+            {
+                replacement.GenericArguments.Add(argument);
+            }
+
+            result = replacement;
+            return true;
+        }
+
+        result = type;
+        return false;
+    }
+
+    /// <summary>
+    /// 对全部可达的类型引用应用 Avalonia 12 类型别名，包括泛型实参、数组、签名和 IL 里的类型操作数。
+    /// </summary>
+    private static void ApplyTypeAliases(Cecil.ModuleDefinition module, List<string> changes)
+    {
+        foreach (var reference in module.GetTypeReferences().ToList())
+        {
+            NormalizeType(module, reference, changes);
+        }
+
+        foreach (var member in module.GetMemberReferences().ToList())
+        {
+            switch (member)
+            {
+                case Cecil.GenericInstanceMethod genericMethod:
+                    NormalizeMethodSignature(module, genericMethod.ElementMethod, changes);
+                    for (var i = 0; i < genericMethod.GenericArguments.Count; i++)
+                    {
+                        genericMethod.GenericArguments[i] =
+                            NormalizeType(module, genericMethod.GenericArguments[i], changes);
+                    }
+
+                    break;
+                case Cecil.MethodReference method:
+                    NormalizeMethodSignature(module, method, changes);
+                    break;
+                case Cecil.FieldReference field:
+                    if (field.DeclaringType != null)
+                    {
+                        field.DeclaringType = NormalizeType(module, field.DeclaringType, changes);
+                    }
+
+                    field.FieldType = NormalizeType(module, field.FieldType, changes);
+                    break;
+            }
+        }
+
+        foreach (var type in module.GetTypes())
+        {
+            if (type.BaseType != null)
+            {
+                type.BaseType = NormalizeType(module, type.BaseType, changes);
+            }
+
+            for (var i = 0; i < type.Interfaces.Count; i++)
+            {
+                type.Interfaces[i] = new Cecil.InterfaceImplementation(
+                    NormalizeType(module, type.Interfaces[i].InterfaceType, changes));
+            }
+
+            foreach (var field in type.Fields)
+            {
+                field.FieldType = NormalizeType(module, field.FieldType, changes);
+            }
+
+            foreach (var method in type.Methods)
+            {
+                method.ReturnType = NormalizeType(module, method.ReturnType, changes);
+                foreach (var parameter in method.Parameters)
+                {
+                    parameter.ParameterType = NormalizeType(module, parameter.ParameterType, changes);
+                }
+
+                if (!method.HasBody)
+                {
+                    continue;
+                }
+
+                foreach (var variable in method.Body.Variables)
+                {
+                    variable.VariableType = NormalizeType(module, variable.VariableType, changes);
+                }
+
+                foreach (var handler in method.Body.ExceptionHandlers)
+                {
+                    if (handler.CatchType != null)
+                    {
+                        handler.CatchType = NormalizeType(module, handler.CatchType, changes);
+                    }
+                }
+
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.Operand is Cecil.TypeReference operand)
+                    {
+                        instruction.Operand = NormalizeType(module, operand, changes);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 规范化一个方法引用的声明类型、返回类型和参数类型。
+    /// </summary>
+    private static void NormalizeMethodSignature(
+        Cecil.ModuleDefinition module,
+        Cecil.MethodReference method,
+        List<string> changes)
+    {
+        if (method.DeclaringType != null)
+        {
+            method.DeclaringType = NormalizeType(module, method.DeclaringType, changes);
+        }
+
+        method.ReturnType = NormalizeType(module, method.ReturnType, changes);
+        foreach (var parameter in method.Parameters)
+        {
+            parameter.ParameterType = NormalizeType(module, parameter.ParameterType, changes);
+        }
+    }
+
+    /// <summary>
+    /// 递归处理类型引用，把已移除的旧类型替换成宿主中的新类型。
+    /// </summary>
+    private static Cecil.TypeReference NormalizeType(
+        Cecil.ModuleDefinition module,
+        Cecil.TypeReference type,
+        List<string> changes)
+    {
+        switch (type)
+        {
+            case Cecil.GenericParameter:
+                return type;
+            case Cecil.GenericInstanceType generic:
+                NormalizeType(module, generic.ElementType, changes);
+                foreach (var argument in generic.GenericArguments)
+                {
+                    NormalizeType(module, argument, changes);
+                }
+
+                return generic;
+            case Cecil.ArrayType array:
+                NormalizeType(module, array.ElementType, changes);
+                return array;
+            case Cecil.ByReferenceType byReference:
+                NormalizeType(module, byReference.ElementType, changes);
+                return byReference;
+            case Cecil.PointerType pointer:
+                NormalizeType(module, pointer.ElementType, changes);
+                return pointer;
+            case Cecil.PinnedType pinned:
+                NormalizeType(module, pinned.ElementType, changes);
+                return pinned;
+            case Cecil.OptionalModifierType optional:
+                NormalizeType(module, optional.ElementType, changes);
+                NormalizeType(module, optional.ModifierType, changes);
+                return optional;
+            case Cecil.RequiredModifierType required:
+                NormalizeType(module, required.ElementType, changes);
+                NormalizeType(module, required.ModifierType, changes);
+                return required;
+            case Cecil.TypeSpecification:
+                return type;
+        }
+
+        if (!RemovedTypeAliases.TryGetValue(type.FullName, out var alias))
+        {
+            return type;
+        }
+
+        var oldName = type.FullName;
+        type.Namespace = alias.Namespace;
+        type.Name = alias.Name;
+        type.DeclaringType = null;
+        if (type.Scope is not Cecil.AssemblyNameReference scope ||
+            !scope.Name.Equals(alias.Assembly, StringComparison.OrdinalIgnoreCase))
+        {
+            type.Scope = ResolveAssemblyReference(module, alias.Assembly);
+        }
+
+        changes.Add($"{oldName} → {alias.Namespace}.{alias.Name}");
+        return type;
+    }
+
+    /// <summary>
+    /// 修正因成员重写而需要调整的 IL 指令（构造调用改静态调用、字段读取改方法调用等）。
+    /// </summary>
+    private static void FixInstructionOperands(Cecil.ModuleDefinition module, List<string> changes)
+    {
+        foreach (var type in module.GetTypes())
+        {
+            foreach (var method in type.Methods)
+            {
+                if (!method.HasBody)
+                {
+                    continue;
+                }
+
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    switch (instruction.Operand)
+                    {
+                        case Cecil.MethodReference reference:
+                        {
+                            var targetMethod = reference is Cecil.GenericInstanceMethod genericMethod
+                                ? genericMethod.ElementMethod
+                                : reference;
+                            RewriteMethod(module, targetMethod, changes);
+                            NormalizeMethodSignature(module, targetMethod, changes);
+                            if (reference is Cecil.GenericInstanceMethod genericReference)
+                            {
+                                for (var i = 0; i < genericReference.GenericArguments.Count; i++)
+                                {
+                                    genericReference.GenericArguments[i] =
+                                        NormalizeType(module, genericReference.GenericArguments[i], changes);
+                                }
+                            }
+
+                            if (instruction.OpCode == CecilIL.OpCodes.Newobj && !targetMethod.HasThis)
+                            {
+                                instruction.OpCode = CecilIL.OpCodes.Call;
+                            }
+                            else if (instruction.OpCode == CecilIL.OpCodes.Callvirt && !targetMethod.HasThis)
+                            {
+                                instruction.OpCode = CecilIL.OpCodes.Call;
+                            }
+
+                            break;
+                        }
+                        case Cecil.FieldReference field:
+                            RewriteField(module, field, changes);
+                            if (field.DeclaringType != null)
+                            {
+                                field.DeclaringType = NormalizeType(module, field.DeclaringType, changes);
+                            }
+
+                            field.FieldType = NormalizeType(module, field.FieldType, changes);
+                            if (TryGetFieldReplacement(module, field, out var replacement))
+                            {
+                                instruction.OpCode = CecilIL.OpCodes.Call;
+                                instruction.Operand = replacement;
+                            }
+
+                            break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// ToggleButton 的 Checked/Unchecked 事件在 Avalonia 12 中合并为 IsCheckedChanged，
+    /// 这里把字段读取改成宿主垫片的方法调用。
+    /// </summary>
+    private static bool TryGetFieldReplacement(
+        Cecil.ModuleDefinition module,
+        Cecil.FieldReference field,
+        out Cecil.MethodReference replacement)
+    {
+        replacement = null!;
+        if (field.DeclaringType == null ||
+            GetElementTypeFullName(field.DeclaringType) != "Avalonia.Controls.Primitives.ToggleButton")
+        {
+            return false;
+        }
+
+        var methodName = field.Name switch
+        {
+            "CheckedEvent" => "GetCheckedEvent",
+            "UncheckedEvent" => "GetUncheckedEvent",
+            _ => null
+        };
+        if (methodName == null)
+        {
+            return false;
+        }
+
+        var routedEvent = MakeGenericType(
+            module,
+            "Avalonia.Interactivity",
+            "RoutedEvent`1",
+            "Avalonia.Base",
+            MakeTypeReference(module, "Avalonia.Interactivity", "RoutedEventArgs", "Avalonia.Base"));
+        var method = new Cecil.MethodReference(methodName, routedEvent, ShimType(module))
+        {
+            HasThis = false
+        };
+        method.Parameters.Add(new Cecil.ParameterDefinition(
+            MakeTypeReference(module, "Avalonia.Controls.Primitives", "ToggleButton", "Avalonia.Controls")));
+        replacement = method;
+        return true;
+    }
+
+    /// <summary>
+    /// 取类型引用的定义名（泛型实例、数组等取最内层的定义类型）。
+    /// </summary>
+    private static string GetElementTypeFullName(Cecil.TypeReference type)
+    {
+        while (type is Cecil.TypeSpecification specification && specification.ElementType != null)
+        {
+            var element = specification.ElementType;
+            if (ReferenceEquals(element, type))
+            {
+                break;
+            }
+
+            type = element;
+        }
+
+        return type.FullName;
+    }
+
+    /// <summary>
+    /// 构造指向宿主程序集的类型引用。
+    /// </summary>
+    private static Cecil.TypeReference MakeTypeReference(
+        Cecil.ModuleDefinition module,
+        string ns,
+        string name,
+        string assemblyName) =>
+        new(ns, name, module, ResolveAssemblyReference(module, assemblyName));
+
+    /// <summary>
+    /// 构造指向宿主程序集的泛型实例引用。
+    /// </summary>
+    private static Cecil.GenericInstanceType MakeGenericType(
+        Cecil.ModuleDefinition module,
+        string ns,
+        string name,
+        string assemblyName,
+        params Cecil.TypeReference[] arguments)
+    {
+        var generic = new Cecil.GenericInstanceType(MakeTypeReference(module, ns, name, assemblyName));
+        foreach (var argument in arguments)
+        {
+            generic.GenericArguments.Add(argument);
+        }
+
+        return generic;
+    }
+
+    private static Cecil.TypeReference ShimType(Cecil.ModuleDefinition module) =>
+        MakeTypeReference(module, "ClassIsland.Core.Compatibility", "Avalonia12Compatibility", "ClassIsland.Core");
 
     /// <summary>
     /// 取得目标程序集在模块里的引用；不存在时按宿主实际版本补一个。

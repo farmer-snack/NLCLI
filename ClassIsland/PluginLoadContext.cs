@@ -325,7 +325,7 @@ public class PluginLoadContext : AssemblyLoadContext
 
         try
         {
-            return LoadFromAssemblyPath(cachedPath);
+            return LoadFromAssemblyPath(Path.GetFullPath(cachedPath));
         }
         catch (FileLoadException)
         {
@@ -345,7 +345,7 @@ public class PluginLoadContext : AssemblyLoadContext
             Info.AddCompatibilityNote(note);
         }
 
-        return LoadFromAssemblyPath(result.AssemblyPath ?? assemblyPath);
+        return LoadFromAssemblyPath(Path.GetFullPath(result.AssemblyPath ?? assemblyPath));
     }
 
     /// <summary>
@@ -382,7 +382,7 @@ public class PluginLoadContext : AssemblyLoadContext
 
         if (libraryPath != null)
         {
-            return LoadUnmanagedDllFromPath(libraryPath);
+            return LoadUnmanagedDllFromPath(Path.GetFullPath(libraryPath));
         }
 
         // 可选依赖的原生库（OpenCvSharpExtern、DlibDotNetNative 等）和托管库同放在缓存目录，
@@ -390,7 +390,7 @@ public class PluginLoadContext : AssemblyLoadContext
         var optionalNativePath = PluginDependencyService.TryGetCachedNativePath(unmanagedDllName);
         if (optionalNativePath != null)
         {
-            return LoadUnmanagedDllFromPath(optionalNativePath);
+            return LoadUnmanagedDllFromPath(Path.GetFullPath(optionalNativePath));
         }
 
         // 兼容层：插件没有 deps.json 或解析器失效时，按约定目录逐个查找原生库。
@@ -460,7 +460,7 @@ public class PluginLoadContext : AssemblyLoadContext
                 var path = Path.Combine(directory, fileName);
                 if (File.Exists(path))
                 {
-                    return LoadUnmanagedDllFromPath(path);
+                    return LoadUnmanagedDllFromPath(Path.GetFullPath(path));
                 }
             }
         }

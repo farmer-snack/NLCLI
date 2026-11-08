@@ -190,6 +190,8 @@ public class PluginService : IPluginService
 
         hint ??= ex switch
         {
+            FileLoadException when IsInvalidAssemblyPathError(ex) =>
+                "插件文件路径异常，无法读取该插件。请确认插件目录完整，重新安装插件后再试。",
             FileNotFoundException or FileLoadException =>
                 MissingAssemblyHint(ex) ??
                 "缺少依赖程序集，或依赖的版本与当前应用不匹配。请确认插件包完整；如果插件自带 ClassIsland.Core 等核心程序集，可尝试删除后重试。",
@@ -208,6 +210,12 @@ public class PluginService : IPluginService
 
         return new InvalidOperationException(message, ex);
     }
+
+    /// <summary>
+    /// 判断加载失败是否由程序集路径无效引起，而不是真的缺少程序集。
+    /// </summary>
+    private static bool IsInvalidAssemblyPathError(Exception ex) =>
+        ex is FileLoadException { InnerException: ArgumentException };
 
     /// <summary>
     /// 兼容层：把「缺少某个依赖程序集」翻译成可直接照做的建议。

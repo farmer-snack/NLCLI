@@ -1,0 +1,4359 @@
+ClassIsland 代码库文件作用说明
+================================
+
+生成日期：2026-11-08
+代码库：D:\MN\TectDos\ClassIsland-Preview\ClassIsland
+说明：本文以“先总览、再按项目/目录逐个文件”的方式说明代码库的作用。
+      覆盖所有手写 .cs、.axaml、项目文件、构建脚本和主要配置；
+      Assets 下的图片、字体、音频、本地化资源数量很多，按目录说明用途，不逐张列出。
+      生成方式：阅读入口、项目文件、服务注册、核心目录和关键类后整理，其余文件按目录职责与类型名归类说明。
+
+一、项目总览
+------------
+
+ClassIsland 是一款面向班级多媒体屏幕的跨平台课表信息显示工具。应用以 Avalonia UI 为界面框架，
+核心功能包括：显示当前课程与课表、上下课提醒、组件化主界面、课表/时间表/科目编辑、自动化、
+天气、主题、插件、集控管理、自动更新等。
+
+技术栈要点：
+- .NET 10（Main 项目）；ClassIsland.Shared / Shared.IPC 在 Windows 下同时目标 net10.0 与 net472。
+- Avalonia 12.1.4 + FluentAvalonia 3.0.0，MVVM 使用 CommunityToolkit.Mvvm 与 DynamicData/ReactiveUI。
+- 依赖注入使用 Microsoft.Extensions.Hosting / DependencyInjection。
+- 插件系统通过 PluginSdk、PluginLoadContext、manifest.yml 和 IPC 扩展。
+- 桌面端按 Windows / Linux / macOS 拆分平台实现；Android 复用同一套 Avalonia 页面代码。
+- 发布与打包使用 NUKE（build/ 目录），支持 folder、deb、pkg、MSIX、APK 等产物。
+
+二、整体架构与启动流程
+----------------------
+
+1. 桌面入口
+   ClassIsland.Desktop/Program.cs
+     -> 初始化平台服务（PlatformServices）
+     -> 调用 ClassIsland.Program.AppEntry(args) 解析命令行并创建 App 工厂
+     -> 用 Avalonia AppBuilder 配置 App、字体、Skia、Win32 渲染模式
+     -> StartWithClassicDesktopLifetime 启动桌面生命周期
+
+2. 应用主体
+   ClassIsland/Program.cs
+     -> 注册 JSON 转换器、解析命令行、单实例 Mutex、Sentry、MoonSharp
+     -> 返回 () => new App()
+   ClassIsland/App.axaml.cs
+     -> App : AppBase，负责应用生命周期、主窗口、崩溃处理、更新、插件加载等
+   ClassIsland/App.Services.xaml.cs
+     -> ConfigureServices：注册所有服务、ViewModel、设置页、组件、触发器、行动、通知提供方等
+
+3. 核心库
+   ClassIsland.Core
+     -> 插件与扩展点抽象（Abstractions/Attributes）
+     -> 通用控件、转换器、主题、行为、助手
+     -> 设置页、组件、通知、规则、教程、天气、插件市场等模型
+   ClassIsland.Shared
+     -> 课表档案（Profile/ClassPlan/TimeLayout/Subject）、自动化 ActionSet、通知、集控模型
+   ClassIsland.Shared.IPC
+     -> 基于 dotnetCampus.Ipc 的跨进程接口与客户端
+   ClassIsland.Platforms.Abstractions
+     -> 平台服务接口与 Stub 默认实现
+
+4. 平台实现
+   platforms/ClassIsland.Platforms.Windows
+   platforms/ClassIsland.Platforms.Linux
+   platforms/ClassIsland.Platforms.MacOs
+   ClassIsland.Android
+     -> 分别实现窗口、桌面、通知、定位、设备信息、系统事件等平台能力
+
+三、解决方案与项目文件
+----------------------
+
+ClassIsland.sln
+  主解决方案，包含桌面端、核心库、共享库、平台项目、Android、构建项目和示例插件等。
+
+ClassIsland.Filter.Linux.slnf
+  Linux 平台过滤解决方案，只加载 Linux 可构建的项目，避免 Windows/macOS 专属项目干扰。
+
+ClassIsland.Filter.MacOs.slnf
+  macOS 平台过滤解决方案，只加载 macOS 可构建的项目。
+
+global.json
+  固定使用 .NET 10 SDK，rollForward=latestFeature，允许预览版 SDK。
+
+Global.props
+  所有项目共享的 MSBuild 配置：关闭自动版本号、允许 unsafe、启用 Windows 目标、
+  引入 ClassIsland.SimpleGitInfoGenerator 与 SourceLink、定义 MSIX/平台常量、设置调试符号。
+
+GeneratePackage.props
+  NuGet 包元数据：作者、LGPL-3.0 许可证、项目地址、README 打包、Release 确定性构建。
+
+AvaloniaShared.props
+  统一 Avalonia 版本（12.1.4）、关闭默认编译绑定、配置 HotAvalonia 热重载。
+
+CrossPlatformProps.props
+  根据宿主系统或发布参数自动选择 Platforms_Windows / Platforms_Linux / Platforms_MacOs，
+  并设置对应 TargetFramework、常量、应用清单和图标。
+
+AssemblyInfo.cs（根目录）
+  解决方案级程序集信息，被各项目通过 Global.props 链接编译。
+
+ClassIsland.sln.DotSettings
+  ReSharper/Rider 代码风格与命名规则配置。
+
+appveyor.yml
+  AppVeyor CI 配置（历史/备用构建流水线）。
+
+build.ps1 / build.sh / build.cmd / build-publish.bat
+  NUKE 构建入口：自动查找或安装 .NET SDK，构建 build/_build.csproj 后执行指定目标。
+  build-publish.bat 是 Windows 下发布构建的便捷包装。
+
+flake.nix / flake.lock
+  Nix 开发与构建环境定义。
+
+cliff.toml
+  git-cliff 变更日志生成配置。
+
+phainon.yml / phainon.development.yml
+  Phainon 分发中心（更新/下载服务）的配置。
+
+README.md
+  项目介绍、功能列表、下载方式、开发分支、许可证与贡献说明。
+
+CONTRIBUTING.md
+  贡献指南：分支策略、提交规范、代码风格、PR 流程。
+
+LICENSE.txt
+  GPL-3.0 许可证正文。
+
+AGENTS.md / CLAUDE.md / GEMINI.md
+  面向 AI 编码助手的仓库说明与工作规则（构建命令、架构约束、验证要求等）。
+
+action.txt / fixxed.txt / out.txt / prompt-full.md
+  上游同步过程记录、修复记录、构建输出与同步任务提示词，属于工作过程文件，不是应用运行代码。
+
+.all-contributorsrc
+  all-contributors 机器人配置，用于生成贡献者名单。
+
+.gitattributes / .gitignore / .gitmodules
+  Git 属性、忽略规则与子模块配置（vendors/EdgeTtsSharp 等）。
+
+四、根目录各目录作用
+--------------------
+
+.agents/            代理技能与验收流程说明（acceptance、skills 等）。
+.claude/            Claude 相关代理配置/说明。
+.codex/             Codex 相关代理配置/说明。
+.gemini/            Gemini 相关代理配置/说明。
+.github/            GitHub Actions 工作流、Issue 模板、PR 模板等。
+.idea/              JetBrains Rider/IDEA 工程配置。
+.nuke/              NUKE 构建系统的临时目录与配置。
+.vscode/            VS Code 工作区配置。
+build/              NUKE 构建项目：Build.cs、各发布目标、配置类。
+ClassIsland/        应用主体（Avalonia UI、服务、视图、ViewModel、组件、资源）。
+ClassIsland.Core/   核心库（扩展点抽象、通用控件、模型、主题、助手）。
+ClassIsland.Desktop/桌面宿主入口与桌面平台服务装配。
+ClassIsland.Android/Android 宿主、平台服务、前台服务与文档提供器。
+ClassIsland.Shared/ 跨项目共享模型（档案、通知、自动化、集控）与配置读写。
+ClassIsland.Shared.IPC/ 跨进程通信客户端与公共接口。
+ClassIsland.Platforms.Abstractions/ 平台服务接口和默认 Stub。
+ClassIsland.PluginSdk/ 插件开发 SDK 聚合包。
+ClassIsland.ExamplePlugin/ 示例插件（插件清单、入口、示例设置页）。
+ClassIsland.DocsGenerator/ 文档生成工具。
+ClassIsland.Launcher/ 原生启动器（负责更新后重启/引导主程序）。
+ClassIsland.Packaging/ MSIX 打包工程。
+Demos/              示例程序（如 IPC Demo）。
+dist/               本地分发包/产物目录。
+doc/                开发文档、依赖说明、隐私政策、贡献范围等。
+examples/           示例配置或示例项目。
+installer/          Inno Setup 等安装器脚本与资源。
+out/                NUKE 构建输出目录。
+patches/            构建/运行补丁文件。
+platforms/          Windows / Linux / macOS 平台实现。
+roslyn/             Roslyn 源生成器（Fluent/Lucide 图标映射生成）。
+tools/              构建辅助 PowerShell 脚本。
+vendors/            第三方源码子模块（EdgeTtsSharp、System.Device.Location、PhainonDistributionCenter 等）。
+
+五、ClassIsland.Desktop（桌面宿主）
+----------------------------------
+
+ClassIsland.Desktop 是可执行入口项目，负责选择桌面平台实现并以 Avalonia 桌面生命周期启动主程序。
+它本身几乎没有业务代码，主要做“平台装配”。
+
+ClassIsland.Desktop/Program.cs
+  桌面进程入口。根据编译常量激活 Windows/Linux/macOS 平台服务；用 AppBuilder 配置 App、
+  字体回退、Skia GPU 缓存、Win32 渲染模式、资源覆盖加载器和日志；最后进入桌面生命周期。
+  同时提供 BuildAvaloniaApp 供设计器使用。
+
+ClassIsland.Desktop/Services/Platform/DesktopAppLifetimeService.cs
+  IAppLifetimeService 的桌面实现：调用 Avalonia 桌面生命周期退出应用，或用当前进程路径重新启动。
+
+ClassIsland.Desktop/Services/Platform/LauncherService.cs
+  ILauncherService 的桌面实现：用系统默认程序打开文件/文件夹/URL；支持 Avalonia 文件选择器的书签路径。
+
+ClassIsland.Desktop/ClassIsland.Desktop.csproj
+  桌面可执行项目文件。目标 net10.0（按平台追加 -windows/-macos），引用主项目、平台抽象和对应平台实现；
+  配置 Windows 应用清单/图标、macOS Bundle 资源、Linux DEB 包元数据、平台常量与发布属性。
+
+ClassIsland.Desktop/app.manifest
+  Windows 应用清单：DPI 感知、UAC 权限、兼容性设置等。
+
+ClassIsland.Desktop/Info.plist
+  macOS 应用包 Info.plist：Bundle 标识、版本、最低系统版本、URL Scheme 等。
+
+ClassIsland.Desktop/Properties/launchSettings.json
+  本地调试启动配置（命令行参数、环境变量）。
+
+ClassIsland.Desktop/Assets/AppIcon.icon/icon.json
+  macOS 26+ Liquid Glass 应用图标描述。
+
+ClassIsland.Desktop/Assets/AppLogo.xcassets/…/Contents.json
+  macOS 各尺寸应用图标资源目录的元数据。
+
+ClassIsland.Desktop/Assets/AppIcon.icns、AppLogo.ico、AppLogo.svg、AppLogo@32w.png
+  macOS/Windows/Linux 打包所需的各格式应用图标。
+
+ClassIsland.Desktop/Assets/AppIcon.icon/**、AppLogo.xcassets/**
+  macOS 26+ Liquid Glass 图标与 AppIcon 资源目录（含多尺寸 PNG/SVG）。
+
+六、ClassIsland.Launcher（原生启动器）
+--------------------------------------
+
+启动器负责在主程序更新后选择正确的版本目录并启动，也承担多实例调试选择。
+它是独立的小型可执行程序，使用原生 AOT 发布。
+
+ClassIsland.Launcher/Program.cs
+  扫描根目录下形如 app-版本-序号的安装目录，排除 .destroy/.partial 目录，
+  按 .current 标记、版本号、序号排序，启动最新可用版本；找不到时显示错误；
+  Windows 下支持调试多实例模式选择版本。
+
+ClassIsland.Launcher/Helpers/TaskDialogHelper.cs
+  Windows 原生 TaskDialog 封装，用于在启动器中显示错误和多版本选择对话框。
+
+ClassIsland.Launcher/AssemblyInfo.cs
+  启动器程序集元数据。
+
+ClassIsland.Launcher/app.manifest
+  Windows 应用清单（DPI、权限、兼容性）。
+
+ClassIsland.Launcher/NativeMethods.txt
+  CsWin32 源生成器输入：启动器需要的 Win32 API 列表。
+
+ClassIsland.Launcher/Assets/AppLogo.ico
+  启动器应用图标。
+
+ClassIsland.Launcher/ClassIsland.Launcher.csproj
+  启动器项目文件：net9.0、原生 AOT、自包含发布、按平台引用 CsWin32/Mono.Posix。
+
+七、ClassIsland.DocsGenerator（文档生成器）
+-------------------------------------------
+
+ClassIsland.DocsGenerator/Program.cs
+  控制台入口，调用 XmlDocMarkdown.Core 把 XML 文档注释生成 Markdown API 文档。
+
+ClassIsland.DocsGenerator/ClassIsland.DocsGenerator.csproj
+  文档生成器项目文件，引用 XmlDocMarkdown 工具包。
+
+ClassIsland.DocsGenerator/LICENSE.txt
+  文档生成器许可证说明。
+
+八、ClassIsland.ExamplePlugin（示例插件）
+-----------------------------------------
+
+示例插件用于演示插件清单、插件入口、依赖注入和设置页注册的写法。
+
+ClassIsland.ExamplePlugin/Plugin.cs
+  插件入口，标注 [PluginEntrance]，继承 PluginBase；在 Initialize 中向服务容器注册示例设置页。
+
+ClassIsland.ExamplePlugin/manifest.yml
+  插件清单：id、名称、描述、入口程序集、项目地址、API 版本、插件版本、作者。
+
+ClassIsland.ExamplePlugin/Views/SettingsPages/HelloSettingsPage.axaml
+  示例设置页界面。
+
+ClassIsland.ExamplePlugin/Views/SettingsPages/HelloSettingsPage.axaml.cs
+  示例设置页后台类，标注 [SettingsPageInfo]，继承 SettingsPageBase。
+
+ClassIsland.ExamplePlugin/Properties/launchSettings.json
+  插件调试启动配置。
+
+ClassIsland.ExamplePlugin/icon.png
+  示例插件图标。
+
+ClassIsland.ExamplePlugin/LICENSE.txt
+  示例插件许可证说明。
+
+ClassIsland.ExamplePlugin/README.md
+  示例插件说明。
+
+ClassIsland.ExamplePlugin/ClassIsland.ExamplePlugin.csproj
+  示例插件项目文件，引用 PluginSdk/Core，并配置插件输出与清单复制。
+
+九、ClassIsland.PluginSdk（插件 SDK）
+-------------------------------------
+
+ClassIsland.PluginSdk/ClassIsland.PluginSdk.csproj
+  插件 SDK 聚合项目。目标 net10.0，引用 ClassIsland.Core，并把 targets 与校验脚本打包进 NuGet 包。
+
+ClassIsland.PluginSdk/ClassIsland.PluginSdk.targets
+  MSBuild 目标：插件项目引用 SDK 后自动设置输出目录、复制依赖、生成插件包等。
+
+ClassIsland.PluginSdk/generate-md5.ps1
+  插件包发布前生成文件 MD5 校验清单的脚本。
+
+ClassIsland.PluginSdk/README.md
+  插件 SDK 使用说明。
+
+ClassIsland.PluginSdk/LICENSE.txt
+  LGPL-3.0 许可证正文。
+
+十、ClassIsland.Packaging（MSIX 打包）
+--------------------------------------
+
+ClassIsland.Packaging/ClassIsland.Packaging.wapproj
+  Windows 应用打包项目（WAP），把主程序打包为 MSIX。
+
+ClassIsland.Packaging/Package.appxmanifest
+  MSIX 清单：应用标识、显示名称、入口、能力、视觉资源。
+
+ClassIsland.Packaging/Images/*.png
+  MSIX 所需的各种尺寸磁贴、商店 Logo、启动画面和锁屏图。
+
+ClassIsland.Packaging/.AppxEnvironment
+  打包环境变量/工具链配置（由 Visual Studio 生成或维护）。
+
+ClassIsland.Packaging/LICENSE.txt
+  MSIX 打包项目许可证说明。
+
+十一、Demos（示例程序）
+-----------------------
+
+Demos/ClassIsland.IpcDemo/App.xaml
+  IPC Demo 的 WPF 应用资源与启动配置。
+
+Demos/ClassIsland.IpcDemo/App.xaml.cs
+  IPC Demo 应用入口与启动逻辑。
+
+Demos/ClassIsland.IpcDemo/MainWindow.xaml
+  IPC Demo 主窗口界面。
+
+Demos/ClassIsland.IpcDemo/MainWindow.xaml.cs
+  IPC Demo 主窗口后台逻辑，演示连接 ClassIsland IPC 并调用公共接口。
+
+Demos/ClassIsland.IpcDemo/ViewModels/MainViewModel.cs
+  IPC Demo 的主 ViewModel。
+
+Demos/ClassIsland.IpcDemo/AssemblyInfo.cs
+  Demo 程序集元数据。
+
+Demos/ClassIsland.IpcDemo/ClassIsland.IpcDemo.csproj
+  IPC Demo 项目文件。
+
+十二、ClassIsland.Shared（共享模型与基础设施）
+----------------------------------------------
+
+ClassIsland.Shared 保存主程序、核心库、插件和平台层都要用的数据模型，
+尤其是“课表档案”与“自动化”两套核心数据结构。Windows 下同时编译 net10.0 与 net472。
+
+ClassIsland.Shared/ClassIsland.Shared.csproj
+  共享库项目文件。Windows 下目标 net10.0;net472，非 Windows 仅 net10.0；
+  引用 CommunityToolkit.Mvvm、CsesSharp、Google.Protobuf、Grpc.Net.Client，
+  并从 Protobuf/*.proto 生成集控通信代码。
+
+ClassIsland.Shared/IAppHost.cs
+  应用宿主静态接口：保存 IHost、CoreVersion，提供 GetService/TryGetService，
+  让 Shared 层在不直接依赖 DI 容器的情况下取服务。
+
+ClassIsland.Shared/AttachableSettingsObject.cs
+  可附加设置对象基类：用 Guid 字典保存挂在课表、时间表、科目等对象上的扩展设置，
+  并负责 JSON 反序列化后的类型转换。
+
+ClassIsland.Shared/AssemblyInfo.cs
+  共享库程序集元数据。
+
+ClassIsland.Shared/Helpers/ConfigureFileHelper.cs
+  配置文件读写助手：统一 JsonSerializerOptions、缩进输出、自动备份、读取失败时
+  记录 ConfigError 并尽量回退，是应用所有 JSON 配置持久化的基础。
+
+ClassIsland.Shared/Abstraction/Models/INotificationSenderRegisterInfo.cs
+  通知发送器注册信息接口，描述通知提供方的 ID、名称、图标等元数据。
+
+ClassIsland.Shared/Abstraction/Models/IAfterSchoolNotificationProviderSettingsBase.cs
+  放学提醒提供方设置的公共接口。
+
+ClassIsland.Shared/Abstraction/Models/ILessonControlSettings.cs
+  课程控件设置接口（显示内容、布局等）。
+
+ClassIsland.Shared/Abstraction/Models/INotificationSettings.cs
+  通知设置接口（提醒方式、音效、语音等）。
+
+ClassIsland.Shared/Abstraction/Models/IWeatherNotificationSettingsBase.cs
+  天气提醒提供方设置的公共接口。
+
+ClassIsland.Shared/Abstraction/Services/IManagementServerConnection.cs
+  集控服务器连接抽象：连接、注册、上报、接收命令等。
+
+ClassIsland.Shared/ComponentModels/ObservableDictionary.cs
+  可观察字典：字典变更时发出集合/属性通知，便于绑定。
+
+ClassIsland.Shared/ComponentModels/ObservableOrderedDictionary.cs
+  可观察有序字典：同时维护键值映射与插入顺序，课表数据大量使用。
+
+ClassIsland.Shared/Enums/ActionSetStatus.cs
+  自动化行动集状态（未运行、运行中、已完成等）。
+
+ClassIsland.Shared/Enums/AppColorSource.cs
+  应用主题色来源（系统、自定义、壁纸等）。
+
+ClassIsland.Shared/Enums/AuthorizeLevel.cs
+  认证等级（无、查看、修改等）。
+
+ClassIsland.Shared/Enums/ManagementServerKind.cs
+  集控服务器类型（官方、自建等）。
+
+ClassIsland.Shared/Enums/NotificationModes.cs
+  通知显示模式（全屏、横幅、置顶等）。
+
+ClassIsland.Shared/Enums/ScheduleType.cs
+  课表类型（经典课表、日程表 V2）。
+
+ClassIsland.Shared/Enums/TempClassPlanGroupType.cs
+  临时课表组继承方式。
+
+ClassIsland.Shared/Enums/TimeState.cs
+  当前时间状态（上课、课间、放学等）。
+
+ClassIsland.Shared/Enums/UpdateStatus.cs
+  应用更新状态。
+
+ClassIsland.Shared/Enums/UpdateWorkingStatus.cs
+  更新任务工作状态。
+
+ClassIsland.Shared/Extensions/CsesExtensions.cs
+  CSES 课表模型与 ClassIsland 档案模型之间的转换扩展。
+
+ClassIsland.Shared/Interfaces/Controls/INotificationEffectControl.cs
+  通知强调特效控件接口。
+
+ClassIsland.Shared/Interfaces/IAttachedSettings.cs
+  可附加设置对象接口。
+
+ClassIsland.Shared/Interfaces/IAttachedSettingsControlBase.cs
+  附加设置编辑控件接口。
+
+ClassIsland.Shared/Interfaces/IAttachedSettingsHelper.cs
+  附加设置读写助手接口。
+
+ClassIsland.Shared/Interfaces/IMiniInfoProvider.cs
+  主界面迷你信息提供方接口。
+
+ClassIsland.Shared/Interfaces/INotificationProvider.cs
+  通知提供方接口。
+
+ClassIsland.Shared/Interfaces/ITimeRule.cs
+  时间规则接口，用于判断某日期/时间是否满足条件。
+
+ClassIsland.Shared/JsonConverters/ActionSetStatusJsonConverter.cs
+  ActionSetStatus 的 JSON 转换器，兼容旧版本数值/字符串。
+
+ClassIsland.Shared/JsonConverters/GuidEmptyFallbackConverter.cs
+  Guid 空值回退转换器，避免旧配置中的空 Guid 导致反序列化失败。
+
+ClassIsland.Shared/Models/Automation/ActionItem.cs
+  单条自动化行动：行动 ID、设置、启用状态、执行结果等。
+
+ClassIsland.Shared/Models/Automation/ActionSet.cs
+  一组自动化行动，支持顺序执行、回滚、状态跟踪。
+
+ClassIsland.Shared/Models/Management/ClientCommandEventArgs.cs
+  集控客户端收到服务器命令时的事件参数。
+
+ClassIsland.Shared/Models/Management/ManagementClientPersistConfig.cs
+  集控客户端持久化配置（服务器地址、凭据、客户端 ID 等）。
+
+ClassIsland.Shared/Models/Management/ManagementCredentialConfig.cs
+  集控认证凭据配置。
+
+ClassIsland.Shared/Models/Management/ManagementManifest.cs
+  集控客户端清单/能力声明。
+
+ClassIsland.Shared/Models/Management/ManagementPolicy.cs
+  集控策略：限制设置、插件、课表修改等。
+
+ClassIsland.Shared/Models/Management/ManagementSettings.cs
+  集控功能总设置。
+
+ClassIsland.Shared/Models/Management/ManagementVersions.cs
+  集控协议/客户端版本信息。
+
+ClassIsland.Shared/Models/Management/ReVersionString.cs
+  版本字符串解析与比较辅助类型。
+
+ClassIsland.Shared/Models/Notification/NotificationChannelRegisterInfo.cs
+  通知通道注册信息。
+
+ClassIsland.Shared/Models/Notification/NotificationPriority.cs
+  通知优先级定义。
+
+ClassIsland.Shared/Models/Notification/NotificationProviderRegisterInfo.cs
+  通知提供方注册信息。
+
+ClassIsland.Shared/Models/Notification/NotificationRequest.cs
+  通知请求：标题、内容、优先级、通道、持续时间等。
+
+ClassIsland.Shared/Models/Notification/NotificationSettings.cs
+  通知功能设置。
+
+ClassIsland.Shared/Models/Profile/Profile.cs
+  课表档案根对象：保存时间表、课表、科目、课表组、按日期排程、临时课表、
+  迁移记录等，是“档案文件”的模型。
+
+ClassIsland.Shared/Models/Profile/ClassPlan.cs
+  一份课表：按时间表组织若干课程（ClassInfo），支持启用、叠加、临时课表、
+  有效时间段过滤和附加设置。
+
+ClassIsland.Shared/Models/Profile/ClassInfo.cs
+  课表中的一节课：科目、时间表项、教师/地点等附加信息。
+
+ClassIsland.Shared/Models/Profile/ClassPlanGroup.cs
+  课表分组：默认组、全局组、临时组等，用于多周轮换或场景切换。
+
+ClassIsland.Shared/Models/Profile/OrderedSchedule.cs
+  经典模式下“日期 -> 课表”的排程。
+
+ClassIsland.Shared/Models/Profile/OrderedScheduleV2.cs
+  日程表 V2 模式下“日期 -> 课表/时间表”的排程。
+
+ClassIsland.Shared/Models/Profile/ProfileMigration.cs
+  档案迁移记录，标记某次结构升级是否已执行。
+
+ClassIsland.Shared/Models/Profile/ScheduleItem.cs
+  日程表 V2 的单条日程项。
+
+ClassIsland.Shared/Models/Profile/Subject.cs
+  科目：名称、缩写、颜色、图标、教师、地点等。
+
+ClassIsland.Shared/Models/Profile/TimeLayout.cs
+  时间表：一天内的时间段集合，支持临时/叠加时间表。
+
+ClassIsland.Shared/Models/Profile/TimeLayoutItem.cs
+  时间表中的一个时间段：开始、结束、类型（上课/课间/分割线）等。
+
+ClassIsland.Shared/Models/Profile/TimeLayoutUpdateEventArgs.cs
+  时间表变更事件参数。
+
+ClassIsland.Shared/Models/Profile/TimeRule.cs
+  课表生效时间规则：星期、周次、日期范围等。
+
+ClassIsland.Shared/Models/ConfigError.cs
+  配置读取/解析错误记录，用于设置界面的“配置错误”页面。
+
+ClassIsland.Shared/LICENSE.txt
+  共享库许可证说明。
+
+ClassIsland.Shared/README.md
+  共享库说明。
+
+ClassIsland.Shared/Protobuf/**
+  集控 gRPC 协议定义：
+  - AuditEvent/*.proto：崩溃、设置更新、认证、换课、插件安装/卸载、档案更新等审计事件；
+  - Client/*.proto：客户端请求（握手、注册、配置上传、审计、命令投递）；
+  - Command/*.proto：服务器命令（获取配置、心跳、发送通知）；
+  - Enum/*.proto：审计事件、命令类型、配置类型、列表更新操作、返回码；
+  - Server/*.proto：服务器响应；
+  - Service/*.proto：gRPC 服务定义（Handshake、ClientRegister、ConfigUpload、ClientCommandDeliver、Audit）。
+  这些文件由 Grpc.Tools 在构建时生成 C# 代码。
+
+十三、ClassIsland.Shared.IPC（跨进程通信）
+------------------------------------------
+
+ClassIsland.Shared.IPC 让插件、外部程序和 IPC Demo 通过命名管道与运行中的
+ClassIsland 通信。服务端在 ClassIsland/Services/IpcService.cs，客户端在 IpcClient。
+
+ClassIsland.Shared.IPC/ClassIsland.Shared.IPC.csproj
+  IPC 库项目文件，引用 dotnetCampus.Ipc 及其源生成器，目标框架与 Shared 相同。
+
+ClassIsland.Shared.IPC/IpcClient.cs
+  IPC 客户端：创建 IpcProvider，连接管道 ClassIsland.IPC.v2.Server，
+  并提供创建远程服务代理的 PeerProxy。
+
+ClassIsland.Shared.IPC/IpcRoutedNotifyIds.cs
+  公共通知路由 ID：上课、课间、放学、时间状态变化。
+
+ClassIsland.Shared.IPC/Abstractions/Services/IFooService.cs
+  示例/测试用 IPC 服务接口，用于验证 IPC 框架。
+
+ClassIsland.Shared.IPC/Abstractions/Services/IPublicLessonsService.cs
+  对外公开的课程服务：当前课程、时间状态、上课/课间/放学事件等。
+
+ClassIsland.Shared.IPC/Abstractions/Services/IPublicProfileService.cs
+  对外公开的档案服务：读取/保存当前档案、切换档案文件等。
+
+ClassIsland.Shared.IPC/Abstractions/Services/IPublicUriNavigationService.cs
+  对外公开的 URI 导航服务，外部程序可用 classisland:// URI 打开指定页面。
+
+十四、ClassIsland.Platforms.Abstractions（平台抽象）
+----------------------------------------------------
+
+该库定义“平台能做什么”，不包含具体系统实现。Desktop、Android、Windows、
+Linux、macOS 项目通过 PlatformServices 静态属性注入具体实现；Stubs 提供默认空实现。
+
+ClassIsland.Platforms.Abstractions/ClassIsland.Platforms.Abstractions.csproj
+  平台抽象库项目文件，目标 net10.0，引用 Shared 与 Avalonia。
+
+ClassIsland.Platforms.Abstractions/PlatformServices.cs
+  平台服务静态注册表：AppLifetimeService、WindowPlatformService、DeviceInfoService、
+  LocationService、DesktopService、DesktopToastService、SystemEventsService、
+  FilePickerService、NotificationPermissionService、HapticFeedbackService 等。
+
+ClassIsland.Platforms.Abstractions/AssemblyInfo.cs
+  平台抽象库程序集元数据。
+
+ClassIsland.Platforms.Abstractions/Enums/WindowFeatures.cs
+  窗口能力标志（置顶、透明、点击穿透、全屏等）。
+
+ClassIsland.Platforms.Abstractions/Models/BlobFilePickerOpenOptions.cs
+  文件选择器打开选项（标题、过滤器、起始目录等）。
+
+ClassIsland.Platforms.Abstractions/Models/DesktopToastContent.cs
+  桌面通知内容模型（标题、正文、图标、按钮、进度等）。
+
+ClassIsland.Platforms.Abstractions/Models/ForegroundWindowChangedEventArgs.cs
+  前台窗口变化事件参数（窗口句柄、进程、标题）。
+
+ClassIsland.Platforms.Abstractions/Models/LocationCoordinate.cs
+  经纬度坐标模型。
+
+ClassIsland.Platforms.Abstractions/Services/IAppLifetimeService.cs
+  应用生命周期：退出、重启。
+
+ClassIsland.Platforms.Abstractions/Services/IDesktopService.cs
+  桌面相关能力：壁纸、桌面窗口、工作区等。
+
+ClassIsland.Platforms.Abstractions/Services/IDesktopToastService.cs
+  系统级桌面通知能力。
+
+ClassIsland.Platforms.Abstractions/Services/IDeviceInfoService.cs
+  设备信息：系统版本、架构、设备名、内存等。
+
+ClassIsland.Platforms.Abstractions/Services/IHapticFeedbackService.cs
+  触觉反馈（Android 等平台）。
+
+ClassIsland.Platforms.Abstractions/Services/ILauncherService.cs
+  用系统默认方式打开文件、文件夹、URL。
+
+ClassIsland.Platforms.Abstractions/Services/ILocationService.cs
+  定位服务：获取当前位置、权限状态。
+
+ClassIsland.Platforms.Abstractions/Services/INotificationPermissionService.cs
+  通知权限申请与查询。
+
+ClassIsland.Platforms.Abstractions/Services/IPlatformFilePickerService.cs
+  平台文件/文件夹选择器与书签管理。
+
+ClassIsland.Platforms.Abstractions/Services/ISystemEventsService.cs
+  系统事件：锁屏、休眠、电源状态、前台窗口变化等。
+
+ClassIsland.Platforms.Abstractions/Services/IWindowPlatformService.cs
+  窗口平台能力：置顶、透明、点击穿透、窗口样式、屏幕信息等。
+
+ClassIsland.Platforms.Abstractions/Stubs/AppLifetimeServiceStub.cs
+  应用生命周期空实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/AvaloniaDefaultPlatformFilePickerService.cs
+  基于 Avalonia StorageProvider 的通用文件选择器实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/DesktopServiceStub.cs
+  桌面服务空实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/DesktopToastServiceStub.cs
+  桌面通知空实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/DeviceInfoServiceStub.cs
+  设备信息回退实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/HapticFeedbackServiceStub.cs
+  触觉反馈空实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/LauncherServiceStub.cs
+  启动器服务回退实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/LocationServiceStub.cs
+  定位服务空实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/SystemEventsServiceStub.cs
+  系统事件空实现。
+
+ClassIsland.Platforms.Abstractions/Stubs/WindowPlatformServiceStub.cs
+  窗口平台能力回退实现。
+
+十五、ClassIsland.Core（核心库）
+--------------------------------
+
+ClassIsland.Core 是应用与插件的公共基础库，提供：
+- 插件扩展点基类与元数据特性；
+- 通用 Avalonia 控件、行为、主题、转换器；
+- 服务接口（课程、通知、插件、天气、主题、教程等）；
+- 设置页、组件、规则、自动化、天气、更新、插件市场等模型；
+- 注册表服务与 DI 扩展方法。
+
+（一）根目录文件
+----------------
+
+ClassIsland.Core/ClassIsland.Core.csproj
+  核心库项目文件。目标 net10.0，启用 XML 文档生成；引用 Shared、Shared.IPC、
+  Platforms.Abstractions；引入 IconsMappingGenerator 源生成器；引用 Avalonia、
+  FluentAvalonia、ReactiveUI、Octokit、YamlDotNet、MoonSharp、SoundFlow 等。
+
+ClassIsland.Core/AppBase.cs
+  Avalonia Application 基类：定义应用版本、生命周期、主窗口、重启/停止抽象、
+  平台/构建类型、图标字体、根窗口获取等，是主程序 App 的父类。
+
+ClassIsland.Core/AssemblyInfo.cs
+  核心库程序集元数据。
+
+ClassIsland.Core/BindingProxy.cs
+  XAML 绑定代理：让非可视化对象（如 DataTemplate 中的资源）参与绑定。
+
+ClassIsland.Core/CommonDirectories.cs
+  应用常用目录常量：配置目录、缓存目录、日志目录、插件目录等。
+
+ClassIsland.Core/RefCounted.cs
+  引用计数容器与 Lease，用于共享可释放资源（如音频播放设备）。
+
+ClassIsland.Core/TimeLineListItemAdorner.cs
+  时间线列表项的装饰层基类，用于在时间线项上叠加提示/编辑元素。
+
+ClassIsland.Core/WindowsVersions.cs
+  Windows 版本号常量与判断助手。
+
+ClassIsland.Core/StylesBase.axaml
+  核心库基础样式资源：控件默认样式、颜色、字体、间距等。
+
+ClassIsland.Core/ThemeBase.axaml
+  核心库主题资源字典基类，供应用主题合并。
+
+（二）Abstractions（扩展点与服务接口）
+--------------------------------------
+
+Abstractions/Automation/ActionBase.cs
+  自动化“行动”基类：定义行动 ID、名称、设置控件、执行与回滚入口。
+
+Abstractions/Automation/TriggerBase.cs
+  自动化“触发器”基类：定义触发条件、设置控件、加载/卸载与触发事件。
+
+Abstractions/Behaviors/BaseDataGridDropHandler.cs
+  DataGrid 行拖放通用逻辑基类（插入、移动、复制行）。
+
+Abstractions/Controls/ActionSettingsControlBase.cs
+  行动设置控件基类。
+
+Abstractions/Controls/AttachedSettingsControlBase.cs
+  附加设置编辑控件基类。
+
+Abstractions/Controls/AuthorizeProviderControlBase.cs
+  认证提供方控件基类。
+
+Abstractions/Controls/ComponentBase.cs
+  主界面组件基类：组件 ID、名称、图标、设置控件、渲染入口。
+
+Abstractions/Controls/IViewHost.cs
+  视图宿主接口：在窗口/抽屉/页面中承载 View。
+
+Abstractions/Controls/MainWindowCustomizableNodeHelper.cs
+  主界面可自定义节点助手：查找、替换、序列化节点设置。
+
+Abstractions/Controls/NotificationProviderControlBase.cs
+  通知提供方控件基类。
+
+Abstractions/Controls/ProfileTransferProviderControlBase.cs
+  档案迁移提供方控件基类。
+
+Abstractions/Controls/RuleSettingsControlBase.cs
+  规则设置控件基类。
+
+Abstractions/Controls/SettingsPageBase.cs
+  设置页面基类。
+
+Abstractions/Controls/SpeechProviderControlBase.cs
+  语音提供方设置控件基类。
+
+Abstractions/Controls/TriggerSettingsControlBase.cs
+  触发器设置控件基类。
+
+Abstractions/Controls/ViewBase.cs
+  通用视图基类（带 ViewModel 生命周期）。
+
+Abstractions/Controls/IconSources/TemplatedIconElement.cs
+  可使用模板的图标源元素。
+
+Abstractions/Controls/ProfileTransferProviders/GenericImportProviderBase.axaml
+  通用导入提供方界面模板。
+
+Abstractions/Controls/ProfileTransferProviders/GenericImportProviderBase.axaml.cs
+  通用导入提供方后台基类。
+
+Abstractions/Converters/DictionaryValueAccessConverter.cs
+  泛型字典按键取值转换器基类。
+
+Abstractions/Converters/EnumToIntConverter.cs
+  泛型枚举与整数互转转换器基类。
+
+Abstractions/Converters/RuleLogicalModeToIntConverter.cs
+  规则逻辑模式与整数互转。
+
+Abstractions/Models/Components/IMainWindowCustomizableNodeSettings.cs
+  主界面可自定义节点设置接口。
+
+Abstractions/Models/Marketplace/IMarketplaceItemIndex.cs
+  插件市场索引接口。
+
+Abstractions/Models/Marketplace/IMarketplaceItemInfo.cs
+  插件市场条目信息接口。
+
+Abstractions/Models/Marketplace/IMarketplaceItemManifest.cs
+  插件市场条目清单接口。
+
+Abstractions/Models/Marketplace/IMarketplaceItemRepoManifest.cs
+  插件市场仓库清单接口。
+
+Abstractions/Models/Speech/IGlobalSpeechSettings.cs
+  全局语音设置接口。
+
+Abstractions/Models/IComponentContainerSettings.cs
+  组件容器设置接口。
+
+Abstractions/Models/IXmlnsAttached.cs
+  可附加 XML 命名空间信息的对象接口。
+
+Abstractions/Services/IActionService.cs
+  行动服务：执行/回滚行动集。
+
+Abstractions/Services/IAttachedSettingsHostService.cs
+  附加设置宿主服务：登记各对象可用的附加设置控件。
+
+Abstractions/Services/IAudioService.cs
+  音频服务：初始化播放设备、播放音效。
+
+Abstractions/Services/IAutomationService.cs
+  自动化服务：加载/保存自动化配置、运行触发器与行动集。
+
+Abstractions/Services/IComponentsService.cs
+  组件服务：读写组件布局、组件设置、当前组件配置路径。
+
+Abstractions/Services/ICredentialService.cs（接口名 IAuthorizeService）
+  认证服务：设置/校验凭据。
+
+Abstractions/Services/IExactTimeService.cs
+  精确时间服务：系统时间、NTP 校时、时间偏移。
+
+Abstractions/Services/IHangService.cs
+  卡顿/挂起检测服务。
+
+Abstractions/Services/IIpcService.cs
+  IPC 服务端接口：启动命名管道、暴露公共代理。
+
+Abstractions/Services/ILessonsService.cs
+  课程服务：当前课表、当前课程、时间状态、上下课事件、计时器。
+
+Abstractions/Services/INotificationHostService.cs
+  通知主机：排队、显示、关闭通知。
+
+Abstractions/Services/INotificationWorkerService.cs
+  通知工作器：后台播放提醒音效/语音、准备通知内容。
+
+Abstractions/Services/IPluginMarketService.cs
+  插件市场服务：获取索引、下载、安装、更新插件。
+
+Abstractions/Services/IPluginService.cs
+  插件服务：加载、卸载、启用/禁用插件，维护插件列表。
+
+Abstractions/Services/IProfileAnalyzeService.cs
+  档案分析服务：分析课表/时间表引用关系。
+
+Abstractions/Services/IProfileService.cs
+  档案服务：加载/保存档案、切换档案、迁移旧配置。
+
+Abstractions/Services/IProfileTransferService.cs
+  档案迁移服务：从其他软件/旧版本导入导出。
+
+Abstractions/Services/IRefreshingService.cs
+  翻新/重载服务：刷新组件、主题、配置等。
+
+Abstractions/Services/IRulesetService.cs
+  规则集服务：注册规则、判断规则组是否满足。
+
+Abstractions/Services/ISplashProvider.cs
+  启动画面提供方接口。
+
+Abstractions/Services/ISplashService.cs
+  启动画面服务：显示/更新/关闭 Splash。
+
+Abstractions/Services/ITaskBarIconService.cs
+  任务栏/托盘图标服务。
+
+Abstractions/Services/IThemeService.cs
+  主题服务：明暗主题、主题色、背景材质。
+
+Abstractions/Services/ITopmostEffectPlayer.cs
+  置顶强调特效播放接口。
+
+Abstractions/Services/ITutorialService.cs
+  教程服务：加载/运行教程脚本。
+
+Abstractions/Services/IUriNavigationService.cs
+  URI 导航服务：解析 classisland:// 并打开页面。
+
+Abstractions/Services/IWeatherService.cs
+  天气服务：定位、查询、缓存、预警。
+
+Abstractions/Services/IWindowRuleService.cs
+  窗口规则服务：判断当前前台窗口是否满足规则。
+
+Abstractions/Services/IXamlThemeService.cs
+  XAML 主题服务：安装/切换/卸载主题包。
+
+Abstractions/Services/Logging/IAppLogService.cs
+  应用日志服务接口。
+
+Abstractions/Services/Management/IManagementService.cs
+  集控服务接口。
+
+Abstractions/Services/Metadata/IAnnouncementService.cs
+  公告服务接口。
+
+Abstractions/Services/NotificationProviders/INotificationSender.cs
+  通知发送器接口。
+
+Abstractions/Services/NotificationProviders/NotificationChannel.cs
+  通知通道模型。
+
+Abstractions/Services/NotificationProviders/NotificationProviderBase.cs
+  通知提供方基类：注册通道、发送通知、设置控件。
+
+Abstractions/Services/SpeechService/ISpeechService.cs
+  语音合成服务接口。
+
+Abstractions/Services/UI/IViewHostProvider.cs
+  视图宿主提供方接口；文件内还包含 ViewHostProviderStub。
+
+Abstractions/Views/SplashWindowBase.cs
+  启动窗口基类。
+
+Abstractions/INotificationConsumer.cs
+  通知消费者接口（接收通知内容）。
+
+Abstractions/PluginBase.cs
+  插件入口基类：插件初始化、依赖声明、生命周期。
+
+（三）Assists（附加属性/控件助手）
+----------------------------------
+
+Assists/ComboBoxAssist.cs
+  ComboBox 附加属性助手。
+
+Assists/ControlCompositionFadeInAssist.cs
+  控件组合淡入动画助手。
+
+Assists/IconSourceElementFontIconAssist.cs
+  图标源与 FontIcon 的桥接助手。
+
+Assists/MainWindowStylesAssist.cs
+  主窗口样式附加属性。
+
+Assists/NativeMenuItemAssist.cs
+  原生菜单项助手。
+
+Assists/PointerStateAssist.cs
+  指针状态（悬停/按下）附加属性。
+
+Assists/ScrollPresenterAnimationAssist.cs
+  ScrollPresenter 动画与缓动函数。
+
+Assists/ScrollViewerAssist.cs
+  ScrollViewer 手势、越界回弹、滚动采样等助手。
+
+Assists/SliderDragTooltipAssist.cs
+  Slider 拖动提示与格式化转换器。
+
+Assists/ViewboxLogicalTreeAssist.cs
+  Viewbox 逻辑树订阅助手。
+
+Assists/ViewHostAssist.cs
+  视图宿主附加属性。
+
+Assists/WrapPanelResizingAnimationAssist.cs
+  WrapPanel 尺寸变化动画助手。
+
+（四）Attributes（扩展点元数据）
+--------------------------------
+
+Attributes/ActionInfo.cs
+  标记行动类型：ID、名称、分类、图标、设置控件等。
+
+Attributes/AttachedSettingsControlInfo.cs
+  标记附加设置控件：目标类型、设置类型。
+
+Attributes/AttachedSettingsUsage.cs
+  声明附加设置可用于哪些对象（时间点、时间表、课表、科目）。
+
+Attributes/AuthorizeProviderInfo.cs
+  标记认证提供方。
+
+Attributes/ComponentInfo.cs
+  标记主界面组件：ID、名称、图标、分类。
+
+Attributes/ContainerComponent.cs
+  标记容器型组件。
+
+Attributes/FullWidthPageAttribute.cs
+  标记设置页使用全宽布局。
+
+Attributes/GroupAttribute.cs
+  给设置页/扩展点分组。
+
+Attributes/HidePageTitleAttribute.cs
+  隐藏页面标题。
+
+Attributes/MigrateFromAttribute.cs
+  标记配置迁移来源版本。
+
+Attributes/NotificationChannelInfo.cs
+  标记通知通道。
+
+Attributes/NotificationProviderInfo.cs
+  标记通知提供方。
+
+Attributes/PluginEntrance.cs
+  标记插件入口类。
+
+Attributes/SettingsInfo.cs
+  标记设置模型/设置项。
+
+Attributes/SettingsPageInfo.cs
+  标记设置页：ID、名称、分类、图标、顺序。
+
+Attributes/SpeechProviderInfo.cs
+  标记语音提供方。
+
+Attributes/TriggerInfo.cs
+  标记触发器类型：ID、名称、分类、设置控件。
+
+（五）Behaviors（Avalonia 行为）
+--------------------------------
+
+Behaviors/ActionProgressBarRunBehavior.cs
+  行动执行进度条行为。
+
+Behaviors/AdvancedCanvasDragBehavior.cs
+  Canvas 高级拖拽行为。
+
+Behaviors/AdvancedItemDragBehavior.cs
+  列表项高级拖拽行为。
+
+Behaviors/AdvancedManagedContextDragBehavior.cs
+  带上下文的托管拖拽行为。
+
+Behaviors/FaMenuFlyoutSubItemTouchFixAssist.cs
+  修复 FluentAvalonia 子菜单触摸问题。
+
+Behaviors/PopupIntroAnimationBehavior.cs
+  Popup 打开动画行为。
+
+Behaviors/StackPanelIntroAnimationBehavior.cs
+  StackPanel 子项入场动画行为。
+
+Behaviors/ToastSwipeBehavior.cs
+  Toast 滑动关闭行为。
+
+Behaviors/ToggleTabStripBehavior.cs
+  TabStrip 切换行为。
+
+Behaviors/WrapPanelAutoResizeBehavior.cs
+  WrapPanel 自动调整尺寸行为。
+
+（六）Commands / Compatibility / ComponentModels / Exceptions
+--------------------------------------------------------------
+
+Commands/UriNavigationCommands.cs
+  URI 导航相关的路由命令定义。
+
+Compatibility/Avalonia12Compatibility.cs
+  Avalonia 12 兼容层：屏蔽/适配 API 差异。
+
+ComponentModels/ObservableKeyValuePair.cs
+  可观察键值对。
+
+ComponentModels/SyncDictionaryList.cs
+  字典与列表同步容器。
+
+Exceptions/ChecksumUnMatchException.cs
+  校验和不匹配异常（插件/更新包校验）。
+
+（七）Extensions（DI 注册与通用扩展）
+-------------------------------------
+
+Extensions/Registry/ActionRegistryExtensions.cs
+  AddAction 等 DI 扩展，把行动类型注册到行动注册表；含旧版行动适配器。
+
+Extensions/Registry/AttachedSettingsRegistryExtensions.cs
+  注册附加设置控件。
+
+Extensions/Registry/AuthorizeProviderRegistryExtensions.cs
+  注册认证提供方。
+
+Extensions/Registry/ComponentRegistryExtensions.cs
+  注册主界面组件。
+
+Extensions/Registry/NotificationProviderRegistryExtensions.cs
+  注册通知提供方与通道。
+
+Extensions/Registry/ProfileTransferRegisterExtensions.cs
+  注册档案迁移提供方。
+
+Extensions/Registry/RulesetRegistryExtensions.cs
+  注册规则类型与规则设置控件。
+
+Extensions/Registry/SettingsWindowRegistryExtensions.cs
+  注册设置页与设置页分组。
+
+Extensions/Registry/SpeechProviderRegistryExtensions.cs
+  注册语音提供方。
+
+Extensions/Registry/TransientViewRegistryExtensions.cs
+  注册临时视图。
+
+Extensions/Registry/TriggerRegistryExtensions.cs
+  注册自动化触发器。
+
+Extensions/Registry/TutorialRegistryExtensions.cs
+  注册教程。
+
+Extensions/Registry/WeatherIconTemplateRegistryExtensions.cs
+  注册天气图标模板。
+
+Extensions/Registry/XamlThemeRegisterExtensions.cs
+  注册 XAML 主题。
+
+Extensions/UI/FAContentDialogExtensions.cs
+  FluentAvalonia ContentDialog 便捷方法。
+
+Extensions/UI/VisualsExtensions.cs
+  可视化树/视觉对象扩展方法。
+
+Extensions/UI/WindowExtensions.cs
+  窗口扩展方法（居中、置顶、尺寸等）。
+
+Extensions/AssetLoaderExtensions.cs
+  Avalonia 资源加载扩展。
+
+Extensions/DictionaryExtensions.cs
+  字典扩展方法。
+
+Extensions/FilePathExtensions.cs
+  文件路径扩展方法。
+
+Extensions/IntToChineseExtensions.cs
+  整数转中文数字。
+
+Extensions/ListExtensions.cs
+  列表扩展方法。
+
+Extensions/NotificationProviderExtensions.cs
+  通知提供方扩展方法。
+
+（八）Helpers（助手类）
+----------------------
+
+Helpers/AssetsStreamHelper.cs
+  读取嵌入资源流。
+
+Helpers/AvaloniaUnsafeAccessorHelpers.cs
+  通过 unsafe/反射访问 Avalonia 内部成员；含 Win32 渲染模式枚举。
+
+Helpers/BindMethodFinder.cs
+  查找 XAML 绑定方法。
+
+Helpers/ChecksumHelper.cs
+  文件/字节校验和计算。
+
+Helpers/LogMaskingHelper.cs
+  日志敏感信息脱敏。
+
+Helpers/MarkdownConvertHelper.cs
+  Markdown 转 Avalonia 控件/文本。
+
+Helpers/PathHelpers.cs
+  路径规范化、相对路径、非法字符处理。
+
+Helpers/Native/BitmapConverters.cs
+  位图与原生像素缓冲转换。
+
+Helpers/Native/NativeWindowHelper.cs
+  Windows 原生窗口操作（样式、位置、层级）。
+
+Helpers/Native/WindowCaptureHelper.cs
+  窗口截图/捕获助手。
+
+Helpers/SimpleExpression/Expression.cs
+  简单表达式模型（变量、运算、求值）。
+
+Helpers/SimpleExpression/SimpleExpressionParser.cs
+  简单表达式解析器。
+
+Helpers/UI/ContentDialogHelper.cs
+  内容对话框显示助手。
+
+Helpers/UI/ControlColorHelper.cs
+  控件颜色计算（对比色、亮度）。
+
+Helpers/UI/FaFrameLifetimeHelper.cs
+  FluentAvalonia Frame 生命周期助手。
+
+Helpers/UI/FlyoutHelper.cs
+  Flyout 显示助手。
+
+Helpers/UI/IconBitmapHelper.cs
+  图标位图渲染/缓存。
+
+Helpers/UI/IconExpressionHelper.cs
+  图标表达式解析。
+
+Helpers/UI/PopupHelper.cs
+  Popup 定位/显示助手。
+
+Helpers/UI/SelectorHelpers.cs
+  样式选择器辅助。
+
+Helpers/UI/ToastsHelper.cs
+  Toast 通知显示助手。
+
+Helpers/UI/UITreeHelper.cs
+  可视化/逻辑树遍历助手。
+
+（九）MarkupExtensions / Services / 其他
+----------------------------------------
+
+MarkupExtensions/FIExtension.cs
+  XAML 中 `{ci:FI ...}` 的 Fluent Icon 标记扩展。
+
+MarkupExtensions/LIExtension.cs
+  XAML 中 `{ci:LI ...}` 的 Lucide Icon 标记扩展。
+
+Services/GlobalStorageService.cs
+  全局键值存储：保存渲染模式、Sentry 开关等启动级设置。
+
+Services/Registry/AuthorizeProviderRegistryService.cs
+  认证提供方注册表运行时服务。
+
+Services/Registry/ComponentRegistryService.cs
+  组件注册表运行时服务。
+
+Services/Registry/NotificationProviderRegistryService.cs
+  通知提供方注册表运行时服务。
+
+Services/Registry/SettingsWindowRegistryService.cs
+  设置页注册表运行时服务。
+
+Services/Registry/SpeechProviderRegistryService.cs
+  语音提供方注册表运行时服务。
+
+Services/UI/ViewManagementService.cs
+  视图管理服务：打开/关闭 View、维护 View 栈。
+
+（十）Controls（通用控件）
+--------------------------
+
+Controls/Automation/ActionControl.axaml(.cs)
+  行动编辑/展示控件：显示行动图标、名称、设置入口。
+
+Controls/Automation/ActionItemControl.axaml(.cs)
+  单条行动项控件。
+
+Controls/Automation/ActionSetRunningControl.axaml(.cs)
+  行动集执行中提示控件。
+
+Controls/Automation/TriggerSettingsControl.axaml(.cs)
+  触发器设置控件容器。
+
+Controls/Automation/TriggerSettingsControlPresenter.axaml(.cs)
+  触发器设置控件呈现器：按触发器类型选择设置界面。
+
+Controls/IconControl/IconControl.cs
+  通用图标控件，可显示字体图标/图片。
+
+Controls/IconControl/IconControlIconKind.cs
+  IconControl 的图标种类枚举。
+
+Controls/IconSources/AdvacnedImageIcon.axaml(.cs)
+  高级图片图标控件（支持裁剪、着色、缓存）。
+
+Controls/IconSources/AdvancedImageIconSource.cs
+  高级图片图标源。
+
+Controls/LessonsControls/ClassInfoMultiConverter.cs
+  课程信息多值转换器。
+
+Controls/LessonsControls/LessonControlBase.cs
+  课程控件基类。
+
+Controls/LessonsControls/LessonControlExpanded.axaml(.cs)
+  展开式课程信息控件。
+
+Controls/LessonsControls/LessonControlMinimized.axaml(.cs)
+  最小化课程信息控件。
+
+Controls/LessonsControls/LessonControlSeperator.axaml(.cs)
+  课程之间的分隔控件。
+
+Controls/LessonsControls/LessonControlVerticalMinimized.axaml(.cs)
+  垂直最小化课程信息控件。
+
+Controls/LessonsControls/LessonsListBox.axaml(.cs)
+  课程列表控件，负责轮播/滚动/淡入淡出。
+
+Controls/LessonsControls/LessonsListBoxFadingStateConverter.cs
+  课程列表淡入淡出状态转换器。
+
+Controls/LessonsControls/LessonsListBoxItemTemplateMultiConverter.cs
+  课程列表项模板选择转换器。
+
+Controls/NavHyperlink/NavHyperlink.cs
+  应用内导航超链接控件。
+
+Controls/NotificationTemplates/RollingTextTemplate.axaml(.cs)
+  滚动文字通知模板。
+
+Controls/NotificationTemplates/SimpleTextOverlayTemplate.axaml
+  简单文字叠加通知模板。
+
+Controls/NotificationTemplates/Templates.axaml
+  通知模板资源字典。
+
+Controls/NotificationTemplates/TwoIconsMaskTemplate.axaml
+  双图标遮罩通知模板。
+
+Controls/Ruleset/RulesetControl.axaml(.cs)
+  规则集编辑控件。
+
+Controls/Ruleset/RulesetSettingsControlPresenter.axaml(.cs)
+  规则设置控件呈现器。
+
+Controls/Ruleset/RulesetStringMatchingSettingsControl.axaml(.cs)
+  字符串匹配规则设置控件。
+
+Controls/Tutorial/TutorialBarrier.axaml(.cs)
+  教程遮罩/高亮屏障控件。
+
+Controls/AdaptiveNavigationView.axaml(.cs)
+  自适应导航视图（随宽度切换导航模式）。
+
+Controls/AnimatedIconButton.axaml(.cs)
+  带动画效果的图标按钮。
+
+Controls/AnnouncementControl.axaml(.cs)
+  公告展示控件。
+
+Controls/AppToastAdorner.axaml(.cs)
+  应用内 Toast 装饰层；含 ToastLifetime。
+
+Controls/AttachedSettingsControlPresenter.axaml(.cs)
+  附加设置控件呈现器。
+
+Controls/ComboBoxDrawerPage.cs
+  ComboBox 抽屉页面基类。
+
+Controls/CommonTaskDialogs.cs
+  常用任务对话框（确认、错误、输入等）。
+
+Controls/ComponentAdvancedSettingsControl.axaml(.cs)
+  组件高级设置控件。
+
+Controls/ComponentPresenter.axaml(.cs)
+  主界面组件呈现器。
+
+Controls/CompositionPageTransition.cs
+  组合页面切换动画。
+
+Controls/CredentialEditControl.axaml(.cs)
+  凭据编辑控件。
+
+Controls/DevelopmentBuildAdorner.cs
+  开发构建角标装饰器。
+
+Controls/DocumentReaderWindow.axaml(.cs)
+  文档阅读窗口（Markdown/文本）。
+
+Controls/DragGestureRecognizer.cs
+  拖拽手势识别器。
+
+Controls/DrawerHost.axaml(.cs)
+  抽屉宿主控件；含 DrawerPlacementEnum。
+
+Controls/Emptiable.axaml(.cs)
+  可显示“空状态”的容器。
+
+Controls/Empty.axaml(.cs)
+  空状态占位控件。
+
+Controls/ExpressiveLoadingIndicator.axaml(.cs)
+  表现力加载动画控件。
+
+Controls/Field.axaml(.cs)
+  表单字段容器（标题、说明、内容）。
+
+Controls/FluentIcon.axaml(.cs)
+  Fluent System Icons 字体图标控件。
+
+Controls/FluentIconSource.cs
+  Fluent 图标源。
+
+Controls/HighlightBox.axaml(.cs)
+  高亮框控件。
+
+Controls/IconExpressionEditor.axaml(.cs)
+  图标表达式编辑器。
+
+Controls/IconText.axaml(.cs)
+  图标 + 文本组合控件。
+
+Controls/Lazy.axaml(.cs)
+  延迟加载内容的容器。
+
+Controls/LucideIcon.axaml(.cs)
+  Lucide 字体图标控件。
+
+Controls/LucideIconSource.cs
+  Lucide 图标源。
+
+Controls/MainWindowBackgroundMaterialControl.cs
+  主窗口背景材质控件（亚克力/Mica 等）。
+
+Controls/MultipleDateSelector.axaml(.cs)
+  多日期选择控件。
+
+Controls/MultipleDateSelectorDayState.cs
+  多日期选择器的日期状态模型。
+
+Controls/MyWindow.cs
+  应用通用窗口基类；含 MyWindowState。
+
+Controls/PopupAcrylicMaterialControl.cs
+  Popup 亚克力材质背景控件。
+
+Controls/ReusableTabControl.cs
+  可复用 TabControl。
+
+Controls/RootAttachedSettingsDependencyControl.axaml(.cs)
+  根级附加设置依赖控件。
+
+Controls/SFSymbolsIcon.axaml.cs
+  SF Symbols 图标控件（macOS 风格）。
+
+Controls/SFSymbolsIconSource.cs
+  SF Symbols 图标源。
+
+Controls/Shimmer.axaml(.cs)
+  微光加载占位控件。
+
+Controls/StarRailLoadingControl.axaml(.cs)
+  星穹铁道风格加载动画。
+
+Controls/StickerControl.axaml(.cs)
+  贴纸/浮层控件。
+
+Controls/StickyScrollViewer.axaml(.cs)
+  粘性滚动容器（滚动时固定头部）。
+
+Controls/TeyvatLoadingControl.axaml(.cs)
+  原神风格加载动画。
+
+Controls/Thing.axaml(.cs)
+  通用演示/占位控件。
+
+Controls/TouchDragThumb.axaml(.cs)
+  触摸拖拽滑块。
+
+Controls/TouchTextCommandBarFlyout.cs
+  触摸文本命令栏；含 TextControlButtons。
+
+Controls/VerticalDrawer.axaml(.cs)
+  垂直抽屉控件；含滚动手势识别器与打开状态枚举。
+
+（十一）Models（数据模型）
+--------------------------
+
+Models/AttachedSettings/LessonControlAttachedSettings.cs
+  课程控件附加设置（显示教师、地点、进度等）。
+
+Models/Automation/ActionMenuTreeNode.cs
+  行动菜单树节点、分组与节点集合。
+
+Models/Automation/TriggerSettings.cs
+  触发器的通用设置数据。
+
+Models/Automation/Workflow.cs
+  自动化工作流：触发器 + 行动集。
+
+Models/Components/ComponentGroup.cs
+  组件分组记录。
+
+Models/Components/ComponentProfile.cs
+  一套组件布局配置。
+
+Models/Components/ComponentSettings.cs
+  单个组件的设置与位置。
+
+Models/Components/MainWindowLineSettings.cs
+  主界面每一行的布局设置。
+
+Models/Logging/LogEntry.cs
+  日志条目模型。
+
+Models/Logging/LogMaskRule.cs
+  日志脱敏规则。
+
+Models/Metadata/Announcement/Announcement.cs
+  公告数据模型。
+
+Models/Notification/NotificationContent.cs
+  通知展示内容。
+
+Models/Notification/NotificationPlayingSessionInfo.cs
+  正在播放的通知会话信息。
+
+Models/Notification/NotificationPlayingTicket.cs
+  通知播放票据（排队/取消）。
+
+Models/Notification/NotificationRequest.cs
+  通知请求（Core 版本）。
+
+Models/Notification/Templates/RollingTextTemplateData.cs
+  滚动文字模板数据。
+
+Models/Notification/Templates/SimpleTextTemplateData.cs
+  简单文字模板数据。
+
+Models/Notification/Templates/TwoIconsMaskTemplateData.cs
+  双图标遮罩模板数据。
+
+Models/Plugin/PluginDependency.cs
+  插件依赖声明。
+
+Models/Plugin/PluginIndex.cs
+  本地插件索引。
+
+Models/Plugin/PluginIndexInfo.cs
+  插件索引元信息。
+
+Models/Plugin/PluginIndexItem.cs
+  插件索引条目。
+
+Models/Plugin/PluginInfo.cs
+  已安装插件信息。
+
+Models/Plugin/PluginManifest.cs
+  插件 manifest.yml 的模型（ID、名称、入口程序集、版本、API 版本等）。
+
+Models/Plugin/PluginRepoManifest.cs
+  插件仓库清单模型。
+
+Models/Profile/ProfileTransferProviderInfo.cs
+  档案迁移提供方信息。
+
+Models/ProfileAnalyzing/AttachableObjectAddress.cs
+  可附加对象地址（定位档案中的对象）。
+
+Models/ProfileAnalyzing/AttachableObjectNode.cs
+  可附加对象节点（分析引用关系）。
+
+Models/Ruleset/Rule.cs
+  单条规则：规则 ID、设置、是否启用。
+
+Models/Ruleset/RuleGroup.cs
+  规则组：多条规则按逻辑模式组合。
+
+Models/Ruleset/RuleRegistryInfo.cs
+  规则注册信息。
+
+Models/Ruleset/Ruleset.cs
+  规则集：规则组集合与整体结果。
+
+Models/Ruleset/StringMatchingSettings.cs
+  字符串匹配设置（包含、正则、通配符等）。
+
+Models/SettingsWindow/SettingsPageGroupInfo.cs
+  设置页分组信息。
+
+Models/SettingsWindow/SettingsWindowNavigationData.cs
+  设置窗口导航数据。
+
+Models/Theming/ThemeUpdatedEventArgs.cs
+  主题更新事件参数。
+
+Models/Tutorial/Tutorial.cs
+  教程脚本根对象。
+
+Models/Tutorial/TutorialAction.cs
+  教程中的一步操作。
+
+Models/Tutorial/TutorialGroup.cs
+  教程分组。
+
+Models/Tutorial/TutorialParagraph.cs
+  教程段落。
+
+Models/Tutorial/TutorialSentence.cs
+  教程句子。
+
+Models/UI/DrawerOptions.cs
+  抽屉打开选项。
+
+Models/UI/IconExpressionEditorViewModel.cs
+  图标表达式编辑器 ViewModel；含 IconDescriptor/IconExpressionEditorItem。
+
+Models/UI/MultipleDateSelectorViewModel.cs
+  多日期选择器 ViewModel。
+
+Models/UI/ShowToastEventArgs.cs
+  Toast 显示事件参数。
+
+Models/UI/ToastMessage.cs
+  Toast 消息模型。
+
+Models/UI/ViewClosingEventArgs.cs
+  视图关闭事件参数。
+
+Models/Updating/ChannelInfo.cs
+  更新通道信息。
+
+Models/Updating/DownloadInfo.cs
+  更新下载信息。
+
+Models/Updating/DownloadMirror.cs
+  下载镜像。
+
+Models/Updating/VersionInfo.cs
+  版本信息。
+
+Models/Updating/VersionInfoMin.cs
+  精简版本信息。
+
+Models/Updating/VersionsIndex.cs
+  版本索引。
+
+Models/UriNavigation/UriNavigationEventArgs.cs
+  URI 导航事件参数。
+
+Models/UriNavigation/UriNavigationNode.cs
+  URI 导航节点。
+
+Models/Weather/AqiInfo.cs
+  空气质量信息。
+
+Models/Weather/City.cs
+  城市模型。
+
+Models/Weather/CityInfo.cs
+  城市详细信息。
+
+Models/Weather/CurrentWeather.cs
+  当前天气。
+
+Models/Weather/ForecastDaily.cs
+  每日预报。
+
+Models/Weather/ForecastHourly.cs
+  逐小时预报。
+
+Models/Weather/Minutely.cs
+  分钟级降水预报。
+
+Models/Weather/MinutelyPrecipitation.cs
+  分钟级降水数据。
+
+Models/Weather/OpenMeteoForecast.cs
+  Open-Meteo 响应模型；含 OmBlock/OmBlockJsonConverter/OpenMeteoAirQuality。
+
+Models/Weather/RangedValue.cs
+  带范围的数值。
+
+Models/Weather/StatusValueBase.cs
+  状态值基类。
+
+Models/Weather/ValueUnitPair.cs
+  数值 + 单位。
+
+Models/Weather/WeatherAlert.cs
+  天气预警。
+
+Models/Weather/WeatherIconTemplateRegistryInfo.cs
+  天气图标模板注册信息。
+
+Models/Weather/WeatherInfo.cs
+  综合天气信息。
+
+Models/Weather/WeatherQueryResult.cs
+  天气查询结果。
+
+Models/Weather/WindInfo.cs
+  风向风速信息。
+
+Models/Weather/XiaomiWeatherStatusCodeItem.cs
+  小米天气状态码条目。
+
+Models/Weather/XiaomiWeatherStatusCodes.cs
+  小米天气状态码表。
+
+Models/XamlTheme/ThemeIndex.cs
+  主题索引。
+
+Models/XamlTheme/ThemeIndexInfo.cs
+  主题索引条目。
+
+Models/XamlTheme/ThemeInfo.cs
+  主题信息。
+
+Models/XamlTheme/ThemeManifest.cs
+  主题清单。
+
+Models/XamlTheme/ThemeRepoManifest.cs
+  主题仓库清单。
+
+Models/DownloadProgress.cs
+  下载进度模型。
+
+Models/SpeedTestResult.cs
+  网络测速结果。
+
+（十二）Converters（XAML 值转换器）
+------------------------------------
+
+Converters/AttachedSettingsControlInfoIdToAttachedSettingsControlInfoMultiConverter.cs
+  附加设置控件 ID 到控件信息的多值转换器。
+
+Converters/BooleanAndExpressionMultiConverter.cs
+  多布尔值“与”转换。
+
+Converters/BooleanOrExpressionMultiConverter.cs
+  多布尔值“或”转换。
+
+Converters/BooleanToBooleanReConverter.cs
+  布尔取反。
+
+Converters/ClassPlanDictionaryValueAccessConverter.cs
+  按 Guid 访问课表字典。
+
+Converters/ClassPlanGroupIdToClassPlanGroupConverter.cs
+  课表组 ID 转课表组对象。
+
+Converters/CollectionToStringConverter.cs
+  集合转字符串。
+
+Converters/ColorHexJsonConverter.cs
+  颜色与十六进制字符串的 JSON 转换。
+
+Converters/ColorToColorPickerBrushConverter.cs
+  颜色转 ColorPicker 画刷。
+
+Converters/CustomKeyDictionaryValueConverter.cs
+  自定义键字典取值转换器。
+
+Converters/DateTimeToDaysLeftConverter.cs
+  日期转剩余天数。
+
+Converters/DateTimeToTotalSecondsConverter.cs
+  日期/时间转总秒数。
+
+Converters/DayTimeSpanToHeightConverter.cs
+  一天内时间跨度转高度（时间线布局）。
+
+Converters/DoubleToPercentStringConverter.cs
+  小数转百分比字符串。
+
+Converters/DoubleToThicknessMultiConverter.cs
+  数值转 Thickness。
+
+Converters/ElementConverters.cs
+  控件/元素相关转换器集合。
+
+Converters/EnumToIntConverter.cs
+  枚举与整数互转。
+
+Converters/ExceptionToExceptionHeaderConverter.cs
+  异常转异常标题文本。
+
+Converters/HorizontalAlignmentToIntConverter.cs
+  水平对齐转整数。
+
+Converters/IndexConverter.cs
+  列表索引相关转换。
+
+Converters/IntToFontWeightConverter.cs
+  整数转字体粗细。
+
+Converters/IntToRadioButtonSelectionConverter.cs
+  整数与单选按钮选中状态互转。
+
+Converters/IntToStringConverter.cs
+  整数转字符串。
+
+Converters/InvertBooleanOrExpressionMultiConverter.cs
+  多布尔值“或”后取反。
+
+Converters/KeyValuePairToValueConverter.cs
+  键值对取值。
+
+Converters/MiniInfoGuidToMiniInfoProviderElementMultiConverter.cs
+  迷你信息 ID 到显示元素的多值转换。
+
+Converters/MiniInfoGuidToMiniInfoProviderMultiConverter.cs
+  迷你信息 ID 到提供方的多值转换。
+
+Converters/MultipleDateSelectorDayConverter.cs
+  多日期选择器日期状态转换。
+
+Converters/NotificationModeToIntConverter.cs
+  通知模式与整数互转。
+
+Converters/NumberToDoubleValidativeValueConverter.cs
+  数值转有效 double（过滤 NaN）。
+
+Converters/PreventNullConverter.cs
+  空值回退转换。
+
+Converters/RippleEffectTranslationConverter.cs
+  波纹特效位移转换。
+
+Converters/SecondsToFormatTimeConverter.cs
+  秒数转格式化时间。
+
+Converters/SecondsToFormatTimeMultiConverter.cs
+  秒数多值转格式化时间。
+
+Converters/SizeDoubleToCornerRadiusConverter.cs
+  尺寸转圆角半径。
+
+Converters/SolidColorBrushOpacityConverter.cs
+  画刷透明度调整。
+
+Converters/SolidColorBrushToColorConverter.cs
+  画刷转颜色。
+
+Converters/StringColorHexToSolidBrushConverter.cs
+  颜色字符串转画刷。
+
+Converters/StringConnectConverter.cs
+  字符串拼接。
+
+Converters/StringToRadioButtonSelectionConverter.cs
+  字符串与单选按钮选中状态互转。
+
+Converters/SubjectIconSourceConverter.cs
+  科目图标源转换。
+
+Converters/SubjectIdToSubjectConverter.cs
+  科目 ID 转科目对象。
+
+Converters/SubjectLocationDisplayConverter.cs
+  科目地点显示格式化。
+
+Converters/SubjectsDictionaryValueAccessConverter.cs
+  按 Guid 访问科目字典。
+
+Converters/TempClassPlanGroupTypeToIntConverter.cs
+  临时课表组类型与整数互转。
+
+Converters/TimeLongToPercentMultiConverter.cs
+  时间长度转百分比。
+
+Converters/TimeSpanDeltaToCanvasPosConverter.cs
+  时间差转画布坐标。
+
+Converters/TimeSpanToCanvasPosConverter.cs
+  时间转画布坐标。
+
+Converters/TimeTypeToIconGlyphConverter.cs
+  时间段类型转图标字形。
+
+Converters/TimeTypeToTimeTypeNameConverter.cs
+  时间段类型转显示名称。
+
+Converters/ValuesToValueTupleMultiConverter.cs
+  多值转 ValueTuple。
+
+Converters/WeekIndexToWeekStringConverter.cs
+  周索引转星期字符串。
+
+Converters/WidthDoubleToRectConverter.cs
+  宽度转矩形。
+
+（十三）Enums（枚举）
+----------------------
+
+Enums/ApplicationLifetime.cs
+  应用生命周期阶段。
+
+Enums/AttachedSettingsControlState.cs
+  附加设置控件状态。
+
+Enums/AttachedSettingsTargets.cs
+  附加设置可应用的目标类型。
+
+Enums/OSPlatform.cs
+  操作系统平台标识。
+
+Enums/PluginLoadStatus.cs
+  插件加载状态。
+
+Enums/RulesetLogicalMode.cs
+  规则组逻辑模式（与/或）。
+
+Enums/Metadata/Announcement/ReadStateStorageScope.cs
+  公告已读状态存储范围。
+
+Enums/Metadata/Announcement/Severity.cs
+  公告严重程度。
+
+Enums/Notification/NotificationState.cs
+  通知状态。
+
+Enums/Profile/ProfileTransferProviderType.cs
+  档案迁移提供方类型。
+
+Enums/SettingsWindow/SettingsPageCategory.cs
+  设置页分类。
+
+Enums/SettingsWindow/SettingsWindowNavigationExtraData.cs
+  设置窗口导航附加数据。
+
+Enums/Tutorial/TutorialActionKind.cs
+  教程操作类型。
+
+Enums/UI/IconBitmapRenderMode.cs
+  图标位图渲染模式。
+
+Enums/UI/MainWindowBackgroundMaterialType.cs
+  主窗口背景材质类型。
+
+Enums/UI/ViewActivationPreference.cs
+  视图激活偏好。
+
+Enums/Updating/DeployMethod.cs
+  更新部署方式。
+
+（十四）Themes（主题与样式资源）
+--------------------------------
+
+Themes/ChipListBox.axaml
+  Chip 风格列表样式。
+
+Themes/ComponentsPanelStyles.axaml
+  组件面板样式。
+
+Themes/Generic.axaml
+  通用控件样式。
+
+Themes/Layers.axaml
+  层级/浮层样式。
+
+Themes/MenuItemStyles.axaml
+  菜单项样式。
+
+Themes/MyNavigationPageStyles.axaml
+  导航页面样式。
+
+Themes/MyTeachingTipStyles.axaml
+  TeachingTip 样式。
+
+Themes/NativeMenuIconsStyle.cs
+  原生菜单图标样式。
+
+Themes/NavigationBackButton.axaml
+  导航返回按钮样式。
+
+Themes/PlatformFeedbackStyles.axaml
+  平台反馈/按压效果样式。
+
+Themes/PopupAnimations.axaml
+  Popup 动画定义。
+
+Themes/PopupBaseStyles.axaml
+  Popup 基础样式。
+
+Themes/RichTextStyles.axaml
+  富文本样式。
+
+Themes/SlidingListBox.axaml
+  滑动列表样式。
+
+Themes/StackPanelIntroAnimation.axaml
+  StackPanel 入场动画资源。
+
+Themes/TabControlWithBarrier.axaml
+  带屏障的 TabControl 样式。
+
+Themes/TabStrip.axaml
+  TabStrip 样式。
+
+Themes/TextBaselineFixes.axaml
+  文本基线修复样式。
+
+Themes/TextSelectionHandle.axaml
+  文本选择手柄样式。
+
+Themes/Utils.axaml
+  主题工具类/附加资源。
+
+Themes/WrapPanelResizingAnimation.axaml
+  WrapPanel 尺寸动画资源。
+
+（十五）ClassIsland.Core 的 Assets 与文档
+----------------------------------------
+
+ClassIsland.Core/Assets/Fonts/FluentSystemIcons-Resizable.json、.ttf
+  Fluent System Icons 字体及图标名称/码点映射，供 IconsMappingGenerator 生成常量。
+
+ClassIsland.Core/Assets/Fonts/lucide.json、lucide.ttf
+  Lucide 图标字体及映射。
+
+ClassIsland.Core/Assets/Fonts/SF-Symbols.ttf
+  macOS SF Symbols 字体。
+
+ClassIsland.Core/LICENSE.txt
+  核心库许可证说明。
+
+ClassIsland.Core/README.md
+  核心库说明。
+
+十六、ClassIsland（应用主体）根文件
+------------------------------------
+
+ClassIsland 是应用主体项目，包含 Avalonia 界面、业务服务、视图/ViewModel、组件、通知、
+自动化、日志、更新、插件宿主等全部实现。桌面和 Android 宿主都引用它。
+
+ClassIsland/ClassIsland.csproj
+  应用主体项目文件。OutputType=Library，目标 net10.0；引用 Core、Shared、Shared.IPC、
+  平台抽象、所有平台实现（按条件）、Avalonia、FluentAvalonia、Sentry、SoundFlow、
+  EdgeTtsSharp、OpenCvSharp 插件依赖等；配置资源打包、MSIX、插件输出和 Android 复用。
+
+ClassIsland/App.axaml
+  应用级 XAML：合并主题资源字典、定义全局样式、数据模板、转换器与字体资源。
+
+ClassIsland/App.axaml.cs
+  应用生命周期核心：初始化 DI 容器、加载设置与档案、启动/停止服务、创建主窗口、
+  处理全局异常、更新检查、插件加载与退出流程。
+
+ClassIsland/App.Services.xaml.cs
+  服务注册入口：把服务、ViewModel、设置页、组件、行动、触发器、通知提供方、
+  规则、教程、语音、主题、IPC 等注册到 Microsoft.Extensions.DependencyInjection。
+
+ClassIsland/MainWindow.axaml
+  主窗口界面：无边框窗口、课程主界面、组件容器、编辑模式、抽屉、Toast、遮罩层等。
+
+ClassIsland/MainWindow.axaml.cs
+  主窗口逻辑：窗口尺寸/位置/层级、主界面组件加载、编辑模式、全屏、点击穿透、
+  显示隐藏动画、系统事件响应。
+
+ClassIsland/MainWindow.VisibilityAnimation.cs
+  主窗口显示/隐藏动画的分部实现（淡入淡出、位移）。
+
+ClassIsland/Program.cs
+  主程序入口：解析命令行、注册 JSON 转换器、单实例 Mutex、Sentry 初始化、
+  MoonSharp 脚本环境初始化，返回 App 工厂给 Avalonia 生命周期。
+
+ClassIsland/PluginLoadContext.cs
+  插件 AssemblyLoadContext：按插件目录解析依赖、隔离插件程序集；
+  macOS/Android 使用 MonoPluginAssemblyResolver 兼容 Mono 加载方式。
+
+ClassIsland/OverlayAssetLoader.cs
+  Avalonia 资源加载器包装：允许用本地目录/程序集资源覆盖内置 avares 资源，
+  用于主题、图标和调试时的资源热替换；含 AssetOverride 记录。
+
+ClassIsland/RegistryNotifier.cs
+  Windows 注册表变更监听封装（RegNotifyChangeKeyValue），用于监听系统主题色等变化。
+
+ClassIsland/AccentColorPicker.cs
+  系统强调色选择器占位/预留实现（当前为空类）。
+
+ClassIsland/ColorOctTreeNode.cs
+  八叉树颜色量化节点（用于从壁纸提取主题色）；当前整体位于 #if false 中，为历史实现。
+
+ClassIsland/GlobalUsing.cs
+  全局 using 声明，统一常用命名空间。
+
+ClassIsland/AssemblyInfo.cs
+  应用主体程序集元数据。
+
+十七、ClassIsland/Services（业务服务）
+--------------------------------------
+
+Services 目录实现 Core 中定义的各服务接口，是应用运行的核心业务层。
+
+（一）Services 根目录
+--------------------
+
+Services/ActionService.cs
+  行动服务：执行/回滚自动化行动集，跟踪执行进度与结果。
+
+Services/AttachedSettingsHostService.cs
+  附加设置宿主：登记各类型对象可用的附加设置控件，按对象类型查找设置界面。
+
+Services/AudioService.cs
+  音频服务：初始化音频播放设备、缓存音效、播放提醒音与试听。
+
+Services/AuthorizeService.cs
+  认证服务：保存/校验管理密码或认证凭据，控制敏感操作权限。
+
+Services/AutomationService.cs
+  自动化服务：加载/保存自动化配置，管理触发器生命周期，按规则触发行动集。
+
+Services/BootService.cs
+  启动托管服务：应用启动后显示主窗口，是 IHostedService 的启动入口。
+
+Services/ComponentsService.cs
+  组件服务：读写主界面组件布局（ComponentProfile）、组件设置、当前配置路径，
+  处理组件增删与迁移。
+
+Services/ConsoleService.cs
+  控制台服务：输出 ASCII Logo、版本信息和彩色启动信息。
+
+Services/DiagnosticService.cs
+  诊断服务：收集运行环境、插件、日志、系统信息，生成诊断包/报告供反馈问题使用。
+
+Services/ExactTimeService.cs
+  精确时间服务：提供系统时间、NTP 校时、时间偏移和定时刷新。
+
+Services/FileFolderService.cs
+  目录初始化托管服务：启动时创建配置、缓存、临时、更新、语音缓存等目录。
+
+Services/FooService.cs
+  IPC 示例服务实现，用于验证 IPC 框架（对应 IFooService）。
+
+Services/HangService.cs
+  卡顿检测服务：监控 UI 线程/主循环响应，记录卡顿并触发恢复提示。
+
+Services/IpcService.cs
+  IPC 服务端：启动命名管道 ClassIsland.IPC.v2.Server，注册公共课程/档案/导航服务代理，
+  处理外部程序请求。
+
+Services/LessonsService.cs
+  课程服务核心：根据档案和时间表计算当前课程、下一课程、时间状态，
+  维护计时器并发出上课/课间/放学/时间点事件；含 ScheduleItemSubscription。
+
+Services/MemoryWatchDogService.cs
+  内存看门狗：每分钟检查内存占用，超过约 1.5GB 时记录日志并重启应用，防止内存泄漏。
+
+Services/MiniInfoProviderHostService.cs
+  迷你信息提供方宿主：注册/管理主界面迷你信息提供方，按设置显示。
+
+Services/NotificationHostService.cs
+  通知主机：接收通知请求、排队、创建播放会话、选择提供方并显示通知。
+
+Services/NotificationWorkerService.cs
+  通知工作器：后台准备通知内容、播放提示音/语音、处理通知生命周期。
+
+Services/PluginDependencyService.cs
+  插件依赖服务：首次加载时按需下载插件所需原生依赖/识别模型并缓存到 PluginDependencies。
+
+Services/PluginMarketService.cs
+  插件市场服务：获取市场索引、下载/安装/更新插件、校验包完整性。
+
+Services/PluginService.cs
+  插件服务：扫描插件目录、读取 manifest、创建加载上下文、加载/卸载/启停插件，
+  维护插件列表和加载状态。
+
+Services/ProfileAnalyzeService.cs
+  档案分析服务：分析课表、时间表、科目之间的引用关系，找出孤立/缺失对象。
+
+Services/ProfileService.cs
+  档案服务：加载/保存/切换课表档案，监听变更并自动保存，提供当前 Profile。
+
+Services/ProfileService.Migrations.cs
+  档案迁移分部实现：把旧版本档案结构升级到当前版本。
+
+Services/RefreshingService.cs
+  欢迎/刷新提示服务：根据上次启动时间和设置显示“欢迎回来/新学期”提示。
+
+Services/RulesetService.cs
+  规则集服务：注册规则类型，按规则组逻辑模式判断当前是否满足条件并发出变更事件。
+
+Services/SettingsService.cs
+  设置服务：加载/保存应用设置（Settings），提供默认值、变更通知和配置错误处理。
+
+Services/SplashService.cs
+  启动画面服务：显示/更新/关闭启动 Splash 窗口。
+
+Services/TaskBarIconService.cs
+  任务栏/托盘图标服务：创建托盘图标、菜单，处理显示主窗口与退出。
+
+Services/ThemeService.cs
+  主题服务：管理明暗主题、主题色、背景材质，并响应系统主题变化。
+
+Services/TutorialService.cs
+  教程服务：加载教程脚本、逐步执行教程、管理教程遮罩与完成状态。
+
+Services/UriNavigationService.cs
+  URI 导航服务：解析 classisland:// 链接并打开对应设置页/操作。
+
+Services/WallpaperPickingService.cs
+  壁纸取色服务（Windows，当前位于 #if false）：从桌面壁纸提取主题色；保留历史实现。
+
+Services/WeatherService.cs
+  天气服务：定位、调用天气 API、缓存结果、生成天气预警。
+
+Services/WindowRuleService.cs
+  窗口规则服务：监听前台窗口变化，判断窗口标题/进程是否满足规则，供自动化使用。
+
+Services/XamlThemeService.cs
+  XAML 主题服务：安装/切换/卸载主题包，合并主题资源。
+
+（二）Services/AppUpdating
+--------------------------
+
+Services/AppUpdating/UpdateService.cs
+  更新服务：检查新版本、选择更新通道/镜像、下载更新包、校验并部署更新。
+
+（三）Services/Automation/Actions
+---------------------------------
+
+Services/Automation/Actions/AppQuitAction.cs
+  自动化行动：退出应用。
+
+Services/Automation/Actions/AppRestartAction.cs
+  自动化行动：重启应用。
+
+Services/Automation/Actions/ModifyAppSettingsAction.cs
+  自动化行动：修改应用设置项。
+
+Services/Automation/Actions/NotificationAction.cs
+  自动化行动：发送通知。
+
+Services/Automation/Actions/RunAction.cs
+  自动化行动：运行程序/命令。
+
+Services/Automation/Actions/SleepAction.cs
+  自动化行动：延时等待。
+
+Services/Automation/Actions/WeatherNotificationAction.cs
+  自动化行动：发送天气通知。
+
+（四）Services/Automation/Triggers
+----------------------------------
+
+Services/Automation/Triggers/AppStartupTrigger.cs
+  触发器：应用启动时触发。
+
+Services/Automation/Triggers/AppStoppingTrigger.cs
+  触发器：应用退出时触发。
+
+Services/Automation/Triggers/CronTrigger.cs
+  触发器：按 Cron 表达式定时触发。
+
+Services/Automation/Triggers/CurrentTimeStateChangedTrigger.cs
+  触发器：当前时间状态（上课/课间/放学等）变化时触发。
+
+Services/Automation/Triggers/OnAfterSchoolTrigger.cs
+  触发器：放学时触发。
+
+Services/Automation/Triggers/OnBreakingTimeTrigger.cs
+  触发器：课间开始时触发。
+
+Services/Automation/Triggers/OnClassTrigger.cs
+  触发器：上课时触发。
+
+Services/Automation/Triggers/PreTimePointTrigger.cs
+  触发器：时间点前若干分钟触发。
+
+Services/Automation/Triggers/RulesetChangedTrigger.cs
+  触发器：规则集满足状态变化时触发。
+
+Services/Automation/Triggers/SignalTrigger.cs
+  触发器：收到指定信号时触发（供 IPC/插件调用）。
+
+Services/Automation/Triggers/SignalTriggerHandlerService.cs
+  信号触发器处理服务：维护信号名称与订阅关系。
+
+Services/Automation/Triggers/TrayMenuTrigger.cs
+  触发器：点击托盘菜单项时触发。
+
+Services/Automation/Triggers/TrayMenuTriggerHandlerService.cs
+  托盘菜单触发器处理服务：动态生成托盘菜单并分发点击。
+
+Services/Automation/Triggers/UriTrigger.cs
+  触发器：访问特定 classisland:// URI 时触发。
+
+Services/Automation/Triggers/UriTriggerHandlerService.cs
+  URI 触发器处理服务：解析 URI 并匹配触发器。
+
+（五）Services/Logging
+----------------------
+
+Services/Logging/AppLogger.cs
+  应用日志器：实现 ILogger，把日志写入应用日志服务并附加分类/作用域信息。
+
+Services/Logging/AppLoggerProvider.cs
+  AppLogger 的 ILoggerProvider。
+
+Services/Logging/AppLogService.cs
+  应用日志服务：维护内存日志集合、日志文件、日志级别和脱敏规则。
+
+Services/Logging/AvaloniaLoggingSink.cs
+  Avalonia 日志接收器：把 Avalonia 内部日志转发到应用日志。
+
+Services/Logging/ClassIslandConsoleFormatter.cs
+  控制台日志格式化器：彩色输出时间、级别、分类和消息。
+
+Services/Logging/FileLogger.cs
+  文件日志器：把日志写入滚动日志文件。
+
+Services/Logging/FileLoggerProvider.cs
+  FileLogger 的 ILoggerProvider。
+
+Services/Logging/SentryEventLogger.cs
+  Sentry 事件日志器：把错误/异常上报到 Sentry。
+
+Services/Logging/SentryLoggerProvider.cs
+  Sentry 日志器的 ILoggerProvider。
+
+（六）Services/Management
+-------------------------
+
+Services/Management/ManagementServerConnection.cs
+  集控服务器连接实现：gRPC 连接、注册客户端、心跳、上报状态、接收服务器命令。
+
+Services/Management/ManagementService.cs
+  集控服务：管理集控配置、策略、认证、客户端生命周期和集控通知。
+
+Services/Management/ServerlessConnection.cs
+  无服务器/离线模式连接实现：不连接集控服务器时的回退。
+
+（七）Services/Metadata
+-----------------------
+
+Services/Metadata/AnnouncementService.cs
+  公告服务：拉取/缓存公告，维护已读状态，向界面提供公告列表。
+
+（八）Services/NotificationProviders
+------------------------------------
+
+Services/NotificationProviders/ActionNotificationProvider.cs
+  通知提供方：显示自动化行动通知。
+
+Services/NotificationProviders/AfterSchoolNotificationProvider.cs
+  通知提供方：放学提醒。
+
+Services/NotificationProviders/ClassNotificationProvider.cs
+  通知提供方：上课/下课/预备铃提醒。
+
+Services/NotificationProviders/ManagementNotificationProvider.cs
+  通知提供方：显示集控服务器下发的通知。
+
+Services/NotificationProviders/WeatherNotificationProvider.cs
+  通知提供方：天气预警/天气提醒。
+
+（九）Services/PluginCompatibility
+----------------------------------
+
+Services/PluginCompatibility/PluginTypeCompatibility.cs
+  插件类型兼容性检查：对比插件引用的宿主类型与当前类型索引，检测 API 变更；
+  含 PluginCompatibilityResult、HostTypeIndex、NestedTypeInfo。
+
+（十）Services/SpeechService
+----------------------------
+
+Services/SpeechService/BlankSpeechService.cs
+  空语音服务：不发声的回退实现。
+
+Services/SpeechService/EdgeTtsPlayInfo.cs
+  Edge TTS 播放信息（文本、语音、语速等）。
+
+Services/SpeechService/EdgeTtsService.cs
+  基于 EdgeTtsSharp 的在线语音合成服务，含缓存目录管理。
+
+Services/SpeechService/GptSoVitsPlayInfo.cs
+  GPT-SoVITS 播放信息。
+
+Services/SpeechService/GPTSovitsSecrets.cs
+  GPT-SoVITS 密钥/地址配置。
+
+Services/SpeechService/GPTSovitsService.cs
+  GPT-SoVITS 语音合成服务。
+
+Services/SpeechService/SystemSpeechService.cs
+  系统语音合成服务（Windows SAPI 等）。
+
+（十一）Services/UI
+-------------------
+
+Services/UI/WindowViewHostProvider.cs
+  窗口视图宿主提供方：在独立窗口/抽屉中承载 View。
+
+（十二）Services/Weather
+------------------------
+
+Services/Weather/OpenMeteoCacheService.cs
+  Open-Meteo 天气缓存：按位置/参数缓存响应，减少 API 调用；含缓存条目模型。
+
+Services/Weather/OpenMeteoQuotaService.cs
+  Open-Meteo 配额管理：记录每日调用量并限制超额请求；含配额信息模型。
+
+十八、ClassIsland/Models（主项目数据模型）
+-------------------------------------------
+
+（一）Models 根目录
+------------------
+
+Models/Settings.cs
+  应用总设置模型：主界面、课程、通知、主题、更新、天气、插件、集控、调试等全部设置项。
+
+Models/Settings.RealtimeNotifications.cs
+  设置模型的实时通知分部类：实时通知开关与各提供方设置。
+
+Models/ApplicationCommand.cs
+  命令行/应用命令模型（命令名、参数、说明）。
+
+Models/AttachedSettingsNodeWithState.cs
+  带启用状态的附加设置节点。
+
+Models/ComponentSettingsPageDraggingContext.cs
+  组件设置页拖拽上下文：记录拖动来源、目标位置和插入方式。
+
+Models/ContributionLabel.cs
+  贡献类型标签（代码、文档、设计等）。
+
+Models/GitHubReleaseAssetInfo.cs
+  GitHub Release 附件信息（名称、下载地址、大小）。
+
+Models/GitHubReleaseInfo.cs
+  GitHub Release 信息（版本、说明、附件列表）。
+
+Models/GptSoVitsSpeechSettings.cs
+  GPT-SoVITS 语音合成设置。
+
+Models/HomeDateSelectionState.cs
+  主界面日期选择状态（当前选中日期、是否临时切换）。
+
+Models/IClassNotificationSettings.cs
+  课程通知设置接口。
+
+Models/IRealtimeNotificationSettings.cs
+  实时通知设置接口。
+
+Models/LessonDetails.cs
+  课程详情：科目、时间、教师、地点、进度等。
+
+Models/NugetLicenseInfo.cs
+  NuGet 依赖许可证信息。
+
+Models/ScheduleClassPosition.cs
+  课程在周课表中的位置记录（星期、节次）。
+
+Models/ScheduleWeekOccurrence.cs
+  某课表在周次中的出现记录。
+
+Models/Selectable.cs
+  可选中项包装（值 + 是否选中）。
+
+Models/SfSymbolIconKind.cs
+  SF Symbols 图标种类枚举。
+
+Models/UpdateChannel.cs
+  更新通道（稳定版、预览版等）。
+
+Models/UpdateSource.cs
+  更新源（GitHub、镜像等）。
+
+Models/WeatherMiniInfoProviderSettings.cs
+  天气迷你信息提供方设置。
+
+Models/WeekClassPlanRow.cs
+  周课表行模型（一天或一节课的显示数据）。
+
+Models/WizardOption.cs
+  向导选项模型。
+
+Models/WpfColor.cs
+  WPF 风格颜色兼容类型（ARGB 分量）。
+
+（二）Models/Actions（行动设置）
+-------------------------------
+
+Models/Actions/AppRestartActionSettings.cs
+  重启行动设置：重启参数、是否经启动器重启。
+
+Models/Actions/ModifyAppSettingsActionSettings.cs
+  修改设置行动设置：设置路径与目标值。
+
+Models/Actions/NotificationActionSettings.cs
+  通知行动设置：标题、正文、优先级、通道、时长。
+
+Models/Actions/RunActionSettings.cs
+  运行行动设置：命令、参数、工作目录、运行方式；含 RunActionRunType 枚举。
+
+Models/Actions/SleepActionSettings.cs
+  延时行动设置：等待时长。
+
+Models/Actions/WeatherNotificationActionSettings.cs
+  天气通知行动设置：通知内容与天气字段选择。
+
+（三）Models/AllContributors
+----------------------------
+
+Models/AllContributors/AllContributorsRc.cs
+  all-contributors 配置模型。
+
+Models/AllContributors/Contributor.cs
+  贡献者条目（用户名、贡献类型、头像等）。
+
+（四）Models/AppUpdating
+------------------------
+
+Models/AppUpdating/DeploymentLock.cs
+  更新部署锁：防止多个进程同时替换程序文件。
+
+Models/AppUpdating/DownloadTaskInfo.cs
+  下载任务信息：URL、目标文件、进度、速度、状态。
+
+（五）Models/AttachedSettings（附加设置模型）
+--------------------------------------------
+
+Models/AttachedSettings/AfterSchoolNotificationAttachedSettings.cs
+  放学提醒附加设置。
+
+Models/AttachedSettings/ClassNotificationAttachedSettings.cs
+  课程提醒附加设置。
+
+Models/AttachedSettings/RealtimeNotificationAttachedSettings.cs
+  实时通知附加设置。
+
+Models/AttachedSettings/TestAttachedSettings.cs
+  测试用附加设置。
+
+Models/AttachedSettings/WeatherNotificationAttachedSettings.cs
+  天气提醒附加设置。
+
+（六）Models/Authorize 与 AuthorizeProviderSettings
+---------------------------------------------------
+
+Models/Authorize/AuthorizeProviderDisplayingModel.cs
+  认证提供方展示模型（名称、说明、图标、控件）。
+
+Models/Authorize/Credential.cs
+  凭据模型：认证类型与凭据数据。
+
+Models/Authorize/CredentialItem.cs
+  单条凭据项（键、值、是否加密）。
+
+Models/Authorize/RequestValidateAuthorizationProviderEventArgs.cs
+  请求校验认证提供方的事件参数。
+
+Models/AuthorizeProviderSettings/PasswordAuthorizeSettings.cs
+  密码认证提供方设置（密码哈希、提示语等）。
+
+（七）Models/Automation/Triggers（触发器设置）
+----------------------------------------------
+
+Models/Automation/Triggers/CronTriggerSettings.cs
+  Cron 触发器设置：Cron 表达式与时区。
+
+Models/Automation/Triggers/PreTimePointTriggerSettings.cs
+  时间点前触发器设置：目标时间点与提前分钟数。
+
+Models/Automation/Triggers/SignalTriggerSettings.cs
+  信号触发器设置：信号名称。
+
+Models/Automation/Triggers/TrayMenuTriggerSettings.cs
+  托盘菜单触发器设置：菜单项名称/图标。
+
+Models/Automation/Triggers/UriTriggerSettings.cs
+  URI 触发器设置：匹配的 URI。
+
+（八）Models/ComponentSettings（内置组件设置）
+---------------------------------------------
+
+Models/ComponentSettings/ClockComponentSettings.cs
+  时钟组件设置：格式、显示秒、时区等。
+
+Models/ComponentSettings/CountDownComponentSettings.cs
+  倒计时组件设置：目标时间、标题、结束提示。
+
+Models/ComponentSettings/GroupComponentSettings.cs
+  分组组件设置：子组件与布局。
+
+Models/ComponentSettings/LessonControlSettings.cs
+  课程表组件设置：显示科目/教师/地点/进度、布局样式。
+
+Models/ComponentSettings/RollingComponentSettings.cs
+  滚动组件设置：滚动内容、速度、方向。
+
+Models/ComponentSettings/SlideComponentSettings.cs
+  轮播组件设置：多页内容与切换间隔。
+
+Models/ComponentSettings/StackComponentSettings.cs
+  堆叠组件设置：子组件排列方式。
+
+Models/ComponentSettings/TextComponentSettings.cs
+  文本组件设置：文本内容、字体、颜色、对齐。
+
+Models/ComponentSettings/WeatherComponentSettings.cs
+  天气组件设置：显示字段、城市、图标模板。
+
+（九）Models/Debugging、EventArgs、External
+------------------------------------------
+
+Models/Debugging/ConfigVariableItem.cs
+  调试配置变量项：变量名、类型、值；含 ConfigVariableKind 枚举。
+
+Models/EventArgs/MainWindowAnimationEventArgs.cs
+  主窗口动画事件参数。
+
+Models/EventArgs/MousePosChangedEventArgs.cs
+  鼠标位置变化事件参数。
+
+Models/EventArgs/RawInputEventArgs.cs
+  原始输入事件参数（键鼠/触摸）。
+
+Models/EventArgs/SeparatorLikeTimePointMovedEventArgs.cs
+  分割线式时间点移动事件参数。
+
+Models/EventArgs/SignalTriggerEventArgs.cs
+  信号触发器事件参数。
+
+Models/EventArgs/UriTriggerHandledEventArgs.cs
+  URI 触发器已处理事件参数。
+
+Models/External/ClassWidgets/CwProfile.cs
+  ClassWidgets 1.x 档案模型。
+
+Models/External/ClassWidgets/CwProfileTimeSpan.cs
+  ClassWidgets 时间段模型；含 TimeSpanType 枚举。
+
+Models/External/ClassWidgets/CwWidgetsProfile.cs
+  ClassWidgets 组件布局档案。
+
+Models/External/ClassWidgets/Cw2Profile.cs
+  ClassWidgets 2.x 档案模型；含元数据、科目、时间线、条目、覆盖项。
+
+（十）其余 Models 子目录
+------------------------
+
+Models/Ipc/IpcPeer.cs
+  IPC 对端信息（名称、连接状态、代理）。
+
+Models/Logging/LoggingScope.cs
+  日志作用域：附加到日志条目的键值上下文。
+
+Models/Notification/NotificationConsumerRegisterInfo.cs
+  通知消费者注册信息。
+
+Models/NotificationProviderSettings/AfterSchoolNotificationProviderSettings.cs
+  放学提醒提供方设置。
+
+Models/NotificationProviderSettings/ClassNotificationSettings.cs
+  课程提醒提供方设置（预备铃、上课、下课提示）。
+
+Models/NotificationProviderSettings/WeatherNotificationProviderSettings.cs
+  天气提醒提供方设置。
+
+Models/Plugins/DependencyNode.cs
+  插件依赖树节点。
+
+Models/Profile/ClassPlansTreeNode.cs
+  课表树节点（用于课表列表展示与分组）。
+
+Models/Profile/ProfileLoadException.cs
+  档案加载异常；含版本降级异常与读取异常。
+
+Models/Refreshing/RefreshingScopes.cs
+  刷新提示作用范围常量。
+
+Models/Rules/CurrentSubjectRuleSettings.cs
+  规则设置：当前科目匹配。
+
+Models/Rules/CurrentWeatherRuleSettings.cs
+  规则设置：当前天气匹配。
+
+Models/Rules/RainTimeRuleSettings.cs
+  规则设置：降雨时段匹配。
+
+Models/Rules/SunRiseSetRuleSettings.cs
+  规则设置：日出日落时间匹配。
+
+Models/Rules/TimeStateRuleSettings.cs
+  规则设置：时间状态匹配。
+
+Models/Rules/WindowStatusRuleSettings.cs
+  规则设置：前台窗口状态匹配。
+
+Models/Tutorial/TutorialSettings.cs
+  教程设置：是否已完成、已读步骤等。
+
+十九、ClassIsland/ViewModels（视图模型）
+-----------------------------------------
+
+（一）ViewModels 根目录
+-----------------------
+
+ViewModels/MainViewModel.cs
+  应用主 ViewModel：持有主窗口、主视图、设置、当前课程等全局状态。
+
+ViewModels/MainViewViewModel.cs
+  主界面 ViewModel：课程展示、组件加载、当前时间状态、日期切换。
+
+ViewModels/MainViewViewModel.Calendar.cs
+  主界面日历分部：月历/周历数据、日期选择。
+
+ViewModels/MainViewViewModel.ScheduleEditing.cs
+  主界面课表编辑分部：临时课表、换课、调课。
+
+ViewModels/MainViewViewModel.ScheduleWeek.cs
+  主界面周课表分部：周视图数据与切换。
+
+ViewModels/HomeCalendarDay.cs
+  主界面日历日记录（日期、课表、是否选中、事件标记）。
+
+ViewModels/AppLogsViewModel.cs
+  应用日志查看器 ViewModel：过滤、搜索、导出日志。
+
+ViewModels/AuthorizeViewModel.cs
+  认证对话框 ViewModel：输入/校验凭据。
+
+ViewModels/ClassChangingViewModel.cs
+  换课/调课 ViewModel。
+
+ViewModels/ClassPlanDetailsViewModel.cs
+  课表详情 ViewModel：课程列表、时间表、科目信息。
+
+ViewModels/ConfigErrorsViewModel.cs
+  配置错误列表 ViewModel：显示读取失败的配置文件与原因。
+
+ViewModels/DataTransferViewModel.cs
+  数据迁移/导入导出 ViewModel。
+
+ViewModels/DevPortalViewModel.cs
+  开发者门户 ViewModel：调试工具、日志、配置、插件信息。
+
+ViewModels/DevPortalViewModel.FontProbe.cs
+  开发者门户字体探测分部：枚举字体并预览。
+
+ViewModels/JoinManagementViewModel.cs
+  加入集控 ViewModel：输入服务器地址/凭据并连接。
+
+ViewModels/ProfileEntry.cs
+  档案下拉项（档案路径、名称、是否当前）。
+
+ViewModels/ProfileRecoveryViewModel.cs
+  档案恢复 ViewModel：列出可用备份并恢复。
+
+ViewModels/ProfileSettingsViewModel.cs
+  档案设置 ViewModel：课表/时间表/科目管理入口。
+
+ViewModels/ProfileSettingsViewModel.Debug.cs
+  档案设置调试分部：导出原始 JSON、模拟数据。
+
+ViewModels/ProfileSettingsViewModel.ScheduleWeek.cs
+  档案设置周课表分部。
+
+ViewModels/RecoveryViewModel.cs
+  恢复模式主 ViewModel：配置损坏时的恢复选项。
+
+ViewModels/ScheduleAdjustmentViewModel.cs
+  课表调整 ViewModel（临时换课/调休）。
+
+ViewModels/ScreenshotHelperViewModel.cs
+  截图助手 ViewModel：窗口列表、截图区域；含 WindowInfo。
+
+ViewModels/SettingsNewViewModel.cs
+  新版设置窗口 ViewModel：导航、搜索、页面栈。
+
+ViewModels/TimeAdjustmentViewModel.cs
+  时间调整 ViewModel：临时提前/延后时间表。
+
+ViewModels/TimeRuleEditViewModel.cs
+  时间规则编辑 ViewModel。
+
+ViewModels/TopmostEffectWindowViewModel.cs
+  置顶强调特效窗口 ViewModel。
+
+ViewModels/TutorialCenterViewModel.cs
+  教程中心 ViewModel：教程列表与进度。
+
+ViewModels/TutorialEditorViewModel.cs
+  教程编辑器 ViewModel：编辑教程步骤与文案。
+
+ViewModels/WeekOffsetSettingsControlViewModel.cs
+  周次偏移设置控件 ViewModel。
+
+ViewModels/WelcomeViewModel.cs
+  欢迎向导 ViewModel：首次启动配置流程。
+
+ViewModels/WindowRuleDebugViewModel.cs
+  窗口规则调试 ViewModel：查看前台窗口与规则匹配结果。
+
+ViewModels/WindowsPickerViewModel.cs
+  窗口选择器 ViewModel：枚举窗口并选择。
+
+（二）ViewModels/EditMode
+-------------------------
+
+ViewModels/EditMode/EditModeViewModel.cs
+  主界面编辑模式 ViewModel：组件拖动、缩放、添加/删除。
+
+（三）ViewModels/MainViewParts
+------------------------------
+
+ViewModels/MainViewParts/CourseEditViewModel.cs
+  课程编辑 ViewModel。
+
+ViewModels/MainViewParts/CourseInfoViewModel.cs
+  课程信息 ViewModel。
+
+ViewModels/MainViewParts/ImportExportProviderViewModel.cs
+  单个导入/导出提供方的 ViewModel。
+
+ViewModels/MainViewParts/ImportExportViewModel.cs
+  导入导出 ViewModel；含 ProviderGroup 分组记录。
+
+ViewModels/MainViewParts/ProfileManagementViewModel.cs
+  档案管理 ViewModel：新建、复制、删除、切换档案。
+
+ViewModels/MainViewParts/SubjectEditViewModel.cs
+  科目编辑 ViewModel。
+
+ViewModels/MainViewParts/SubjectManagementViewModel.cs
+  科目管理 ViewModel。
+
+ViewModels/MainViewParts/SubjectPickerViewModel.cs
+  科目选择器 ViewModel。
+
+（四）ViewModels/RecoveryPages
+------------------------------
+
+ViewModels/RecoveryPages/RecoverBackupViewModel.cs
+  从备份恢复配置的 ViewModel。
+
+（五）ViewModels/SettingsPages
+------------------------------
+
+ViewModels/SettingsPages/AdvancedSettingsViewModel.cs
+  高级设置页 ViewModel。
+
+ViewModels/SettingsPages/AppearanceSettingsViewModel.cs
+  外观设置页 ViewModel：主题、缩放、字体。
+
+ViewModels/SettingsPages/AutomationSettingsPageViewModel.cs
+  自动化设置页 ViewModel：触发器/行动编辑。
+
+ViewModels/SettingsPages/ClockSettingsViewModel.cs
+  时钟设置页 ViewModel。
+
+ViewModels/SettingsPages/ComponentsSettingsViewModel.cs
+  组件设置页 ViewModel。
+
+ViewModels/SettingsPages/ConfigDebugSettingsViewModel.cs
+  配置调试设置页 ViewModel。
+
+ViewModels/SettingsPages/DebugPageViewModel.cs
+  调试页 ViewModel。
+
+ViewModels/SettingsPages/ErrorSettingsViewModel.cs
+  错误/诊断设置页 ViewModel。
+
+ViewModels/SettingsPages/GeneralSettingsViewModel.cs
+  常规设置页 ViewModel。
+
+ViewModels/SettingsPages/ManagementCredentialsSettingsViewModel.cs
+  集控凭据设置页 ViewModel。
+
+ViewModels/SettingsPages/ManagementPolicySettingsViewModel.cs
+  集控策略设置页 ViewModel。
+
+ViewModels/SettingsPages/ManagementSettingsViewModel.cs
+  集控设置页 ViewModel。
+
+ViewModels/SettingsPages/NotificationSettingsViewModel.cs
+  通知设置页 ViewModel。
+
+ViewModels/SettingsPages/PluginsSettingsPageViewModel.cs
+  插件设置页 ViewModel：插件列表、安装、更新。
+
+ViewModels/SettingsPages/RealtimeNotificationSettingsViewModel.cs
+  实时通知设置页 ViewModel。
+
+ViewModels/SettingsPages/RefreshingSettingsViewModel.cs
+  刷新/欢迎提示设置页 ViewModel。
+
+ViewModels/SettingsPages/StorageSettingsViewModel.cs
+  存储设置页 ViewModel：缓存、日志、数据目录清理。
+
+ViewModels/SettingsPages/ThemesSettingsViewModel.cs
+  主题设置页 ViewModel：明暗、主题色、背景材质、XAML 主题。
+
+ViewModels/SettingsPages/UpdateSettingsViewModel.cs
+  更新设置页 ViewModel：通道、镜像、自动更新。
+
+ViewModels/SettingsPages/WeatherSettingsViewModel.cs
+  天气设置页 ViewModel：定位、城市、API、提醒。
+
+ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs
+  天气详情页 ViewModel：逐日/逐小时/空气质量数据；含 OmMetricItem、OmHourItem、
+  OmMinutelyItem、OmAqiItem、OmDayItem。
+
+ViewModels/SettingsPages/WindowSettingsViewModel.cs
+  窗口设置页 ViewModel：置顶、透明、点击穿透、全屏。
+
+二十、ClassIsland/Views（窗口与页面）
+--------------------------------------
+
+Views 目录存放所有 Avalonia 窗口、主界面部分、设置页、欢迎向导和恢复页面。
+每个 `.axaml` 是界面布局，对应 `.axaml.cs` 是后台代码；下面成对说明。
+
+（一）Views 根目录
+------------------
+
+Views/MainView.axaml / MainView.axaml.cs
+  主界面视图：课程信息、组件容器、日历、迷你信息、编辑模式入口。
+
+Views/AppLogsWindow.axaml / .axaml.cs
+  应用日志窗口：日志列表、级别过滤、搜索、复制/导出。
+
+Views/AuthorizeWindow.axaml / .axaml.cs
+  认证窗口：输入密码/凭据并校验。
+
+Views/ClassChangingWindow.axaml / .axaml.cs
+  换课窗口：选择临时课表或调整当前课程。
+
+Views/ClassPlanDetailsWindow.axaml / .axaml.cs
+  课表详情窗口：查看/编辑某份课表的课程列表。
+
+Views/ClassPlanTreeDropHandler.cs
+  课表树拖放处理：把课表拖入分组/调整顺序；含 ClassPlanDropTarget。
+
+Views/ClearNotificationButtonWindow.xaml.cs
+  清除通知按钮窗口后台（无独立 axaml，界面在资源中定义）。
+
+Views/ConfigErrorsWindow.xaml.cs
+  配置错误窗口后台：展示配置读取失败详情。
+
+Views/CrashWindow.axaml / .axaml.cs
+  崩溃窗口：显示崩溃原因、日志位置和重启/退出操作。
+
+Views/DataTransferPage.axaml / .axaml.cs
+  数据迁移页面：选择导入/导出提供方并执行。
+
+Views/DataTransferWindow.axaml / .axaml.cs
+  数据迁移窗口：承载 DataTransferPage。
+
+Views/DevPortalWindow.axaml / .axaml.cs
+  开发者门户窗口：调试工具、日志、配置、字体探测、插件信息。
+
+Views/ExcelExportWindow.xaml.cs
+  Excel 导出窗口后台。
+
+Views/ExcelImportWindow.xaml.cs
+  Excel 导入窗口后台。
+
+Views/FeatureDebugWindow.xaml.cs
+  功能调试窗口后台（内部测试入口）。
+
+Views/InstanceExistedWindow.xaml.cs
+  “实例已存在”提示窗口后台。
+
+Views/MveBigImageTestView.axaml / .axaml.cs
+  大图渲染测试视图（开发调试用）。
+
+Views/MveTestView.axaml / .axaml.cs
+  主视图渲染测试视图（开发调试用）。
+
+Views/ProfileRecoveryWindow.axaml / .axaml.cs
+  档案恢复窗口：从备份/历史档案恢复。
+
+Views/ProfileSettingsWindow.axaml / .axaml.cs
+  档案设置窗口：课表、时间表、科目、周次管理；含撤销记录 UndoEntry。
+
+Views/RecoveryWindow.axaml / .axaml.cs
+  恢复模式窗口：配置损坏时选择修复/重置/导入。
+
+Views/RefreshingScopesConfigDialog.axaml / .axaml.cs
+  刷新提示范围配置对话框。
+
+Views/ScheduleItemDataGridDropHandler.cs
+  日程项 DataGrid 拖放处理。
+
+Views/ScreenshotHelperWindow.axaml / .axaml.cs
+  截图助手窗口：选择窗口/区域截图。
+
+Views/SettingsWindowNew.axaml / .axaml.cs
+  新版设置窗口：导航、搜索、页面容器。
+
+Views/SplashView.axaml / .axaml.cs
+  启动画面视图（内容层）。
+
+Views/SplashWindow.axaml / .axaml.cs
+  启动画面窗口（无边框、居中）。
+
+Views/SubjectDataGridDropHandler.cs
+  科目 DataGrid 拖放处理。
+
+Views/TimeAdjustmentWindow.axaml / .axaml.cs
+  时间调整窗口：临时提前/延后时间表。
+
+Views/TopmostEffectWindow.axaml / .axaml.cs
+  置顶强调特效窗口。
+
+Views/TutorialCenterWindow.axaml / .axaml.cs
+  教程中心窗口。
+
+Views/TutorialControllerWindow.axaml / .axaml.cs
+  教程控制窗口：遮罩、步骤提示、下一步/跳过。
+
+Views/TutorialEditorDragDropHandler.cs
+  教程编辑器拖放处理。
+
+Views/TutorialEditorWindow.axaml / .axaml.cs
+  教程编辑器窗口。
+
+Views/TutorialScriptEditWindow.axaml / .axaml.cs
+  教程脚本编辑窗口。
+
+Views/UpdateProgressWindow.xaml.cs
+  更新进度窗口后台：下载/部署进度。
+
+Views/WallpaperPreviewWindow.xaml.cs
+  壁纸预览窗口后台。
+
+Views/WelcomeWindow.axaml / .axaml.cs
+  欢迎向导窗口。
+
+Views/WindowRuleDebugWindow.axaml / .axaml.cs
+  窗口规则调试窗口。
+
+Views/WindowsPicker.xaml.cs
+  窗口选择器后台。
+
+（二）Views/MainViewParts
+-------------------------
+
+Views/MainViewParts/CourseEditView.axaml / .axaml.cs
+  课程编辑视图。
+
+Views/MainViewParts/CourseInfoView.axaml / .axaml.cs
+  课程信息视图。
+
+Views/MainViewParts/ImportExportProviderView.axaml / .axaml.cs
+  单个导入/导出提供方视图。
+
+Views/MainViewParts/ImportExportView.axaml / .axaml.cs
+  导入/导出视图。
+
+Views/MainViewParts/ProfileManagementView.axaml / .axaml.cs
+  档案管理视图。
+
+Views/MainViewParts/ScheduleModeView.axaml / .axaml.cs
+  课表模式切换视图（经典/日程表 V2）。
+
+Views/MainViewParts/SubjectEditView.axaml / .axaml.cs
+  科目编辑视图。
+
+Views/MainViewParts/SubjectManagementView.axaml / .axaml.cs
+  科目管理视图。
+
+Views/MainViewParts/SubjectPickerView.axaml / .axaml.cs
+  科目选择视图。
+
+（三）Views/RecoveryPages
+-------------------------
+
+Views/RecoveryPages/HomePage.axaml / .axaml.cs
+  恢复模式首页：说明问题并提供恢复入口。
+
+Views/RecoveryPages/RecoverBackupPage.axaml / .axaml.cs
+  备份恢复页面。
+
+（四）Views/SettingPages
+------------------------
+
+Views/SettingPages/AdvancedSettingsPage.axaml / .axaml.cs
+  高级设置页。
+
+Views/SettingPages/AppearanceSettingsPage.axaml / .axaml.cs
+  外观设置页。
+
+Views/SettingPages/AutomationSettingsPage.axaml / .axaml.cs
+  自动化设置页。
+
+Views/SettingPages/ClockSettingsPage.axaml / .axaml.cs
+  时钟设置页。
+
+Views/SettingPages/ComponentsSettingsPage.axaml / .axaml.cs
+  组件设置页。
+
+Views/SettingPages/ComponentsSettingsPageDropHandler.cs
+  组件设置页拖放处理。
+
+Views/SettingPages/ConfigDebugSettingsPage.axaml / .axaml.cs
+  配置调试设置页。
+
+Views/SettingPages/DebugBrushesSettingsPage.xaml.cs
+  画刷调试设置页后台。
+
+Views/SettingPages/DebugPage.axaml / .axaml.cs
+  调试页面。
+
+Views/SettingPages/ErrorSettingsPage.axaml / .axaml.cs
+  错误/诊断设置页。
+
+Views/SettingPages/GeneralSettingsPage.axaml / .axaml.cs
+  常规设置页。
+
+Views/SettingPages/ManagementCredentialsSettingsPage.axaml / .axaml.cs
+  集控凭据设置页。
+
+Views/SettingPages/ManagementPolicySettingsPage.axaml / .axaml.cs
+  集控策略设置页。
+
+Views/SettingPages/ManagementSettingsPage.axaml / .axaml.cs
+  集控设置页。
+
+Views/SettingPages/NotificationSettingsPage.axaml / .axaml.cs
+  通知设置页。
+
+Views/SettingPages/PluginsSettingsPage.axaml / .axaml.cs
+  插件设置页；含安装预览项 PluginInstallPreviewItem、原始预览 PluginInstallPreviewRaw。
+
+Views/SettingPages/PrivacySettingsPage.axaml / .axaml.cs
+  隐私设置页：遥测、Sentry、数据收集开关。
+
+Views/SettingPages/RealtimeNotificationSettingsPage.axaml / .axaml.cs
+  实时通知设置页。
+
+Views/SettingPages/RefreshingSettingsPage.axaml / .axaml.cs
+  刷新/欢迎提示设置页。
+
+Views/SettingPages/StorageSettingsPage.axaml / .axaml.cs
+  存储设置页。
+
+Views/SettingPages/TestSettingsPage.axaml / .axaml.cs
+  测试设置页（开发用）。
+
+Views/SettingPages/ThemesSettingsPage.axaml / .axaml.cs
+  主题设置页。
+
+Views/SettingPages/WeatherDetailSettingsPage.axaml / .axaml.cs
+  天气详情设置页。
+
+Views/SettingPages/WeatherSettingsPage.axaml / .axaml.cs
+  天气设置页。
+
+Views/SettingPages/WindowSettingsPage.axaml / .axaml.cs
+  窗口设置页。
+
+（五）Views/WelcomePages
+------------------------
+
+Views/WelcomePages/IWelcomePage.cs
+  欢迎向导页面接口：定义页面标题、完成条件与导航顺序。
+
+Views/WelcomePages/WelcomePage.axaml / .axaml.cs
+  欢迎页首页。
+
+Views/WelcomePages/GeneralPage.axaml / .axaml.cs
+  常规配置页。
+
+Views/WelcomePages/AppearancePage.axaml / .axaml.cs
+  外观配置页。
+
+Views/WelcomePages/ColorThemePage.axaml / .axaml.cs
+  主题色配置页。
+
+Views/WelcomePages/SystemPage.axaml / .axaml.cs
+  系统/开机自启配置页。
+
+Views/WelcomePages/LicensePage.axaml / .axaml.cs
+  许可证展示页。
+
+Views/WelcomePages/RefreshingPage.axaml / .axaml.cs
+  刷新提示配置页。
+
+Views/WelcomePages/FinishPage.axaml / .axaml.cs
+  完成页。
+
+二十一、ClassIsland/Controls（自定义控件）
+-------------------------------------------
+
+（一）Controls 根目录
+--------------------
+
+Controls/AdornerAttachHostControl.cs
+  装饰层附加宿主控件。
+
+Controls/AuthorizeProviderPresenter.axaml / .axaml.cs
+  认证提供方呈现器：按提供方类型显示认证界面。
+
+Controls/ClassPlanGroupItemControl.axaml / .axaml.cs
+  课表分组列表项控件。
+
+Controls/DataOperatingIndicator.axaml / .axaml.cs
+  数据操作进行中指示器。
+
+Controls/EmptySplashScreen.cs
+  空启动画面（无 Splash 时占位）。
+
+Controls/FileBrowserButton.cs
+  文件浏览按钮：打开文件/文件夹选择器。
+
+Controls/HomeDatePicker.axaml / .axaml.cs
+  主界面日期选择控件（日历+快速切换）。
+
+Controls/IMainWindowNotificationVisibilityHost.cs
+  主窗口通知可见性宿主接口。
+
+Controls/INotificationRenderSizeHost.cs
+  通知渲染尺寸宿主接口。
+
+Controls/JoinManagementDialog.axaml / .axaml.cs
+  加入集控对话框。
+
+Controls/LessonControl.xaml.cs
+  课程信息控件后台（界面在其他资源中）。
+
+Controls/ListDetailView.axaml / .axaml.cs
+  列表-详情双栏视图控件。
+
+Controls/LoadingMask.xaml.cs
+  加载遮罩后台。
+
+Controls/MainWindowLine.axaml / MainWindowLine.cs
+  主界面行控件：承载一行组件并处理布局。
+
+Controls/ManagementInfoControl.xaml.cs
+  集控信息展示控件后台。
+
+Controls/NavigationButtonsControl.xaml.cs
+  导航按钮组后台（前进/后退/主页）。
+
+Controls/NotificationProviderSettingsIndicatorControl.axaml / .axaml.cs
+  通知提供方设置指示控件。
+
+Controls/OobeIntroAnimationControl.axaml / .axaml.cs
+  首次启动引导动画控件。
+
+Controls/ParallelogramControl.cs
+  平行四边形绘制控件。
+
+Controls/PluginSourceListBoxItem.xaml.cs
+  插件来源列表项后台。
+
+Controls/ReattachableContentPresenter.cs
+  可重新附加内容的呈现器（切换父级时不丢失状态）。
+
+Controls/RecoverySplashControl.xaml.cs
+  恢复模式启动画面后台。
+
+Controls/RectanglesNotificationBubble.cs
+  矩形风格通知气泡。
+
+Controls/RectanglesNotificationPanel.cs
+  矩形风格通知面板；含 WindowRenderSizeReservation 与 OffsetAnimationSuppression。
+
+Controls/ScheduleAdjustmentMenu.cs
+  课表调整菜单（临时换课/调休入口）。
+
+Controls/ScheduleCalendarControl.axaml / .cs
+  课表日历控件（月视图显示课表分布）。
+
+Controls/ScheduleDayControl.axaml / .axaml.cs
+  单日课表控件。
+
+Controls/SettingsVariableEditor.cs
+  设置变量编辑器：编辑设置路径/变量。
+
+Controls/SlantedMaskControl.cs
+  斜切遮罩绘制控件。
+
+Controls/SplashControl.xaml.cs
+  启动画面内容控件后台。
+
+Controls/TestAttachedSettingsControl.xaml.cs
+  测试用附加设置控件后台。
+
+Controls/TimeRuleEditControl.axaml / .axaml.cs
+  时间规则编辑控件。
+
+Controls/TypingControl.axaml / .axaml.cs
+  打字机文字动画控件。
+
+Controls/WeatherPackIconControl.axaml / .axaml.cs
+  天气图标包控件（单天气）。
+
+Controls/WeatherRangePackIconControl.axaml / .axaml.cs
+  天气图标包控件（时间段/范围）。
+
+Controls/WeekOffsetSettingsControl.axaml / .axaml.cs
+  周次偏移设置控件。
+
+Controls/WelcomeWindowIntroControl.xaml.cs
+  欢迎窗口入场动画后台。
+
+Controls/WorkflowProgressIndicatorControl.axaml / .axaml.cs
+  工作流进度指示器。
+
+Controls/WorkflowProgressIndicatorItemControl.axaml / .axaml.cs
+  工作流进度单步项。
+
+（二）Controls/Components（主界面组件）
+--------------------------------------
+
+Controls/Components/ClockComponent.axaml / .axaml.cs
+  时钟组件。
+
+Controls/Components/ClockComponentSettingsControl.axaml / .axaml.cs
+  时钟组件设置控件。
+
+Controls/Components/CountDownComponent.axaml / .axaml.cs
+  倒计时组件。
+
+Controls/Components/CountDownComponentSettingsControl.axaml / .axaml.cs
+  倒计时组件设置控件。
+
+Controls/Components/DateComponent.axaml / .axaml.cs
+  日期组件。
+
+Controls/Components/GroupComponent.axaml / .axaml.cs
+  分组容器组件。
+
+Controls/Components/RollingComponent.axaml / .axaml.cs
+  滚动文字组件。
+
+Controls/Components/RollingComponentSettingsControl.axaml / .axaml.cs
+  滚动组件设置控件。
+
+Controls/Components/ScheduleComponent.axaml / .axaml.cs
+  课表组件：显示当前/后续课程。
+
+Controls/Components/ScheduleComponentSettingsControl.axaml / .axaml.cs
+  课表组件设置控件。
+
+Controls/Components/SeparatorComponent.axaml / .axaml.cs
+  分隔线组件。
+
+Controls/Components/SlideComponent.axaml / .axaml.cs
+  轮播容器组件。
+
+Controls/Components/SlideComponentSettingsControl.axaml / .axaml.cs
+  轮播组件设置控件。
+
+Controls/Components/StackComponent.axaml / .axaml.cs
+  堆叠容器组件。
+
+Controls/Components/TextComponent.axaml / .axaml.cs
+  文本组件。
+
+Controls/Components/TextComponentSettingsControl.axaml / .axaml.cs
+  文本组件设置控件。
+
+Controls/Components/WeatherComponent.axaml / .axaml.cs
+  天气组件。
+
+Controls/Components/WeatherComponentSettingsControl.axaml / .axaml.cs
+  天气组件设置控件。
+
+（三）Controls/ActionSettingsControls
+------------------------------------
+
+Controls/ActionSettingsControls/AppRestartActionSettingsControl.axaml / .axaml.cs
+  重启行动设置控件。
+
+Controls/ActionSettingsControls/BroadcastSignalActionSettingsControl.axaml / .axaml.cs
+  广播信号行动设置控件。
+
+Controls/ActionSettingsControls/ModifyAppSettingsActionControlTemplateSelector.cs
+  修改设置行动控件的模板选择器。
+
+Controls/ActionSettingsControls/ModifyAppSettingsActionSettingsControl.axaml / .axaml.cs
+  修改设置行动设置控件；含 ViewModel 与 SettingsInfo。
+
+Controls/ActionSettingsControls/NotificationActionSettingsControl.axaml / .axaml.cs
+  通知行动设置控件。
+
+Controls/ActionSettingsControls/RunActionSettingsControl.axaml / .axaml.cs
+  运行行动设置控件。
+
+Controls/ActionSettingsControls/SleepActionSettingsControl.axaml / .axaml.cs
+  延时行动设置控件。
+
+Controls/ActionSettingsControls/WeatherNotificationActionSettingControl.axaml / .axaml.cs
+  天气通知行动设置控件。
+
+（四）Controls/AttachedSettingsControls
+--------------------------------------
+
+Controls/AttachedSettingsControls/AfterSchoolNotificationAttachedSettingsControl.axaml / .cs
+  放学提醒附加设置控件。
+
+Controls/AttachedSettingsControls/ClassNotificationAttachedSettingsControl.axaml / .cs
+  课程提醒附加设置控件。
+
+Controls/AttachedSettingsControls/LessonControlAttachedSettingsControl.axaml / .cs
+  课程控件附加设置控件。
+
+Controls/AttachedSettingsControls/RealtimeNotificationAttachedSettingsControl.axaml / .cs
+  实时通知附加设置控件。
+
+Controls/AttachedSettingsControls/WeatherNotificationAttachedSettingsControl.axaml / .cs
+  天气提醒附加设置控件。
+
+（五）Controls/AuthorizeProvider、MiniInfoProvider、NotificationEffects
+---------------------------------------------------------------------
+
+Controls/AuthorizeProvider/PasswordAuthorizeProvider.axaml / .axaml.cs
+  密码认证提供方界面。
+
+Controls/MiniInfoProvider/DateMiniInfoProviderControl.xaml.cs
+  日期迷你信息提供方控件后台。
+
+Controls/MiniInfoProvider/WeatherMiniInfoProviderControl.xaml.cs
+  天气迷你信息提供方控件后台。
+
+Controls/MiniInfoProvider/WeatherMiniInfoProviderSettingsControl.xaml.cs
+  天气迷你信息提供方设置控件后台。
+
+Controls/NotificationEffects/RippleEffect.axaml / .axaml.cs
+  通知波纹强调特效。
+
+（六）Controls/RuleSettingsControls
+----------------------------------
+
+Controls/RuleSettingsControls/CurrentSubjectRuleSettingsControl.axaml / .cs
+  当前科目规则设置控件。
+
+Controls/RuleSettingsControls/CurrentWeatherRuleSettingsControl.axaml / .cs
+  当前天气规则设置控件。
+
+Controls/RuleSettingsControls/RainTimeRuleSettingsControl.axaml / .cs
+  降雨时段规则设置控件。
+
+Controls/RuleSettingsControls/SunRiseSetRuleSettingsControl.axaml / .cs
+  日出日落规则设置控件。
+
+Controls/RuleSettingsControls/TimeStateRuleSettingsControl.axaml / .cs
+  时间状态规则设置控件。
+
+Controls/RuleSettingsControls/WindowStatusRuleSettingsControl.axaml / .cs
+  窗口状态规则设置控件。
+
+（七）Controls/SpeechProviderSettingsControls、TriggerSettingsControls
+---------------------------------------------------------------------
+
+Controls/SpeechProviderSettingsControls/EdgeTtsSpeechServiceSettingsControl.axaml / .cs
+  Edge TTS 语音提供方设置控件。
+
+Controls/SpeechProviderSettingsControls/GptSovitsSpeechServiceSettingsControl.axaml / .cs
+  GPT-SoVITS 语音提供方设置控件。
+
+Controls/TriggerSettingsControls/CronTriggerSettingsControl.axaml / .axaml.cs
+  Cron 触发器设置控件。
+
+Controls/TriggerSettingsControls/PreTimePointTriggerSettingsControl.axaml / .axaml.cs
+  时间点前触发器设置控件。
+
+Controls/TriggerSettingsControls/SignalTriggerSettingsControl.axaml / .axaml.cs
+  信号触发器设置控件。
+
+Controls/TriggerSettingsControls/TrayMenuTriggerSettingsControl.axaml / .axaml.cs
+  托盘菜单触发器设置控件。
+
+Controls/TriggerSettingsControls/UriTriggerSettingsControl.axaml / .axaml.cs
+  URI 触发器设置控件。
+
+（八）Controls/Demo、EditMode
+----------------------------
+
+Controls/Demo/OpenTaskBarMenuDemo.xaml.cs
+  打开托盘菜单演示后台。
+
+Controls/Demo/ThemeDemo.axaml / .axaml.cs
+  主题/控件样式演示页。
+
+Controls/EditMode/EditableComponentsListBox.axaml / .axaml.cs
+  编辑模式下可拖拽组件列表。
+
+Controls/EditMode/EditableComponentsListBoxDragData.cs
+  组件拖拽数据。
+
+Controls/EditMode/EditableComponentsListBoxDropHandler.cs
+  组件拖放处理。
+
+Controls/EditMode/EditableComponentsListBoxEventArgs.cs
+  组件列表事件参数。
+
+Controls/EditMode/EditModeContainerComponentInfo.cs
+  编辑模式容器组件信息。
+
+Controls/EditMode/EditModeView.axaml / .axaml.cs
+  编辑模式视图：组件工具栏、边框、拖拽手柄。
+
+Controls/EditMode/RequestAddComponentEventArgs.cs
+  请求添加组件事件参数。
+
+（九）Controls/NotificationProviders
+------------------------------------
+
+Controls/NotificationProviders/AfterSchoolNotificationProvider.axaml / .axaml.cs
+  放学提醒通知界面。
+
+Controls/NotificationProviders/AfterSchoolNotificationProviderSettingsControl.axaml / .cs
+  放学提醒设置控件。
+
+Controls/NotificationProviders/ClassNotificationProviderControl.axaml / .axaml.cs
+  课程提醒通知界面。
+
+Controls/NotificationProviders/ClassNotificationProviderSettingsControl.axaml / .cs
+  课程提醒设置控件。
+
+Controls/NotificationProviders/ManagementNotificationProviderControl.xaml.cs
+  集控通知界面后台。
+
+Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml / .cs
+  天气预报通知界面；含 DayForecastItem。
+
+Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml / .cs
+  逐小时天气通知界面；含 HourForecastItem。
+
+Controls/NotificationProviders/WeatherNotificationProviderControl.axaml / .cs
+  天气提醒通知界面。
+
+Controls/NotificationProviders/WeatherNotificationProviderSettingsControl.axaml / .cs
+  天气提醒设置控件。
+
+（十）Controls/ProfileTransferProviders
+--------------------------------------
+
+Controls/ProfileTransferProviders/ClassIsland1ImportProvider.cs
+  ClassIsland 1.x 档案导入提供方。
+
+Controls/ProfileTransferProviders/ClassWidgets1ImportProvider.cs
+  ClassWidgets 1.x 档案导入提供方。
+
+Controls/ProfileTransferProviders/ClassWidgets2ImportProvider.cs
+  ClassWidgets 2.x 档案导入提供方。
+
+Controls/ProfileTransferProviders/CsesImportProvider.cs
+  CSES 课表导入提供方。
+
+（十一）Controls/ScheduleDataGrid
+--------------------------------
+
+Controls/ScheduleDataGrid/ScheduleDataGrid.axaml / .axaml.cs
+  课表数据网格：按时间表/周次编辑课程。
+
+Controls/ScheduleDataGrid/ScheduleDataGridCellControl.axaml / .axaml.cs
+  课表单元格控件。
+
+Controls/ScheduleDataGrid/ScheduleDataGridColHeaderControl.axaml / .axaml.cs
+  课表列头控件。
+
+Controls/ScheduleDataGrid/ScheduleDataGridColHeaderViewModel.cs
+  课表列头 ViewModel。
+
+Controls/ScheduleDataGrid/ScheduleDataGridSelectionChangedEventArgs.cs
+  课表选择变化事件参数。
+
+Controls/ScheduleDataGrid/ScheduleDataGridClassPlanEventArgs.cs
+  课表相关事件参数。
+
+Controls/ScheduleDataGrid/CreateClassPlanEventArgs.cs
+  创建课表事件参数。
+
+（十二）Controls/ScheduleWeekEdit
+--------------------------------
+
+Controls/ScheduleWeekEdit/ScheduleWeekEditControl.axaml / .cs
+  周课表编辑控件；含 PinchState、DragKind、DisplayOccurrence、DragState。
+
+Controls/ScheduleWeekEdit/ScheduleWeekBlock.cs
+  周课表课程块模型。
+
+Controls/ScheduleWeekEdit/ScheduleWeekRuler.cs
+  周课表标尺。
+
+Controls/ScheduleWeekEdit/ScheduleWeekEditEventArgs.cs
+  周课表编辑事件参数。
+
+Controls/ScheduleWeekEdit/ScheduleDayHeaderEventArgs.cs
+  星期列头事件参数。
+
+（十三）Controls/TimeLine
+-------------------------
+
+Controls/TimeLine/TimeLineBackgroundRulerControl.cs
+  时间线背景刻度控件。
+
+Controls/TimeLine/TimeLineListControl.axaml / .cs
+  时间线列表控件：显示时间表项、拖动排序。
+
+Controls/TimeLine/TimeLineListItemControl.axaml / .axaml.cs
+  时间线单项控件。
+
+Controls/TimeLine/TimeLineListItemExpandingAdornerControl.axaml / .cs
+  时间线项展开编辑装饰层。
+
+Controls/TimeLine/TimeLineListItemSeparatorAdornerControl.axaml / .cs
+  时间线分割线装饰层。
+
+Controls/TimeLine/TimeLineListAdornerStyles.axaml
+  时间线装饰层样式。
+
+Controls/TimeLine/TimeLineListControlDataTemplateSelector.cs
+  时间线项模板选择器。
+
+Controls/TimeLine/TimeLineListItemAdornerTemplateSelector.cs
+  时间线装饰层模板选择器。
+
+Controls/TimeLine/TimeLineInsertTimePointEventArgs.cs
+  插入时间点事件参数；含 InsertLocation 枚举。
+
+（十四）Controls/Tutorial、TutorialEditor、UI、WeatherIcons
+----------------------------------------------------------
+
+Controls/Tutorial/TutorialHighlightControl.axaml / .axaml.cs
+  教程高亮框控件。
+
+Controls/Tutorial/TutorialSpotlightControl.axaml / .axaml.cs
+  教程聚光灯控件。
+
+Controls/Tutorial/TutorialStateProvider.cs
+  教程状态提供方：向教程脚本暴露控件状态/位置。
+
+Controls/TutorialEditor/TutorialActionsEditControl.axaml / .axaml.cs
+  教程操作编辑控件。
+
+Controls/UI/DrawerNavigationHost.axaml / .axaml.cs
+  抽屉导航宿主。
+
+Controls/UI/WindowViewHost.axaml / .axaml.cs
+  窗口视图宿主。
+
+Controls/WeatherIcons/Index.axaml
+  天气图标模板索引。
+
+Controls/WeatherIcons/FluentDesignWeatherIconTemplate.axaml
+  Fluent Design 风格天气图标模板。
+
+Controls/WeatherIcons/LucideWeatherIconTemplate.axaml
+  Lucide 风格天气图标模板。
+
+Controls/WeatherIcons/SFSymbolsWeatherIconTemplate.axaml
+  SF Symbols 风格天气图标模板。
+
+Controls/WeatherIcons/SimpleTextWeatherIconTemplate.axaml
+  简单文字天气图标模板。
+
+二十二、ClassIsland 其余目录
+------------------------------
+
+（一）Converters
+----------------
+
+Converters/AuthLevelToIntConverter.cs
+  认证等级转整数（用于单选按钮索引）。
+
+Converters/ClassChangeIsSwapModeOnToSwapModeIndexConverter.cs
+  换课模式开关转模式索引。
+
+Converters/ClassPlanDictionaryValueAccessConverter.cs
+  按 Guid 访问课表字典。
+
+Converters/DateTimeToCurrentDateTimeConverter.cs
+  日期时间转为“当前日期时间”。
+
+Converters/GuidToNotificationProviderConverter.cs
+  通知提供方 Guid 转提供方对象。
+
+Converters/HomeCalendarDayConverter.cs
+  主界面日历日数据转换。
+
+Converters/LargeNumberToFriendlyNumberConverter.cs
+  大数字转友好显示（万/亿）。
+
+Converters/MinutesToApproxTimeConverter.cs
+  分钟数转近似时间描述。
+
+Converters/ObjectIsNullConverter.cs
+  判断对象是否为空。
+
+Converters/OSPlatformTypeConverter.cs
+  YAML/JSON 中操作系统平台类型转换；含 OSPlatformTypeConverter_Yaml、OSPlatformConverter_Json。
+
+Converters/SizeLongToStringConverter.cs
+  字节大小转可读字符串。
+
+Converters/StringPreventEmptyConverter.cs
+  空字符串回退为占位文本。
+
+Converters/StringToColorConverter.cs
+  颜色字符串转 Avalonia Color。
+
+Converters/StringToFontFamilyConverter.cs
+  字体名称转 FontFamily。
+
+Converters/SubjectDictionaryKeyFinderMultiConverter.cs
+  多值查找科目字典键（含 DictionaryKeyFinderMultiConverter）。
+
+Converters/SubjectPreviewConverters.cs
+  科目预览转换器集合：详情、图标源、颜色画刷。
+
+Converters/SupportedOSPlatformsToBooleanConverter.cs
+  支持的操作系统平台转布尔（控制设置项可见性）。
+
+Converters/ThemeEnabledConverter.cs
+  主题启用状态转换。
+
+Converters/TimeSpanToStringConverter.cs
+  时间跨度转字符串。
+
+Converters/TimeStateToClassConverter.cs
+  时间状态转样式类名。
+
+Converters/WeatherConverters.cs
+  天气数值/状态/图标转换器集合。
+
+Converters/WindDirectionConverter.cs
+  风向角度转方位文字。
+
+（二）Helpers
+-------------
+
+Helpers/AccentColorHelper.cs
+  强调色/主题色计算与调色；含 Bgra32。
+
+Helpers/AttachedSettingsControlHelper.cs
+  附加设置控件创建与绑定助手。
+
+Helpers/DefaultFontProbe.cs
+  默认字体探测：读取字体名称、变体轴、回退字体；含 FontVariationAxis、DefaultFontProbeResult。
+
+Helpers/DetachedSignatureProcessor.cs
+  分离签名（GPG）校验处理。
+
+Helpers/GZipHelper.cs
+  GZip 压缩/解压。
+
+Helpers/LegacyDataMigrationHelper.cs
+  旧版数据迁移助手；含 MigrationResult。
+
+Helpers/ScheduleItemEditHelper.cs
+  日程项编辑助手（复制、移动、合并）。
+
+Helpers/ShortcutHelpers.cs
+  快捷方式创建助手（.url、Linux desktop）。
+
+Helpers/SkiaGpuCacheHelper.cs
+  Skia GPU 着色器缓存管理。
+
+Helpers/StorageSizeHelper.cs
+  存储空间统计。
+
+Helpers/TimeSpanFormatHelper.cs
+  时间跨度格式化。
+
+Helpers/TimeSpanHelper.cs
+  时间跨度计算/取整助手。
+
+Helpers/UriProtocolRegisterHelper.cs
+  注册 classisland:// URI 协议。
+
+Helpers/WeatherCodeHelper.cs
+  天气代码转图标/描述。
+
+Helpers/WebRequestHelper.cs
+  HTTP 请求封装（User-Agent、超时、重试）。
+
+Helpers/ProfileTransferHelpers/ClassIslandV1ProfileTransferHelper.cs
+  ClassIsland 1.x 档案转换助手。
+
+Helpers/ProfileTransferHelpers/ClassWidgetsProfileTransferHelper.cs
+  ClassWidgets 1.x 档案转换助手。
+
+Helpers/ProfileTransferHelpers/ClassWidgets2ProfileTransferHelper.cs
+  ClassWidgets 2.x 档案转换助手；含大量规范化模型、警告收集和导入分析记录。
+
+Helpers/ProfileTransferHelpers/CsesExportHelper.cs
+  CSES 格式导出助手。
+
+（三）Extensions / Behaviors / Enums / Validations / Properties / Styling
+-------------------------------------------------------------------------
+
+Extensions/AvaloniaLoggingSinkExtensions.cs
+  把 Avalonia 日志接入 Microsoft.Extensions.Logging 的扩展方法。
+
+Extensions/OverlayAssetLoaderExtensions.cs
+  注册资源覆盖目录的扩展方法。
+
+Extensions/ProfileServiceExtensions.cs
+  档案服务扩展：加载/保存/切换的便捷方法。
+
+Behaviors/AdornerAttachingBehavior.cs
+  自动附加装饰层行为。
+
+Behaviors/AllCollectionBehavior.cs
+  集合全选/全不选行为。
+
+Behaviors/ComboBoxEmptyFixBehavior.cs
+  修复空 ComboBox 显示异常。
+
+Behaviors/TimeLineListItemBehavior.cs
+  时间线列表项交互行为。
+
+Enums/ImportEntries.cs
+  导入条目类型枚举。
+
+Enums/AppUpdating/DownloadState.cs
+  下载状态枚举（等待、下载中、完成、失败）。
+
+Validations/SameStringValidationRule.cs
+  校验两次输入字符串是否一致（如密码确认）。
+
+Properties/ReOpenWindowAttribute.cs
+  标记关闭后可重新打开的窗口特性。
+
+Styling/ResourceLookupCachingStyles.cs
+  资源查找缓存样式，提升大量控件查找资源性能；含 CacheKey、Comparer。
+
+（四）Themes 与 XamlThemes
+--------------------------
+
+Themes/LightTheme.axaml
+  浅色主题资源字典。
+
+Themes/DarkTheme.axaml
+  深色主题资源字典。
+
+XamlThemes/ClassicTheme/Styles.axaml
+  “经典”主题样式包。
+
+XamlThemes/FluentTheme/Styles.axaml
+  Fluent 主题样式包。
+
+XamlThemes/RectanglesTheme/Styles.axaml
+  “矩形”主题样式包。
+
+XamlThemes/TestInternalTheme/Styles.axaml
+  内部测试主题样式包。
+
+（五）Assets（资源）
+--------------------
+
+Assets/AppLogo.ico、AppLogo.png、AppLogo@*.png、AppLogo_AppLogo.svg、AppLogo_Fade.png、AppLogo_Monochrome.png
+  应用图标各尺寸与变体（窗口、托盘、商店、单色）。
+
+Assets/AsciiLogo.txt
+  控制台启动 ASCII Logo。
+
+Assets/BannerMain_App2.png
+  主界面/关于页横幅。
+
+Assets/ClassIsland.ai
+  应用 Logo 的矢量源文件。
+
+Assets/default-subjects.json
+  默认科目列表。
+
+Assets/DefaultTutorialBanner.webp、DefaultTutorialGroupBanner.webp
+  教程与教程分组的默认横幅。
+
+Assets/Demo_MainMenu.png、Demo_OpenProfileSettingsWindow.png
+  教程/文档中使用的界面演示图。
+
+Assets/dependencies.g.json
+  第三方依赖版本/许可证汇总数据。
+
+Assets/LICENSE.txt
+  资源目录许可证说明。
+
+Assets/Tellings.txt
+  应用内提示语/彩蛋文本。
+
+Assets/Documents/ChangeLog.md
+  更新日志文档（应用内展示）。
+
+Assets/Documents/Privacy_.md
+  隐私政策文档。
+
+Assets/Fonts/Fonts.axaml、Fonts.xaml、HarmonyOS_Sans_SC_*.ttf、LICENSE.txt
+  内置 HarmonyOS Sans 字体族及字体注册资源、许可证。
+
+Assets/FreedesktopIcons/AppLogo@128w.png
+  Linux 桌面环境图标。
+
+Assets/Highlighting/Lua.xshd
+  Lua 脚本语法高亮定义（教程/脚本编辑器）。
+
+Assets/HoYoStickers/*.png
+  内置 HoYo 风格贴纸资源（组件/装饰用）。
+
+Assets/Localization/SettingsPage/*.resx、*.Designer.cs
+  设置页多语言资源（中简、中繁、英文）及强类型访问类。
+
+Assets/Localization/SettingsPage/General/*.resx、*.Designer.cs
+  常规设置页多语言资源及访问类。
+
+Assets/Localization/TrayMenu/*.resx、*.Designer.cs
+  托盘菜单多语言资源及访问类。
+
+Assets/Logos/Main.png、Beta.png、Dev.png
+  不同发布渠道的应用 Logo。
+
+Assets/Marketplace/Logo*.png、Logo.svg
+  插件市场图标。
+
+Assets/Media/Notification/1.wav
+  默认通知提示音。
+
+Assets/ProfileTemplates/default.json
+  新建档案的默认模板。
+
+Assets/RealtimeNotificationDemo/Dark.webp、Light.webp
+  实时通知效果演示图。
+
+Assets/ShortcutTemplates/ClassSwap.url、cn.classisland.app.desktop
+  Windows/Linux 快捷方式模板。
+
+Assets/TrustedPublicKeys/ClassIsland.MetadataPublisher.asc
+  元数据/更新包签名校验公钥。
+
+Assets/TutorialImages/**/*.webp
+  内置教程步骤截图（按教程 ID 分目录）。
+
+Assets/Tutorials/classisland.getStarted.json、classisland.sp.json、classisland.test.json
+  内置教程脚本。
+
+Assets/XamlThemePreviews/classisland.*.png
+  XAML 主题预览图。
+
+Assets/XiaomiWeather/xiaomi_weather_status.json
+  小米天气状态码映射表。
+
+ClassIsland/app.manifest
+  Windows 应用清单（DPI 感知、UAC、兼容性）。
+
+ClassIsland/Package.appxmanifest
+  MSIX 打包清单。
+
+ClassIsland/LICENSE.txt
+  应用主体许可证说明。
+
+ClassIsland/README.md
+  应用主体项目说明。
+
+二十三、platforms（桌面平台实现）
+-----------------------------------
+
+（一）platforms/ClassIsland.Platforms.Windows
+--------------------------------------------
+
+platforms/ClassIsland.Platforms.Windows/ClassIsland.Platforms.Windows.csproj
+  Windows 平台实现项目：目标 net10.0-windows10.0.19041.0，引用 CsWin32、HarmonyLib、
+  Avalonia.Win32、System.Device.Location 等，并启用 Windows 平台常量。
+
+platforms/ClassIsland.Platforms.Windows/Services/WindowPlatformService.cs
+  Windows 窗口平台实现：置顶、透明、点击穿透、全屏、窗口样式、显示器信息、任务栏隐藏等。
+
+platforms/ClassIsland.Platforms.Windows/Services/DesktopService.cs
+  Windows 桌面服务：桌面窗口、壁纸、工作区、桌面图标层操作。
+
+platforms/ClassIsland.Platforms.Windows/Services/DesktopToastService.cs
+  Windows 桌面通知实现（Toast）。
+
+platforms/ClassIsland.Platforms.Windows/Services/DeviceInfoService.cs
+  Windows 设备信息：系统版本、架构、设备名、内存等。
+
+platforms/ClassIsland.Platforms.Windows/Services/LocationService.cs
+  Windows 定位服务（System.Device.Location）。
+
+platforms/ClassIsland.Platforms.Windows/Services/SystemEventsService.cs
+  Windows 系统事件：锁屏、休眠、电源状态、前台窗口变化。
+
+platforms/ClassIsland.Platforms.Windows/Helpers/OSKIntegration.cs
+  触摸键盘（OSK）集成：输入框聚焦时调整窗口位置/滚动。
+
+platforms/ClassIsland.Platforms.Windows/PatcherEntrance.cs
+  Harmony 补丁入口：安装所有运行时补丁。
+
+platforms/ClassIsland.Platforms.Windows/Patches/AppWindowInitializeAppWindowPatcher.cs
+  补丁：调整 Avalonia AppWindow 初始化行为。
+
+platforms/ClassIsland.Platforms.Windows/Patches/Win32WindowManagerConstructorPatcher.cs
+  补丁：调整 Win32 窗口管理器构造逻辑。
+
+platforms/ClassIsland.Platforms.Windows/NativeHelpers.cs
+  Win32 原生调用助手：分配 PWSTR、检查返回值。
+
+platforms/ClassIsland.Platforms.Windows/DisposablePWSTR.cs
+  可自动释放的原生宽字符串。
+
+platforms/ClassIsland.Platforms.Windows/NativeMethods.txt / NativeMethods.json
+  CsWin32 源生成器输入：需要生成的 Win32 API 列表与配置。
+
+platforms/ClassIsland.Platforms.Windows/GlobalUsing.cs
+  Windows 平台项目全局 using。
+
+platforms/ClassIsland.Platforms.Windows/AssemblyInfo.cs
+  Windows 平台程序集元数据。
+
+（二）platforms/ClassIsland.Platforms.Linux
+------------------------------------------
+
+platforms/ClassIsland.Platforms.Linux/ClassIsland.Platforms.Linux.csproj
+  Linux 平台实现项目：目标 net10.0，引用 X11、Mono.Posix、Avalonia.X11 等。
+
+platforms/ClassIsland.Platforms.Linux/X.cs
+  libX11 P/Invoke 声明：窗口创建、属性、事件、原子等。
+
+platforms/ClassIsland.Platforms.Linux/XExtensions.cs
+  X11 扩展：窗口置顶/全屏/隐藏、_NET_WM_STATE 操作。
+
+platforms/ClassIsland.Platforms.Linux/Notification/FreeDesktopNotificationProxy.cs
+  FreeDesktop 桌面通知 D-Bus 代理。
+
+platforms/ClassIsland.Platforms.Linux/Services/WindowPlatformService.cs
+  Linux 窗口平台实现（基于 X11）。
+
+platforms/ClassIsland.Platforms.Linux/Services/DesktopService.cs
+  Linux 桌面服务。
+
+platforms/ClassIsland.Platforms.Linux/Services/DesktopToastService.cs
+  Linux 桌面通知实现。
+
+platforms/ClassIsland.Platforms.Linux/Services/DeviceInfoService.cs
+  Linux 设备信息。
+
+（三）platforms/ClassIsland.Platforms.MacOs
+------------------------------------------
+
+platforms/ClassIsland.Platforms.MacOs/ClassIsland.Platforms.MacOs.csproj
+  macOS 平台实现项目：目标 net10.0，引用 Avalonia.Native、CoreGraphics 等。
+
+platforms/ClassIsland.Platforms.MacOs/API.cs
+  CoreGraphics/QuartzCore P/Invoke：枚举窗口、取窗口信息、矩形转换。
+
+platforms/ClassIsland.Platforms.MacOs/Models/WindowInfo.cs
+  macOS 窗口信息模型。
+
+platforms/ClassIsland.Platforms.MacOs/Services/WindowPlatformServices.cs
+  macOS 窗口平台实现。
+
+platforms/ClassIsland.Platforms.MacOs/Services/DesktopToastService.cs
+  macOS 桌面通知实现。
+
+platforms/ClassIsland.Platforms.MacOs/Services/DeviceInfoService.cs
+  macOS 设备信息。
+
+platforms/ClassIsland.Platforms.MacOs/Services/LocationService.cs
+  macOS 定位服务（CoreLocation）。
+
+platforms/ClassIsland.Platforms.MacOs/AssemblyInfo.cs
+  macOS 平台程序集元数据。
+
+二十四、ClassIsland.Android（Android 宿主）
+--------------------------------------------
+
+ClassIsland.Android 复用 ClassIsland 的 Avalonia 页面与服务，实现 Android 特有的
+Activity、前台服务、悬浮窗、通知、定位、文件提供器和返回键处理。
+
+ClassIsland.Android/ClassIsland.Android.csproj
+  Android 项目文件：net10.0-android，引用 ClassIsland 主项目与平台抽象；
+  配置 Android 资源、权限、前台服务类型、AOT 发布。
+
+ClassIsland.Android/Application.cs
+  Android Application：注册 Android 平台服务实现，配置 AppBuilder、字体和日志。
+
+ClassIsland.Android/MainActivity.cs
+  Android 主 Activity：承载 Avalonia 视图、处理返回键、权限请求、通知权限、
+  定位权限和前台服务启动。
+
+ClassIsland.Android/AndroidManifest.xml
+  Android 清单：权限、Activity、Service、Provider 声明。
+
+ClassIsland.Android/AssemblyInfo.cs
+  Android 程序集元数据。
+
+ClassIsland.Android/Controls/AndroidMainView.axaml / .axaml.cs
+  Android 主界面视图：适配移动端布局、返回手势、底部导航。
+
+ClassIsland.Android/Controls/AndroidDebugOverlay.cs
+  调试悬浮层：显示 FPS、内存、Skia GPU 指标。
+
+ClassIsland.Android/Controls/AndroidSkiaGpuMetrics.cs
+  Android Skia GPU 指标采集。
+
+ClassIsland.Android/Controls/UI/AndroidViewHost.axaml / .axaml.cs
+  Android 视图宿主：在 Activity/对话框中承载 View。
+
+ClassIsland.Android/Helpers/AndroidFontHelper.cs
+  Android 字体加载与回退。
+
+ClassIsland.Android/Services/AndroidOverlayService.cs
+  Android 悬浮窗服务：在其他应用上显示课程/通知浮层。
+
+ClassIsland.Android/Services/AndroidProcessMetrics.cs
+  Android 进程内存/CPU 指标。
+
+ClassIsland.Android/Services/LessonsForegroundService.cs
+  课程前台服务：后台保持课程进度并更新常驻通知。
+
+ClassIsland.Android/Services/RealtimeNotificationContentBuilder.cs
+  实时通知内容构建：课程、倒计时、进度。
+
+ClassIsland.Android/Services/SubjectNotificationIcons.cs
+  按科目生成通知图标/颜色。
+
+ClassIsland.Android/Services/Platform/AndroidAppLifetimeService.cs
+  Android 应用生命周期实现。
+
+ClassIsland.Android/Services/Platform/DesktopToastService.cs
+  Android 通知实现。
+
+ClassIsland.Android/Services/Platform/DeviceInfoService.cs
+  Android 设备信息。
+
+ClassIsland.Android/Services/Platform/HapticFeedbackService.cs
+  Android 触觉反馈。
+
+ClassIsland.Android/Services/Platform/LauncherService.cs
+  Android 打开链接/文件。
+
+ClassIsland.Android/Services/Platform/LocationService.cs
+  Android 定位与权限。
+
+ClassIsland.Android/Services/UI/ActivityViewHostProvider.cs
+  Android Activity 视图宿主提供方。
+
+ClassIsland.Android/Storage/ClassIslandDocumentsProvider.cs
+  Android 文档提供器：把应用数据目录暴露给系统文件选择器。
+
+ClassIsland.Android/Resources/**
+  Android 图标、启动图、通知布局、字符串、样式与颜色资源。
+
+二十五、构建、源生成器与辅助脚本
+-----------------------------------
+
+（一）build（NUKE 构建）
+------------------------
+
+build/_build.csproj
+  NUKE 构建项目文件（net10.0），引用 Nuke.Common、Octokit、Azure Key Vault 等。
+
+build/Build.cs
+  构建主入口：解析参数（OsName、Arch、Package、BuildType、BuildName、AppVersion），
+  定义生成元数据、清理、编译、发布、签名、打包、上传等目标与依赖关系。
+
+build/Configuration.cs
+  构建配置枚举（Debug/Release）与类型转换器。
+
+build/Build.App.cs
+  应用发布目标：构建 ClassIsland.Desktop、裁剪/自包含、生成 secrets、打包 zip/deb/pkg。
+
+build/Build.DesktopApp.cs
+  桌面应用发布辅助目标（运行时标识、平台常量、输出目录）。
+
+build/Build.AndroidApp.cs
+  Android 发布目标：构建 APK/AAB、AOT、签名。
+
+build/Build.Launcher.cs
+  启动器发布目标：原生 AOT、自包含、按平台产物。
+
+build/Build.Nupkg.cs
+  NuGet 包发布目标：插件 SDK/Core 打包与推送。
+
+build/Build.PluginDev.cs
+  插件开发环境目标：发布 ClassIsland_Dev 并配置环境变量。
+
+build/Directory.Build.props / Directory.Build.targets
+  构建项目统一属性与目标。
+
+build/.editorconfig、_build.csproj.DotSettings
+  构建项目代码风格配置。
+
+（二）roslyn/IconsMappingGenerator
+----------------------------------
+
+roslyn/IconsMappingGenerator/IconsMappingGenerator.csproj
+  图标映射源生成器项目（netstandard2.0），作为 Analyzer 被 Core 引用。
+
+roslyn/IconsMappingGenerator/FluentIconsMappingGenerator.cs
+  IIncrementalGenerator：读取 Fluent/Lucide 图标映射文件，生成
+  FluentIcons / LucideIcons 常量类。
+
+roslyn/IconsMappingGenerator/GenerateOptions.cs
+  生成选项（映射文件路径）。
+
+roslyn/IconsMappingGenerator/HardDecoder.cs
+  轻量 JSON 映射解析器（逐行解析名称与码点）。
+
+（三）tools
+-----------
+
+tools/build-appveyor.ps1
+  AppVeyor CI 构建脚本。
+
+tools/gen-nuget-depinfo.ps1
+  生成 NuGet 依赖信息（许可证、版本）。
+
+tools/generate-md5.ps1
+  生成文件 MD5 校验清单。
+
+tools/develop/convert-lucideInfo-to-codepoints.ps1
+  把 Lucide 图标信息转换为码点映射。
+
+tools/develop/convert-wpf-to-avalonia.ps1
+  WPF 到 Avalonia 的批量转换辅助脚本。
+
+tools/develop/disable-wpf.ps1
+  临时禁用 WPF 相关代码/项目的脚本。
+
+tools/nix/classisland.nix、classisland-bin.nix、deps.json
+  Nix 打包表达式与依赖清单。
+
+tools/plugin/build.ps1、build_macos.command、plugindev-init.ps1
+  插件模板构建与插件开发环境初始化脚本。
+
+tools/release-gen/*.ps1、pack/*.ps1、alist-utils.psm1
+  发布流水线脚本：初始化产物、合并产物、生成密钥、登录 GitHub、
+  发布 NuGet/MSIX、生成签名包、上传 AList、打包 folder 产物。
+
+（四）installer
+---------------
+
+installer/setup.iss
+  Inno Setup 安装器脚本：安装目录、快捷方式、卸载、文件关联。
+
+installer/languages/ChineseSimplified.isl、ChineseTraditional.isl
+  Inno Setup 简体/繁体中文语言文件。
+
+（五）doc 与 examples
+---------------------
+
+doc/AttachedSettings.md
+  附加设置机制开发文档。
+
+doc/Dependencies.md
+  依赖项与许可证说明。
+
+doc/InstallOnLegaceyOS.md
+  旧版操作系统安装说明。
+
+doc/NotificationHostService.md
+  通知主机服务工作原理文档。
+
+doc/Privacy.md
+  隐私政策。
+
+doc/ChangeLogs/**/App.md
+  各版本更新日志。
+
+doc/Contributing/Scopes.md
+  Conventional Commits 作用域列表。
+
+doc/Design/Cyrene_MSP/*.md
+  Cyrene 集控/消息协议设计文档。
+
+examples/example.json
+  示例配置文件。
+
+二十六、vendors（第三方子模块源码）
+-------------------------------------
+
+vendors/EdgeTtsSharp
+  Edge TTS 语音合成库（classisland-v2 分支）：
+  - Edge_tts_sharp.sln、Edge_tts_sharp/Edge_tts_sharp.csproj：库项目；
+  - edge_tts_test/edge_tts_test.csproj：控制台测试项目；
+  - Edge_tts_sharp/Edge_tts.cs：TTS 主流程；
+  - EdgeTts.Token.cs：鉴权令牌获取；
+  - Wss.cs：WebSocket 通信；
+  - Tools.cs：音频/文本辅助；
+  - Model/eVoice.cs、Log.cs、PlayOption.cs：语音、日志与播放选项模型；
+  - Source/VoiceList.json：可用语音列表；
+  - edge_tts_test：控制台测试项目；
+  - README.md、Logo/MenuLogo、.github/workflows：说明与 CI。
+
+vendors/PhainonDistributionCenter.Shared
+  分发中心共享库（netstandard2.1，项目文件 PhainonDistributionCenter.Shared.csproj）：
+  - Models/Client/DistributionInfo.cs、DistributionMetadata.cs：分发信息；
+  - Models/FileMap/FileMap.cs、FileMapComponent.cs、FileMapFile.cs：文件映射；
+  - Models/Api/Requests、Responses：API 请求/响应；
+  - Models/FileRepo.cs、FileRepoItem.cs：文件仓库；
+  - Enums/Api/StatusCodes.cs：状态码；
+  - Exceptions/PhainonApiException.cs：API 异常；
+  - Helpers/VariableStringHelpers.cs：变量字符串替换。
+
+vendors/System.Device.Location
+  System.Device.Location 的跨平台源码兼容实现（System.Device.Location.csproj）：
+  - GeoCoordinate.cs：经纬度坐标；
+  - GeoCoordinateWatcher.cs / GeoCoordinateWatcherInternal.cs：定位监听；
+  - CivicAddressResolver.cs：地址解析。
+
+二十七、仓库配置与辅助目录
+----------------------------
+
+.github/CODEOWNERS
+  代码所有者配置。
+
+.github/pull_request_template.md
+  PR 模板。
+
+.github/ISSUE_TEMPLATE/BugReport.yml、FeatureRequest.yml、config.yml
+  Issue 模板：Bug 报告、功能请求与模板选择配置。
+
+.github/DISCUSSION_TEMPLATE/组件配置分享.yml
+  组件配置分享讨论模板。
+
+.github/workflows/build_release.yml
+  发布构建流水线：多平台矩阵构建、签名、打包、上传 Release。
+
+.github/workflows/close_stale_issues.yml
+  自动关闭长期无响应 Issue。
+
+.github/workflows/issues_similarity_analysis.yml
+  Issue 相似度分析（自动标记重复问题）。
+
+.github/workflows/qodana_code_quality.yml
+  Qodana 代码质量检查。
+
+.agents/acceptance/*.md
+  验收流程说明、常见错误、探针 Mock 模式与项目适配说明。
+
+.agents/skills/acceptance/**
+  验收技能：SKILL.md、OpenAI 代理配置、references 参考文档
+  （浏览器、CDP、证据、报告格式、录屏、iOS 模拟器等）、scripts 辅助脚本、
+  surfaces 各平台验收说明。
+
+.claude/skills、.codex/skills、.gemini/skills
+  各 AI 编码助手使用的技能目录（内容与 .agents/skills 对应）。
+
+.vscode/launch.json、tasks.json
+  VS Code 调试启动配置与构建任务。
+
+.idea/**
+  JetBrains Rider/IDEA 工程配置：解决方案名、VCS 映射、代码检查、字典、Proto 编辑器等。
+
+.nuke/build.schema.json、parameters.json
+  NUKE 构建参数模式与默认参数。
+
+.nuke/temp/*.log
+  历史构建日志（本地生成，不属于源码）。
+
+patches/apply.txt、patch-1106.am、update-918.txt、update-918-last.txt、update.txt
+  上游同步/补丁应用过程记录与补丁片段。
+
+dist/*.zip
+  本地留存的分发包（Windows 自包含/依赖框架、带/不带 .NET 运行时）。
+
+out/、out.zip、patches.zip
+  NUKE 构建输出与打包产物（本地生成）。
+
+git
+  一个无扩展名的本地文件，内容为 Git 相关信息/占位，不属于应用代码。
+
+action.txt、fixxed.txt、out.txt、prompt-full.md
+  上游同步任务记录、修复记录、构建输出和提示词，属于工作过程文件。
+
+init.txt
+  本文档：代码库文件作用说明。
+
