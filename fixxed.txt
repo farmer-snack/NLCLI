@@ -1,4 +1,73 @@
 ================================================
+[2026-11-08 17:00] 同步 upstream/develop/v2/misha-alpha @ 186f5bf
+================================================
+
+范围：基线 d62329d0 → 186f5bf，上游 8 个提交，改动 58 个文件（新增 29 / 修改 29 / 删除 0）。
+处理：冲突 1 个（残留 0 个，SettingsWindowNew.axaml.cs 手工合并并保留本地定制）；本地定制 6 个文件与上游同改，走三方合并；分支回退 0。
+构建：ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1378 warnings）
+
+改动的文件
+----------
+- .codex/config.toml — 取上游
+- ClassIsland.Android/Application.cs — 取上游
+- ClassIsland.Android/ClassIsland.Android.csproj — 取上游
+- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml.cs — 取上游
+- ClassIsland.Android/Helpers/NavigationRepeaterAutomationFix.cs — 取上游
+- ClassIsland.Android/MainActivity.cs — 取上游
+- ClassIsland.Core/Abstractions/Controls/IViewHost.cs — 取上游
+- ClassIsland.Core/Abstractions/Controls/MainViewPageBase.cs — 取上游
+- ClassIsland.Core/Abstractions/Controls/ViewBase.cs — 取上游
+- ClassIsland.Core/Abstractions/Services/INotificationWorkerService.cs — 取上游
+- ClassIsland.Core/Assists/ScrollViewerAssist.cs — 取上游
+- ClassIsland.Core/Attributes/FullWidthPageAttribute.cs — 取上游
+- ClassIsland.Core/Attributes/MainViewPageInfo.cs — 取上游
+- ClassIsland.Core/Controls/CompositionPageTransition.cs — 取上游
+- ClassIsland.Core/Controls/ConfettiAdorner.cs — 取上游
+- ClassIsland.Core/Controls/ConfettiAnimation.cs — 取上游
+- ClassIsland.Core/Controls/MyWindow.cs — 三方合并
+- ClassIsland.Core/Enums/MainView/MainViewPageCategory.cs — 取上游
+- ClassIsland.Core/Extensions/Registry/MainViewRegistryExtensions.cs — 取上游
+- ClassIsland.Core/Extensions/Registry/NotificationEffectRegistryExtensions.cs — 取上游
+- ClassIsland.Core/Helpers/UI/ConfettiHelper.cs — 取上游
+- ClassIsland.Core/Models/Notification/NotificationEffectContext.cs — 取上游
+- ClassIsland.Core/Models/Notification/NotificationEffectRegisterInfo.cs — 取上游
+- ClassIsland.Core/Models/Notification/NotificationPlayingTicket.cs — 取上游
+- ClassIsland.Core/Models/Notification/NotificationRequest.cs — 取上游
+- ClassIsland.Shared/Abstraction/Models/INotificationSettings.cs — 取上游
+- ClassIsland.Shared/Models/Notification/NotificationSettings.cs — 取上游
+- ClassIsland/App.Services.xaml.cs — 三方合并
+- ClassIsland/Controls/MainWindowLine.cs — 取上游
+- ClassIsland/Controls/NotificationEffects/ConfettiEffect.cs — 取上游
+- ClassIsland/Controls/NotificationEffects/RippleEffect.axaml.cs — 取上游
+- ClassIsland/Controls/PhonyTopmostEffectPlayer.cs — 取上游
+- ClassIsland/Controls/UI/WindowViewHost.axaml.cs — 取上游
+- ClassIsland/Helpers/TextRenderingBenchmarkReport.cs — 取上游
+- ClassIsland/Models/Settings.cs — 三方合并
+- ClassIsland/Models/TextRenderingBenchmark.cs — 取上游
+- ClassIsland/Services/NotificationWorkerService.cs — 三方合并
+- ClassIsland/ViewModels/SettingsNewViewModel.cs — 取上游
+- ClassIsland/ViewModels/TextRenderingBenchmarkViewModel.cs — 取上游
+- ClassIsland/Views/DevPortalWindow.axaml — 取上游
+- ClassIsland/Views/DevPortalWindow.axaml.cs — 取上游
+- ClassIsland/Views/MainView.axaml — 取上游
+- ClassIsland/Views/MainView.axaml.cs — 取上游
+- ClassIsland/Views/MainViewPages/MoreMainViewPage.axaml — 取上游
+- ClassIsland/Views/MainViewPages/MoreMainViewPage.axaml.cs — 取上游
+- ClassIsland/Views/MainViewPages/ScheduleMainViewCommandBar.axaml — 取上游
+- ClassIsland/Views/MainViewPages/ScheduleMainViewCommandBar.axaml.cs — 取上游
+- ClassIsland/Views/MainViewPages/TodayMainViewPage.axaml — 取上游
+- ClassIsland/Views/MainViewPages/TodayMainViewPage.axaml.cs — 取上游
+- ClassIsland/Views/MainViewPages/WeekMainViewPage.axaml — 取上游
+- ClassIsland/Views/MainViewPages/WeekMainViewPage.axaml.cs — 取上游
+- ClassIsland/Views/SettingPages/NotificationSettingsPage.axaml — 三方合并
+- ClassIsland/Views/SettingPages/SettingsNavigationPage.axaml — 取上游
+- ClassIsland/Views/SettingPages/SettingsNavigationPage.axaml.cs — 取上游
+- ClassIsland/Views/SettingsWindowNew.axaml — 取上游
+- ClassIsland/Views/SettingsWindowNew.axaml.cs — 冲突修正
+- ClassIsland/Views/TextRenderingBenchmarkView.axaml — 取上游
+- ClassIsland/Views/TextRenderingBenchmarkView.axaml.cs — 取上游
+
+================================================
 [2026-11-06 21:10] 同步 upstream/develop/v2/misha-alpha @ d62329d0
 ================================================
 

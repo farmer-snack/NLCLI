@@ -1,14 +1,15 @@
 # 上游同步进度记录
-UPSTREAM_REPO   = https://github.com/ClassIsland/ClassIsland.git
-UPSTREAM_BRANCH = develop/v2/misha-alpha
-BRANCH_FALLBACK = 0
-LAST_SYNCED_SHA   = d62329d093e146cf9d51758c82c8c9f6aa174b3b
-LAST_SYNCED_SHORT = d62329d0
-LAST_SYNCED_AT    = 2026-11-06T21:10:29+0800
-BASE_SHA          = 329bf4b1
-SYNCED_FROM       = origin/develop/v2/misha-alpha @ adb53d46
-MY_REMOTE_URL     = https://github.com/farmer-snack/nlcli.git
+UPSTREAM_REPO      = https://github.com/ClassIsland/ClassIsland.git
+UPSTREAM_BRANCH    = develop/v2/misha-alpha
+UPSTREAM_BRANCH_FB = master
+BRANCH_FALLBACK    = 0
+LAST_SYNCED_SHA   = 186f5bfed0a093ee6272e18e574dea2c3cb26df1
+LAST_SYNCED_SHORT = 186f5bf
+LAST_SYNCED_AT    = 2026-11-08T16:58:47+0800
+BASE_SHA          = d62329d0
+SYNCED_FROM       = origin/develop/v2/misha-alpha @ b93000f
+MY_REMOTE_URL     = https://ghfast.top/https://github.com/farmer-snack/nlcli.git
 LOCAL_BRANCH      = develop/v2/misha-alpha
-UPDATED_FILES     = 149
+UPDATED_FILES     = 58
 CONFLICT_FILES    = 1
-BUILD_RESULT      = 通过（0 errors / 1371 warnings）
+BUILD_RESULT      = 通过（增量单次）
