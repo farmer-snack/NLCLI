@@ -2,6 +2,31 @@
 （最新记录在最上方，越往下越旧）
 
 ================================================================
+## 2026-11-08 21:34:00  同步 9804dec
+上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (9804dec)
+本次基线 : 186f5bfe
+本地分支 : develop/v2/misha-alpha  →  本地提交见本次 commit
+
+新增:
+  - ClassIsland/Controls/NotificationEffects/StarFountainEffect.cs
+修改:
+  - ClassIsland/App.Services.xaml.cs（三方合并）
+  - ClassIsland/Controls/ActionSettingsControls/NotificationActionSettingsControl.axaml
+  - ClassIsland/Models/Actions/NotificationActionSettings.cs
+  - ClassIsland/Services/Automation/Actions/NotificationAction.cs
+  - ClassIsland/Views/SettingsWindowNew.axaml
+  - ClassIsland/Views/SettingsWindowNew.axaml.cs（三方合并）
+删除:
+  - (无)
+本次无 Action 变更
+本次同步的上游提交（3 个，全部列出，每条附改动文件数）:
+  - 6813faed feat(notification): 添加星星喷泉提醒特效（2 个文件）
+  - 87a77457 feat(ui/settings): 将应用设置的导航容器重构为 NavigationPage（2 个文件）
+  - 9804dec0 feat(r/actions/notification): 允许提醒行动覆盖提醒特效（3 个文件）
+冲突修正 : 本次 2 个定制文件三方合并均为干净合并，冲突 0 个，残留 0 个
+================================================================
+
+================================================================
 ## 2026-11-08 16:59:37  同步 186f5bf
 上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (186f5bf)
 本次基线 : d62329d0

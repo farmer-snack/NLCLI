@@ -364,6 +364,7 @@ public partial class App
         // 提醒效果
         services.AddNotificationEffect("classisland.ripple", "波纹", RippleEffect.Create);
         services.AddNotificationEffect("classisland.confetti", "下彩带", ConfettiEffect.Create);
+        services.AddNotificationEffect("classisland.starFountain", "星星喷泉", StarFountainEffect.Create);
         // Plugins
         // 安全模式下仍然扫描插件清单，否则插件页面会是空的，用户无法禁用或卸载出问题的插件。
         if (string.IsNullOrWhiteSpace(ApplicationCommand.ImportV1) && string.IsNullOrWhiteSpace(ApplicationCommand.ImportV2))

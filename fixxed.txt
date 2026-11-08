@@ -1,4 +1,57 @@
 ================================================
+[2026-11-08 21:34] 同步 upstream/develop/v2/misha-alpha @ 9804dec
+================================================
+
+范围：基线 186f5bfe → 9804dec，上游 3 个提交，改动 7 个文件（新增 1 / 修改 6 / 删除 0）。
+处理：冲突 0 个；2 个定制文件（App.Services.xaml.cs、SettingsWindowNew.axaml.cs）三方合并均为干净合并；分支回退 0。
+构建：ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1334 warnings）
+
+改动的文件
+----------
+- ClassIsland/App.Services.xaml.cs — 三方合并
+- ClassIsland/Controls/ActionSettingsControls/NotificationActionSettingsControl.axaml — 取上游
+- ClassIsland/Controls/NotificationEffects/StarFountainEffect.cs — 取上游（新增）
+- ClassIsland/Models/Actions/NotificationActionSettings.cs — 取上游
+- ClassIsland/Services/Automation/Actions/NotificationAction.cs — 取上游
+- ClassIsland/Views/SettingsWindowNew.axaml — 取上游
+- ClassIsland/Views/SettingsWindowNew.axaml.cs — 三方合并
+
+本轮上游主要内容
+----------------
+- 新增星星喷泉提醒特效（StarFountainEffect）。
+- 应用设置导航容器重构为 NavigationPage（SettingsNavigationPage 成为独立导航页）。
+- 提醒行动（NotificationAction）可覆盖提醒特效，NotificationActionSettings 增加特效字段。
+- SettingsWindowNew 大改 213 行；「变量调试」页常显的过滤条件已随 BuildNavigationSections 保留。
+
+================================================
+[2026-11-08 21:10] [修复] 兼容层：枚举签名被写成 class，插件 JIT 报 Method not found
+================================================
+
+现象：SystemTools 2.5.1.0 加载后，FloatingWindowService.EnsureWindow() 抛
+      System.MissingMethodException: Method not found:
+      'Void Avalonia.Controls.Window.set_WindowDecorations(Avalonia.Controls.WindowDecorations)'。
+      上一版（CompatibilityVersion=4）报的是 set_SystemDecorations(WindowDecorations)。
+
+根因：Cecil 手工 new TypeReference(...) 的 IsValueType 默认为 false。WindowDecorations 是枚举，
+      按 class 写进方法签名后，JIT 解析目标方法时签名对不上 —— 宿主里方法确实存在，也报 Method not found。
+      实测签名：
+        IsValueType=false → 20 01 01 12 0D  （class，失败）
+        IsValueType=true  → 20 01 01 11 0D  （valuetype，正确）
+        宿主真签名        → 20 01 01 11 85 40（valuetype，TypeDef）
+
+修复：
+- 新增 MakeValueTypeReference()，构造时显式置 IsValueType = true。
+- Window.SystemDecorations → WindowDecorations 的 get/set 改写改用它。
+- Window.WindowDecorationsProperty（StyledProperty<Window, WindowDecorations>）与
+  Window.WindowStateProperty（DirectProperty<Window, WindowState>）的泛型实参同样改为值类型引用
+  —— WindowState 也是枚举，之前同样被写成 class，属于同一类潜在故障。
+- 宿主没有 WindowDecorations 属性（Avalonia 11）时跳过改写，保留原名原类型。
+- CompatibilityVersion 4 → 5，强制丢弃已生成的旧缓存。
+
+语义核对：Avalonia 11.0.0 的 SystemDecorations 与 12.1.4 的 WindowDecorations 数值一致
+          （None=0 / BorderOnly=1 / Full=2），改名不会改变窗口装饰行为。
+
+================================================
 [2026-11-08 17:00] 同步 upstream/develop/v2/misha-alpha @ 186f5bf
 ================================================
 
