@@ -60,7 +60,14 @@ internal static class PluginTypeCompatibility
     /// <summary>
     /// 兼容规则的版本号。重写逻辑发生变化时必须递增，否则旧缓存会被继续复用。
     /// </summary>
-    private const int CompatibilityVersion = 4;
+    private const int CompatibilityVersion = 5;
+
+    /// <summary>
+    /// 宿主是否已经把 <c>Window.SystemDecorations</c> 正式改名为 <c>Window.WindowDecorations</c>（Avalonia 12 起）。
+    /// 老宿主上没有这个属性，插件原本的引用就有效，不需要改写。
+    /// </summary>
+    private static readonly bool HostHasWindowDecorationsProperty =
+        typeof(Avalonia.Controls.Window).GetProperty("WindowDecorations") != null;
 
     /// <summary>
     /// 宿主当前 Avalonia 的主版本号。用于判断插件是否需要兼容处理。
@@ -579,7 +586,16 @@ internal static class PluginTypeCompatibility
             // WindowDecorations，而且并不保证在所有发行版/裁剪配置里都存在。只改参数类型、
             // 保留 set_SystemDecorations 方法名，等于把插件押在这个兼容属性上；一旦宿主里没有，
             // 就会在 JIT 时抛 MissingMethodException。这里连方法名一起改成正式属性。
-            var decorations = MakeTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
+            //
+            // 注意：WindowDecorations 是枚举，必须按值类型写入签名。Cecil 手工 new 出来的
+            // TypeReference 默认 IsValueType = false，会写成 class，同样触发 MissingMethodException。
+            if (!HostHasWindowDecorationsProperty)
+            {
+                // Avalonia 11 宿主：原名原类型都有效，保持不动。
+                return;
+            }
+
+            var decorations = MakeValueTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
             if (name == "set_SystemDecorations" && parameterCount == 1)
             {
                 method.Parameters[0].ParameterType = decorations;
@@ -628,15 +644,20 @@ internal static class PluginTypeCompatibility
         if (declaring == "Avalonia.Controls.Window" && field.Name == "WindowStateProperty")
         {
             var window = MakeTypeReference(module, "Avalonia.Controls", "Window", "Avalonia.Controls");
-            var state = MakeTypeReference(module, "Avalonia.Controls", "WindowState", "Avalonia.Controls");
+            var state = MakeValueTypeReference(module, "Avalonia.Controls", "WindowState", "Avalonia.Controls");
             field.FieldType = MakeGenericType(module, "Avalonia", "DirectProperty`2", "Avalonia.Base", window, state);
             changes.Add("Window.WindowStateProperty → DirectProperty<Window, WindowState>");
         }
 
         if (declaring == "Avalonia.Controls.Window" && field.Name == "SystemDecorationsProperty")
         {
+            if (!HostHasWindowDecorationsProperty)
+            {
+                return;
+            }
+
             var window = MakeTypeReference(module, "Avalonia.Controls", "Window", "Avalonia.Controls");
-            var decorations = MakeTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
+            var decorations = MakeValueTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
             field.Name = "WindowDecorationsProperty";
             field.FieldType = MakeGenericType(module, "Avalonia", "StyledProperty`2", "Avalonia.Base", window, decorations);
             changes.Add("Window.SystemDecorationsProperty → Window.WindowDecorationsProperty");
@@ -1004,6 +1025,26 @@ internal static class PluginTypeCompatibility
         string name,
         string assemblyName) =>
         new(ns, name, module, ResolveAssemblyReference(module, assemblyName));
+
+    /// <summary>
+    /// 构造指向宿主程序集的值类型引用（枚举 / 结构体）。
+    /// </summary>
+    /// <remarks>
+    /// Cecil 用手工 <see cref="Cecil.TypeReference"/> 构造出来的引用，<c>IsValueType</c> 默认是
+    /// <see langword="false"/>，写进签名会变成 <c>class</c>。枚举/结构体一旦按 <c>class</c> 编码，
+    /// JIT 解析目标方法时签名对不上，直接抛 <see cref="MissingMethodException"/>
+    /// （典型症状：<c>Window.set_WindowDecorations</c> 明明存在却报 Method not found）。
+    /// </remarks>
+    private static Cecil.TypeReference MakeValueTypeReference(
+        Cecil.ModuleDefinition module,
+        string ns,
+        string name,
+        string assemblyName)
+    {
+        var reference = MakeTypeReference(module, ns, name, assemblyName);
+        reference.IsValueType = true;
+        return reference;
+    }
 
     /// <summary>
     /// 构造指向宿主程序集的泛型实例引用。
