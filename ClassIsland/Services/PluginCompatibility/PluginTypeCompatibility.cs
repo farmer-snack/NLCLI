@@ -60,7 +60,7 @@ internal static class PluginTypeCompatibility
     /// <summary>
     /// 兼容规则的版本号。重写逻辑发生变化时必须递增，否则旧缓存会被继续复用。
     /// </summary>
-    private const int CompatibilityVersion = 3;
+    private const int CompatibilityVersion = 4;
 
     /// <summary>
     /// 宿主当前 Avalonia 的主版本号。用于判断插件是否需要兼容处理。
@@ -572,15 +572,29 @@ internal static class PluginTypeCompatibility
             return;
         }
 
-        if (declaring == "Avalonia.Controls.Window" &&
-            name == "set_SystemDecorations" &&
-            parameterCount == 1 &&
-            GetElementTypeFullName(method.Parameters[0].ParameterType) == "Avalonia.Controls.SystemDecorations")
+        if (declaring == "Avalonia.Controls.Window" && name is "set_SystemDecorations" or "get_SystemDecorations")
         {
-            method.Parameters[0].ParameterType =
-                MakeTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
-            changes.Add("Window.SystemDecorations → WindowDecorations");
-            return;
+            // Avalonia 12 把 Window.SystemDecorations 的正式名称改成了 WindowDecorations。
+            // 12.x 虽然还留着 SystemDecorations 这个 [Obsolete] 兼容属性，但它的类型已经换成
+            // WindowDecorations，而且并不保证在所有发行版/裁剪配置里都存在。只改参数类型、
+            // 保留 set_SystemDecorations 方法名，等于把插件押在这个兼容属性上；一旦宿主里没有，
+            // 就会在 JIT 时抛 MissingMethodException。这里连方法名一起改成正式属性。
+            var decorations = MakeTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
+            if (name == "set_SystemDecorations" && parameterCount == 1)
+            {
+                method.Parameters[0].ParameterType = decorations;
+                method.Name = "set_WindowDecorations";
+                changes.Add("Window.SystemDecorations → Window.WindowDecorations（属性名与类型）");
+                return;
+            }
+
+            if (name == "get_SystemDecorations" && parameterCount == 0)
+            {
+                method.ReturnType = decorations;
+                method.Name = "get_WindowDecorations";
+                changes.Add("Window.SystemDecorations → Window.WindowDecorations（属性名与类型）");
+                return;
+            }
         }
 
         // 剪贴板文本 API 在 Avalonia 12 中改为扩展方法。
@@ -617,6 +631,15 @@ internal static class PluginTypeCompatibility
             var state = MakeTypeReference(module, "Avalonia.Controls", "WindowState", "Avalonia.Controls");
             field.FieldType = MakeGenericType(module, "Avalonia", "DirectProperty`2", "Avalonia.Base", window, state);
             changes.Add("Window.WindowStateProperty → DirectProperty<Window, WindowState>");
+        }
+
+        if (declaring == "Avalonia.Controls.Window" && field.Name == "SystemDecorationsProperty")
+        {
+            var window = MakeTypeReference(module, "Avalonia.Controls", "Window", "Avalonia.Controls");
+            var decorations = MakeTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
+            field.Name = "WindowDecorationsProperty";
+            field.FieldType = MakeGenericType(module, "Avalonia", "StyledProperty`2", "Avalonia.Base", window, decorations);
+            changes.Add("Window.SystemDecorationsProperty → Window.WindowDecorationsProperty");
         }
     }
 
