@@ -23,7 +23,10 @@ env:
   MACOS_XCODE_PATH: /Applications/Xcode_26.6.app/Contents/Developer
 
 jobs:
+  # 本工作流依赖官方仓库的私有 secrets（签名、S3、NuGet 源等），
+  # 在 fork 中整体跳过，避免必然失败的红色构建。fork 请使用 build_fork.yml。
   build_app:
+    if: ${{ github.repository == 'ClassIsland/ClassIsland' }}
     runs-on: ${{ matrix.os == 'linux' &&  'ubuntu-24.04' || ( matrix.os == 'macos' && 'macos-26' || 'windows-2022' ) }}
     env:
       build_id: appBase_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.build_type }}_${{ matrix.package }}
@@ -118,6 +121,7 @@ jobs:
             ./out/*.pkg
 
   build_android:
+    if: ${{ github.repository == 'ClassIsland/ClassIsland' }}
     runs-on: ubuntu-24.04
     env:
       artifact_name: out_app_android_${{ matrix.arch }}_monoaot_apk
@@ -215,6 +219,7 @@ jobs:
           if-no-files-found: error
             
   build_launcher:
+    if: ${{ github.repository == 'ClassIsland/ClassIsland' }}
     runs-on: ${{ matrix.os == 'windows' && 'windows-2022' || 'ubuntu-24.04' }}
     env:
       build_id: launcher_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.build_type }}_${{ matrix.package }}
@@ -283,7 +288,7 @@ jobs:
   sign_1:
     name: Sign_1
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.release_tag && github.event_name != 'pull_request' && github.event.inputs.is_test_mode != 'true' }}
+    if: ${{ github.repository == 'ClassIsland/ClassIsland' && github.event.inputs.release_tag && github.event_name != 'pull_request' && github.event.inputs.is_test_mode != 'true' }}
     needs: [ build_app, build_launcher ]
     steps:
       - name: Checkout
@@ -338,7 +343,7 @@ jobs:
   pack_app:
     runs-on: ${{ matrix.os == 'windows' && 'windows-2022' || 'ubuntu-latest' }}
     needs: [ sign_1 ]
-    if: ${{ always() && success('build_app') && success('build_launcher') }}
+    if: ${{ github.repository == 'ClassIsland/ClassIsland' && always() && success('build_app') && success('build_launcher') }}
     env:
       build_id: app_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.build_type }}_${{ matrix.package }}
       artifact_name: out_app_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.build_type }}_${{ matrix.package }}
@@ -407,6 +412,7 @@ jobs:
             ${{ github.workspace }}/out_pack/*.exe
           
   build_nupkg:
+    if: ${{ github.repository == 'ClassIsland/ClassIsland' }}
     runs-on: windows-2022
     env:
       Solution_Name: ClassIsland.sln
@@ -468,7 +474,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       isTestMode: ${{ github.event.inputs.is_test_mode == 'true' }}
-    if: ${{ always() && success('pack_app') && success('build_nupkg') && success('build_android') && github.event.inputs.release_tag && github.event_name != 'pull_request' }}
+    if: ${{ github.repository == 'ClassIsland/ClassIsland' && always() && success('pack_app') && success('build_nupkg') && success('build_android') && github.event.inputs.release_tag && github.event_name != 'pull_request' }}
     needs: [ pack_app, build_nupkg, build_android ]
     concurrency:
       group: "publish-public"
