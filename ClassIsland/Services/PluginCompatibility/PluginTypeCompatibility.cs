@@ -94,13 +94,15 @@ internal static class PluginTypeCompatibility
     /// Avalonia 12 中已经彻底移除、只能改名到新类型的旧类型。
     /// 这些名字无法从宿主类型表里反推（新旧名字没有包含关系），因此显式列出。
     /// </summary>
-    private static readonly Dictionary<string, (string Namespace, string Name, string Assembly)> RemovedTypeAliases =
+    private static readonly Dictionary<string, (string Namespace, string Name, string Assembly, bool IsValueType)> RemovedTypeAliases =
         new(StringComparer.Ordinal)
         {
-            ["Avalonia.Data.IBinding"] = ("Avalonia.Data", "BindingBase", "Avalonia.Base"),
-            ["Avalonia.Controls.SystemDecorations"] = ("Avalonia.Controls", "WindowDecorations", "Avalonia.Controls"),
-            ["Avalonia.Input.IDataObject"] = ("Avalonia.Input", "IDataTransfer", "Avalonia.Base"),
-            ["Avalonia.Input.DataObject"] = ("Avalonia.Input", "DataTransfer", "Avalonia.Base"),
+            ["Avalonia.Data.IBinding"] = ("Avalonia.Data", "BindingBase", "Avalonia.Base", false),
+            // WindowDecorations 是枚举。Cecil 手工构造的 TypeReference 默认 IsValueType=false，
+            // 会把枚举写成 class，导致 JIT 按签名找不到宿主方法（MissingMethodException）。
+            ["Avalonia.Controls.SystemDecorations"] = ("Avalonia.Controls", "WindowDecorations", "Avalonia.Controls", true),
+            ["Avalonia.Input.IDataObject"] = ("Avalonia.Input", "IDataTransfer", "Avalonia.Base", false),
+            ["Avalonia.Input.DataObject"] = ("Avalonia.Input", "DataTransfer", "Avalonia.Base", false),
         };
 
 
@@ -878,6 +880,9 @@ internal static class PluginTypeCompatibility
         type.Namespace = alias.Namespace;
         type.Name = alias.Name;
         type.DeclaringType = null;
+        // 值类型标志必须显式设置：TypeReference 默认 false，枚举会被写成 class，
+        // 方法签名就再也匹配不上宿主里的真实定义了。
+        type.IsValueType = alias.IsValueType;
         if (type.Scope is not Cecil.AssemblyNameReference scope ||
             !scope.Name.Equals(alias.Assembly, StringComparison.OrdinalIgnoreCase))
         {

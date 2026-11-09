@@ -1035,8 +1035,10 @@ public partial class App : AppBase, IAppHost
             var migratedPlugins = LegacyDataMigrationHelper.Results.Sum(x => x.CopiedPlugins);
             var migratedBackups = LegacyDataMigrationHelper.Results.Sum(x => x.CopiedBackups);
             var skippedPlugins = LegacyDataMigrationHelper.Results.Sum(x => x.SkippedPlugins);
+            var failedItems = LegacyDataMigrationHelper.Results.Sum(x => x.FailedPlugins + x.FailedBackups);
             var message = $"已从旧版本目录复制 {migratedPlugins} 个插件、{migratedBackups} 个备份包" +
-                          (skippedPlugins > 0 ? $"，{skippedPlugins} 个同名插件保留了当前版本" : "") + "。";
+                          (skippedPlugins > 0 ? $"，{skippedPlugins} 个同名插件保留了当前版本" : "") +
+                          (failedItems > 0 ? $"，{failedItems} 项复制失败，详见 Logs/legacy-migration.log" : "") + "。";
             PlatformServices.DesktopToastService.ShowToastAsync("已迁移旧版本数据", message);
         }
         File.Delete(startupCountFilePath);

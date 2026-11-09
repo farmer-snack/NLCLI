@@ -1,4 +1,59 @@
 ================================================
+[2026-11-09 22:05] [修复] 兼容层：类型别名重定向漏设 IsValueType
+================================================
+
+现象：SystemTools 2.5.1.0 的悬浮窗仍无法创建。上一版修复只覆盖了
+      Window.set_SystemDecorations 这一个方法引用，插件里其它 SystemDecorations
+      类型引用（局部变量签名、字段、泛型实参）仍被写成 class。
+
+根因：RemovedTypeAliases 只存命名空间/类型名/程序集，NormalizeType 改名时
+      没有同步 IsValueType。WindowDecorations 是枚举，写成 class 后 JIT
+      解析签名失败。
+
+修复：
+- 别名表增加 IsValueType 字段，SystemDecorations → WindowDecorations 标记为 true。
+- NormalizeType 应用别名时写入该标志。
+
+验证（对 SystemTools 2.5.1.0 做完整规则模拟）：
+- FluentAvalonia 3 的 FA 前缀重命名命中 10 个类型（ContentDialog→FAContentDialog 等）。
+- Avalonia / FluentAvalonia 无法解析的成员从 60 项降到 17 项。
+- SystemDecorations 相关引用全部通过。
+
+仍无法兼容（Avalonia 12 的真实 API 破坏，非改名可解）：
+- IClipboard.GetTextAsync / SetTextAsync（12 改为 TryGetDataAsync / SetDataAsync）
+- IDataTransfer.Contains / Get、DataTransfer.Set（数据传输接口重构）
+- DragDrop.DoDragDrop、DragEventArgs.Data
+- ToggleButton.CheckedEvent / UncheckedEvent（改为 IsCheckedChangedEvent）
+- Binding(string, BindingMode) 构造与 BindingBase.Mode
+
+================================================
+[2026-11-09 22:05] [修复] 旧版本数据迁移：Debug / Release / 便携版三形态
+================================================
+
+现象：Debug 构建里，旧版本的插件与备份都没有被复制过来，「恢复备份」列表为空。
+      旧版本有自启动项、有完整数据。
+
+根因（三处叠加）：
+1. 记账过宽：备份复制失败不计入计数，仍会被写入迁移记录，下次永远跳过。
+2. 旧目录发现太窄：只查自启项与 %AppData%\ClassIsland\Data，
+   漏掉 %LocalAppData% 和 exe 相邻目录（便携版 / Release / Debug）。
+3. 旧格式记账没有版本头，无法区分「成功」与「失败后误记」。
+
+修复：
+- 发现：自启项（.lnk + HKCU/HKLM Run，含 32 位视图）+ %AppData% / %LocalAppData%
+  + exe 相邻两级的 data 与目录自身。
+- 记账：#v2 格式，只有插件和备份都处理完才记账；旧格式自动丢弃重扫。
+- 复制：备份支持 zip 与目录；插件支持子目录与根目录文件。
+- 隔离：每个旧目录独立 try/catch，单个失败不影响其它目录。
+- 日志：扫描候选与每个目录的结果写入 Logs/legacy-migration.log。
+- 排重：跳过与当前数据目录相同、互为祖先/后代的路径，避免自我复制。
+
+三形态覆盖：
+- Debug：AppRootFolderPath = exe 目录（PackagingType 默认 folderClassic）。
+- Release / 便携版：AppRootFolderPath = 安装根/data（PackagingType=folder）。
+- 安装版：%AppData%\ClassIsland\Data（installer/msix）。
+
+================================================
 [2026-11-08 21:34] 同步 upstream/develop/v2/misha-alpha @ 9804dec
 ================================================
 

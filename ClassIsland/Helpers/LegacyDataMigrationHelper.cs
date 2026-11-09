@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using ClassIsland.Core;
 using ClassIsland.Services;
 using Microsoft.Win32;
@@ -12,11 +14,22 @@ namespace ClassIsland.Helpers;
 /// 从其它 ClassIsland 安装目录迁移插件与备份包。
 /// </summary>
 /// <remarks>
-/// 旧目录通过开机自启项定位：启动文件夹里的 .lnk 快捷方式，以及注册表 Run 键。
+/// 兼容三种部署形态：
+/// <list type="bullet">
+/// <item>Debug：PackagingType 为默认值，数据目录就是 exe 所在目录。</item>
+/// <item>Release / 便携版：PackagingType=folder，数据目录是安装根下的 data 子目录。</item>
+/// <item>安装版 / 商店版：数据目录为 %AppData%\ClassIsland\Data。</item>
+/// </list>
+/// 旧目录通过开机自启项、常见安装位置和当前 exe 的相邻目录综合定位。
 /// 只做复制，不移动、不覆盖已有文件，避免影响仍在使用的旧版本。
 /// </remarks>
 public static class LegacyDataMigrationHelper
 {
+    /// <summary>迁移记录的格式版本。旧格式（无版本头）会被丢弃并重新扫描。</summary>
+    private const string MarkerVersion = "#v2";
+
+    private const string LogFileName = "legacy-migration.log";
+
     /// <summary>用来判断一个目录是不是 ClassIsland 的数据目录。</summary>
     private static readonly string[] DataMarkers = ["Plugins", "Backups", "Config", "Settings.json"];
 
@@ -28,10 +41,22 @@ public static class LegacyDataMigrationHelper
         int CopiedPlugins,
         int SkippedPlugins,
         int CopiedBackups,
-        int FailedPlugins);
+        int FailedPlugins,
+        int FailedBackups,
+        bool PluginsComplete,
+        bool BackupsComplete)
+    {
+        /// <summary>插件与备份都已处理完毕（没有失败项），可以记账。</summary>
+        public bool Complete => PluginsComplete && BackupsComplete;
+
+        /// <summary>本次是否真的产生了动作，用于决定要不要提示用户。</summary>
+        public bool HasChanges =>
+            CopiedPlugins > 0 || CopiedBackups > 0 || SkippedPlugins > 0 ||
+            FailedPlugins > 0 || FailedBackups > 0;
+    }
 
     /// <summary>
-    /// 扫描开机自启项并迁移旧版本数据。必须在 <see cref="CommonDirectories.AppRootFolderPath"/>
+    /// 扫描旧版本目录并迁移数据。必须在 <see cref="CommonDirectories.AppRootFolderPath"/>
     /// 确定之后、插件扫描之前调用。
     /// </summary>
     public static void Run()
@@ -44,58 +69,98 @@ public static class LegacyDataMigrationHelper
         }
 
         var results = new List<MigrationResult>();
+        var log = new StringBuilder();
         try
         {
             var currentRoot = NormalizePath(CommonDirectories.AppRootFolderPath);
+            Log(log, $"当前数据目录：{currentRoot}");
+
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var migrated = LoadMigratedRoots();
-            foreach (var legacyRoot in EnumerateLegacyDataRoots())
+            var migrated = LoadMigratedRoots(log);
+            foreach (var legacyRoot in EnumerateLegacyDataRoots(log))
             {
-                var normalized = NormalizePath(legacyRoot);
-                // 指向自己的启动项不算旧版本，同一个目录也只处理一次。
-                if (string.Equals(normalized, currentRoot, StringComparison.OrdinalIgnoreCase) ||
-                    !visited.Add(normalized) || migrated.Contains(normalized))
+                string normalized;
+                try
+                {
+                    normalized = NormalizePath(legacyRoot);
+                }
+                catch (Exception ex)
+                {
+                    Log(log, $"跳过无法解析的路径 {legacyRoot}：{ex.Message}");
+                    continue;
+                }
+
+                // 当前目录自身、以及和当前目录有包含关系的路径都必须跳过：
+                // 否则会把当前数据目录再复制进它自己，或者把整棵父目录当成旧数据。
+                if (IsSameOrNested(normalized, currentRoot))
+                {
+                    Log(log, $"跳过 {normalized}：与当前数据目录相同或存在包含关系");
+                    continue;
+                }
+
+                if (!visited.Add(normalized))
                 {
                     continue;
                 }
 
-                var result = Migrate(legacyRoot);
-                if (result.FailedPlugins == 0)
+                if (migrated.Contains(normalized))
                 {
-                    // 有失败项时不记账，下次启动重试。
-                    migrated.Add(normalized);
+                    Log(log, $"跳过 {normalized}：之前已完成迁移");
+                    continue;
                 }
-                if (result.CopiedPlugins > 0 || result.CopiedBackups > 0 ||
-                    result.SkippedPlugins > 0 || result.FailedPlugins > 0)
+
+                // 每个旧目录单独隔离，一个目录出错不影响其它目录。
+                try
                 {
-                    results.Add(result);
+                    var result = Migrate(legacyRoot, currentRoot);
+                    Log(log,
+                        $"处理 {normalized}：插件 复制 {result.CopiedPlugins} / 跳过 {result.SkippedPlugins} / 失败 {result.FailedPlugins}，" +
+                        $"备份 复制 {result.CopiedBackups} / 失败 {result.FailedBackups}");
+                    if (result.Complete)
+                    {
+                        // 只有插件和备份都处理完才记账；有失败项时下次启动继续重试。
+                        migrated.Add(normalized);
+                    }
+
+                    if (result.HasChanges)
+                    {
+                        results.Add(result);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log(log, $"处理 {normalized} 失败：{ex}");
                 }
             }
 
-            SaveMigratedRoots(migrated);
+            SaveMigratedRoots(migrated, log);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[旧版本迁移] 扫描失败：{ex}");
+            Log(log, $"扫描失败：{ex}");
         }
 
         Results = results;
+        WriteLog(log);
     }
 
     /// <summary>把旧目录下的插件和备份包复制到当前数据目录。</summary>
     internal static MigrationResult Migrate(string legacyRoot, string? currentRoot = null)
     {
-        currentRoot ??= CommonDirectories.AppRootFolderPath;
+        currentRoot = NormalizePath(currentRoot ?? CommonDirectories.AppRootFolderPath);
         var copiedPlugins = 0;
         var skippedPlugins = 0;
         var failedPlugins = 0;
         var copiedBackups = 0;
+        var failedBackups = 0;
 
+        var pluginsComplete = true;
         var sourcePlugins = Path.Combine(legacyRoot, "Plugins");
         if (Directory.Exists(sourcePlugins))
         {
             var targetPlugins = Path.Combine(currentRoot, "Plugins");
             Directory.CreateDirectory(targetPlugins);
+
             foreach (var source in Directory.EnumerateDirectories(sourcePlugins))
             {
                 var name = Path.GetFileName(source);
@@ -120,16 +185,42 @@ public static class LegacyDataMigrationHelper
                 catch (Exception ex)
                 {
                     failedPlugins++;
+                    pluginsComplete = false;
                     Console.WriteLine($"[旧版本迁移] 复制插件 {name} 失败：{ex.Message}");
+                }
+            }
+
+            // 插件包有时直接放在 Plugins 根目录（.cipx、.dll），一并复制。
+            foreach (var source in Directory.EnumerateFiles(sourcePlugins))
+            {
+                var name = Path.GetFileName(source);
+                var target = Path.Combine(targetPlugins, name);
+                if (File.Exists(target))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Copy(source, target, false);
+                    copiedPlugins++;
+                }
+                catch (Exception ex)
+                {
+                    failedPlugins++;
+                    pluginsComplete = false;
+                    Console.WriteLine($"[旧版本迁移] 复制插件文件 {name} 失败：{ex.Message}");
                 }
             }
         }
 
+        var backupsComplete = true;
         var sourceBackups = Path.Combine(legacyRoot, "Backups");
         if (Directory.Exists(sourceBackups))
         {
             var targetBackups = Path.Combine(currentRoot, "Backups");
             Directory.CreateDirectory(targetBackups);
+
             foreach (var source in Directory.EnumerateFiles(sourceBackups, "*.zip"))
             {
                 var target = Path.Combine(targetBackups, Path.GetFileName(source));
@@ -145,49 +236,171 @@ public static class LegacyDataMigrationHelper
                 }
                 catch (Exception ex)
                 {
+                    failedBackups++;
+                    backupsComplete = false;
                     Console.WriteLine($"[旧版本迁移] 复制备份 {Path.GetFileName(source)} 失败：{ex.Message}");
+                }
+            }
+
+            // 恢复页面同时支持目录形式的备份，这里也要带上。
+            foreach (var source in Directory.EnumerateDirectories(sourceBackups))
+            {
+                var name = Path.GetFileName(source);
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
+                var target = Path.Combine(targetBackups, name);
+                if (Directory.Exists(target))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    CopyDirectory(source, target);
+                    copiedBackups++;
+                }
+                catch (Exception ex)
+                {
+                    failedBackups++;
+                    backupsComplete = false;
+                    Console.WriteLine($"[旧版本迁移] 复制备份目录 {name} 失败：{ex.Message}");
                 }
             }
         }
 
-        return new MigrationResult(legacyRoot, copiedPlugins, skippedPlugins, copiedBackups, failedPlugins);
+        return new MigrationResult(
+            legacyRoot,
+            copiedPlugins,
+            skippedPlugins,
+            copiedBackups,
+            failedPlugins,
+            failedBackups,
+            pluginsComplete,
+            backupsComplete);
     }
 
     /// <summary>收集所有可能的旧版本数据目录。</summary>
-    private static IEnumerable<string> EnumerateLegacyDataRoots()
+    private static IEnumerable<string> EnumerateLegacyDataRoots(StringBuilder log)
     {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var target in EnumerateAutoStartTargets())
         {
-            var root = ResolveLegacyDataRoot(target);
-            if (root is not null)
+            string? root;
+            try
             {
+                root = ResolveLegacyDataRoot(target);
+            }
+            catch (Exception ex)
+            {
+                Log(log, $"解析自启目标 {target} 失败：{ex.Message}");
+                continue;
+            }
+
+            if (root is null)
+            {
+                Log(log, $"自启目标 {target} 未找到数据目录");
+                continue;
+            }
+
+            if (seen.Add(NormalizePath(root)))
+            {
+                Log(log, $"自启项定位到旧目录：{root}");
                 yield return root;
             }
         }
 
-        // 安装版的数据目录固定在 %AppData%\ClassIsland\Data。即使旧版本的启动项
-        // 已经被清理，只要数据还在，也一并迁移（从安装版换到便携版的情况）。
-        string installedData;
+        // 便携版换目录、安装版换便携版等场景下，自启项可能已被清理，
+        // 这里再把常见位置扫一遍。
+        foreach (var candidate in EnumerateWellKnownCandidates())
+        {
+            string normalized;
+            try
+            {
+                normalized = NormalizePath(candidate);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!HasDataMarkers(candidate) || !seen.Add(normalized))
+            {
+                continue;
+            }
+
+            Log(log, $"常见位置定位到旧目录：{candidate}");
+            yield return candidate;
+        }
+    }
+
+    /// <summary>
+    /// 枚举常见的数据目录候选。覆盖安装版（Roaming/Local）、
+    /// Release 便携版与 Debug（exe 相邻的 data 与目录自身）。
+    /// </summary>
+    private static IEnumerable<string> EnumerateWellKnownCandidates()
+    {
+        foreach (var special in new[]
+                 {
+                     Environment.SpecialFolder.ApplicationData,
+                     Environment.SpecialFolder.LocalApplicationData
+                 })
+        {
+            string baseDir;
+            try
+            {
+                baseDir = Environment.GetFolderPath(special);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(baseDir))
+            {
+                continue;
+            }
+
+            yield return Path.Combine(baseDir, "ClassIsland", "Data");
+            yield return Path.Combine(baseDir, "ClassIsland");
+        }
+
+        // 从当前 exe 所在目录向上找两级，覆盖：
+        //   便携版：<root>/data
+        //   Release：<root>/data（exe 可能在 <root>/bin 下）
+        //   Debug：<bin>/Debug/net10.0-windows.../ 自身（由 HasDataMarkers 判定）
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
+        if (string.IsNullOrEmpty(exeDir))
+        {
+            yield break;
+        }
+
+        DirectoryInfo? current;
         try
         {
-            installedData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClassIsland", "Data");
+            current = new DirectoryInfo(exeDir);
         }
         catch
         {
             yield break;
         }
 
-        if (HasDataMarkers(installedData))
+        for (var i = 0; i < 2 && current?.Parent is not null; i++)
         {
-            yield return installedData;
+            yield return Path.Combine(current.Parent.FullName, "data");
+            yield return current.Parent.FullName;
+            yield return Path.Combine(current.FullName, "data");
+            current = current.Parent;
         }
     }
 
     private static string MarkerFilePath =>
         Path.Combine(CommonDirectories.AppConfigPath, "legacy-migration.txt");
 
-    private static HashSet<string> LoadMigratedRoots()
+    private static HashSet<string> LoadMigratedRoots(StringBuilder log)
     {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
@@ -197,32 +410,45 @@ public static class LegacyDataMigrationHelper
                 return roots;
             }
 
-            foreach (var line in File.ReadAllLines(MarkerFilePath))
+            var lines = File.ReadAllLines(MarkerFilePath);
+            if (lines.Length == 0 || !string.Equals(lines[0].Trim(), MarkerVersion, StringComparison.Ordinal))
             {
-                if (!string.IsNullOrWhiteSpace(line))
+                // 旧版本记账不区分成功与否，可能把失败的目录也记上了。直接丢弃重扫。
+                Log(log, "迁移记录为旧格式，已忽略并重新扫描");
+                return roots;
+            }
+
+            foreach (var line in lines.Skip(1))
+            {
+                var value = line.Trim();
+                if (value.Length > 0)
                 {
-                    roots.Add(NormalizePath(line));
+                    roots.Add(NormalizePath(value));
                 }
             }
+
+            Log(log, $"已有迁移记录 {roots.Count} 条");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[旧版本迁移] 读取迁移记录失败：{ex.Message}");
+            Log(log, $"读取迁移记录失败：{ex.Message}");
         }
 
         return roots;
     }
 
-    private static void SaveMigratedRoots(HashSet<string> roots)
+    private static void SaveMigratedRoots(HashSet<string> roots, StringBuilder log)
     {
         try
         {
             Directory.CreateDirectory(CommonDirectories.AppConfigPath);
-            File.WriteAllLines(MarkerFilePath, roots);
+            var lines = new List<string> { MarkerVersion };
+            lines.AddRange(roots);
+            File.WriteAllLines(MarkerFilePath, lines);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[旧版本迁移] 写入迁移记录失败：{ex.Message}");
+            Log(log, $"写入迁移记录失败：{ex.Message}");
         }
     }
 
@@ -263,32 +489,36 @@ public static class LegacyDataMigrationHelper
     private static IEnumerable<string> EnumerateRunKeyTargets(RegistryHive hive)
     {
         var targets = new List<string>();
-        RegistryKey? key = null;
-        try
+        // 64 位系统上 Run 键可能写在 32 位视图（WOW6432Node），两个视图都查一遍。
+        foreach (var view in new[] { RegistryView.Default, RegistryView.Registry32 })
         {
-            key = RegistryKey.OpenBaseKey(hive, RegistryView.Default)
-                .OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-            if (key is null)
+            RegistryKey? key = null;
+            try
             {
-                return targets;
-            }
-
-            foreach (var name in key.GetValueNames())
-            {
-                var exe = ExtractExecutablePath(key.GetValue(name) as string);
-                if (!string.IsNullOrWhiteSpace(exe))
+                key = RegistryKey.OpenBaseKey(hive, view)
+                    .OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+                if (key is null)
                 {
-                    targets.Add(exe);
+                    continue;
+                }
+
+                foreach (var name in key.GetValueNames())
+                {
+                    var exe = ExtractExecutablePath(key.GetValue(name) as string);
+                    if (!string.IsNullOrWhiteSpace(exe) && !targets.Contains(exe, StringComparer.OrdinalIgnoreCase))
+                    {
+                        targets.Add(exe);
+                    }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[旧版本迁移] 读取 {hive} 启动项失败：{ex.Message}");
-        }
-        finally
-        {
-            key?.Dispose();
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[旧版本迁移] 读取 {hive}/{view} 启动项失败：{ex.Message}");
+            }
+            finally
+            {
+                key?.Dispose();
+            }
         }
 
         return targets;
@@ -340,7 +570,7 @@ public static class LegacyDataMigrationHelper
 
     /// <summary>
     /// 从可执行文件路径推导出旧版本的数据目录。便携版数据在 <c>data</c> 子目录，
-    /// 安装版数据在全局目录（和当前版本共用），后者不迁移。
+    /// Debug/Release 数据就在 exe 目录，安装版数据在全局目录（由调用方兜底）。
     /// </summary>
     internal static string? ResolveLegacyDataRoot(string executablePath)
     {
@@ -366,13 +596,37 @@ public static class LegacyDataMigrationHelper
             return null;
         }
 
+        // 便携版：exe 同级（或上级）的 data 子目录。
         var portableData = Path.Combine(directory, "data");
         if (HasDataMarkers(portableData))
         {
             return portableData;
         }
 
-        return HasDataMarkers(directory) ? directory : null;
+        // Debug / Release 绿色版：数据直接躺在 exe 旁边。
+        if (HasDataMarkers(directory))
+        {
+            return directory;
+        }
+
+        // exe 放在 <root>/bin 下的布局，数据在 <root>/data 或 <root>。
+        var parent = Path.GetDirectoryName(directory);
+        if (!string.IsNullOrEmpty(parent))
+        {
+            var parentData = Path.Combine(parent, "data");
+            if (HasDataMarkers(parentData))
+            {
+                return parentData;
+            }
+
+            if (HasDataMarkers(parent))
+            {
+                return parent;
+            }
+        }
+
+        // 安装版：数据在全局目录，返回 null 交给常见位置扫描。
+        return null;
     }
 
     private static bool HasDataMarkers(string directory)
@@ -439,4 +693,47 @@ public static class LegacyDataMigrationHelper
 
     private static string NormalizePath(string path) =>
         Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    /// <summary>两个路径相同，或存在祖先/后代包含关系。</summary>
+    private static bool IsSameOrNested(string a, string b)
+    {
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return IsAncestorOf(a, b) || IsAncestorOf(b, a);
+    }
+
+    private static bool IsAncestorOf(string parent, string child)
+    {
+        var prefix = parent.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return child.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void Log(StringBuilder log, string message)
+    {
+        log.AppendLine($"[{DateTime.Now:HH:mm:ss}] {message}");
+        Console.WriteLine($"[旧版本迁移] {message}");
+    }
+
+    private static void WriteLog(StringBuilder log)
+    {
+        if (log.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(CommonDirectories.AppLogFolderPath);
+            var path = Path.Combine(CommonDirectories.AppLogFolderPath, LogFileName);
+            File.AppendAllText(path,
+                $"===== {DateTime.Now:yyyy-MM-dd HH:mm:ss} 旧版本数据迁移 ====={Environment.NewLine}{log}{Environment.NewLine}");
+        }
+        catch
+        {
+            // 日志写入失败不应影响启动流程。
+        }
+    }
 }
