@@ -21,6 +21,8 @@ public class PluginInfo : ObservableRecipient, IMarketplaceItemInfo
     private long _downloadCount = 0;
     private long _starsCount = 0;
     private bool _isNotSupportCurrentOS = false;
+    private string _realIconPath = "";
+    private PluginCompatibilityMode _compatibilityMode = PluginCompatibilityMode.Unknown;
 
     /// <summary>
     /// 插件元数据
@@ -110,7 +112,16 @@ public class PluginInfo : ObservableRecipient, IMarketplaceItemInfo
     /// <summary>
     /// 图标真实路径
     /// </summary>
-    public string RealIconPath { get; set; } = "";
+    public string RealIconPath
+    {
+        get => _realIconPath;
+        set
+        {
+            if (value == _realIconPath) return;
+            _realIconPath = value;
+            OnPropertyChanged();
+        }
+    }
 
     /// <summary>
     /// 插件加载时错误
@@ -133,6 +144,46 @@ public class PluginInfo : ObservableRecipient, IMarketplaceItemInfo
     /// </summary>
     [JsonIgnore]
     public bool HasCompatibilityNotes => CompatibilityNotes.Count > 0;
+
+    /// <summary>
+    /// 插件与当前宿主 Avalonia 版本的二进制兼容状态。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PluginCompatibilityMode.Unknown"/> 表示还没检测过（常见于只存在于插件市场、
+    /// 本地没有程序集的插件）。已安装插件在加载时由兼容层写入实际结果。
+    /// </remarks>
+    [JsonIgnore]
+    public PluginCompatibilityMode CompatibilityMode
+    {
+        get => _compatibilityMode;
+        internal set
+        {
+            if (value == _compatibilityMode) return;
+            _compatibilityMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsNativeCompatible));
+            OnPropertyChanged(nameof(IsUsingCompatibilityLayer));
+            OnPropertyChanged(nameof(IsCompatibilityUnknown));
+        }
+    }
+
+    /// <summary>
+    /// 插件是否原生兼容当前宿主，不需要兼容层介入。
+    /// </summary>
+    [JsonIgnore]
+    public bool IsNativeCompatible => CompatibilityMode == PluginCompatibilityMode.Native;
+
+    /// <summary>
+    /// 插件是否需要经过兼容层转译才能在当前宿主上加载。
+    /// </summary>
+    [JsonIgnore]
+    public bool IsUsingCompatibilityLayer => CompatibilityMode == PluginCompatibilityMode.CompatibilityLayer;
+
+    /// <summary>
+    /// 插件的兼容状态是否尚未确定。
+    /// </summary>
+    [JsonIgnore]
+    public bool IsCompatibilityUnknown => CompatibilityMode == PluginCompatibilityMode.Unknown;
 
     /// <summary>
     /// 记录一条兼容层调整。重复的记录会被忽略。

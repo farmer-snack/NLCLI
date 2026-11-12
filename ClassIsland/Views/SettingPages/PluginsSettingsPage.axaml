@@ -55,6 +55,34 @@
                                 <Border Background="{DynamicResource SystemFillColorSuccessBackgroundBrush}"
                                         CornerRadius="999"
                                         Padding="10 3"
+                                        VerticalAlignment="Center"
+                                        IsVisible="{Binding IsNativeCompatible}">
+                                    <ToolTip.Tip>此插件原生支持当前的 Avalonia 版本，加载时不需要兼容层。</ToolTip.Tip>
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <ci:FluentIcon Glyph="&#xE73E;" FontSize="14" VerticalAlignment="Center"/>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <Run Text="原生支持"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                                        CornerRadius="999"
+                                        Padding="10 3"
+                                        VerticalAlignment="Center"
+                                        IsVisible="{Binding IsUsingCompatibilityLayer}">
+                                    <ToolTip.Tip>此插件按旧版 Avalonia 编译，加载时由兼容层转译。</ToolTip.Tip>
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <ci:FluentIcon Glyph="&#xE7BA;" FontSize="14" VerticalAlignment="Center"/>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <Run Text="兼容层转译"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{DynamicResource SystemFillColorSuccessBackgroundBrush}"
+                                        CornerRadius="999"
+                                        Padding="10 3"
                                         VerticalAlignment="Center">
                                     <Border.IsVisible>
                                         <Binding Path="LoadStatus" Converter="{x:Static ObjectConverters.Equal}">
@@ -624,6 +652,7 @@
                              ItemsSource="{Binding ViewModel.MergedPluginsFiltered.Items}"
                              SelectedValue="{Binding ViewModel.SelectedPluginInfo}"
                              SelectedValueBinding="{Binding Value}"
+                             ContainerPrepared="PluginList_OnContainerPrepared"
                              SelectionChanged="Selector_OnSelectionChanged">
                         <ListBox.Styles>
                             <Style Selector="ListBox:empty">
@@ -665,11 +694,35 @@
                                                             Margin="0 0 6 0 "
                                                             Source="{Binding Value.RealIconPath, FallbackValue={x:Null}}"/>
                                     <!-- 标题 -->
-                                    <TextBlock Grid.Column="1" Grid.Row="0"
-                                                   TextWrapping="Wrap"
+                                    <DockPanel Grid.Column="1" Grid.Row="0" LastChildFill="True">
+                                        <Border DockPanel.Dock="Right"
+                                                Background="{DynamicResource CardBackgroundFillColorSecondaryBrush}"
+                                                CornerRadius="999" Padding="7 1" Margin="6 0 0 0"
+                                                VerticalAlignment="Center"
+                                                IsVisible="{Binding Value.IsCompatibilityUnknown}"
+                                                ToolTip.Tip="尚未检测此插件按哪个 Avalonia 版本编译。滚动到此处后会在后台自动检测。">
+                                            <TextBlock Text="待检测" FontSize="11" VerticalAlignment="Center" Opacity="0.7"/>
+                                        </Border>
+                                        <Border DockPanel.Dock="Right"
+                                                Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                                                CornerRadius="999" Padding="7 1" Margin="6 0 0 0"
+                                                VerticalAlignment="Center"
+                                                IsVisible="{Binding Value.IsUsingCompatibilityLayer}"
+                                                ToolTip.Tip="此插件按旧版 Avalonia 编译，加载时需要兼容层转译。">
+                                            <TextBlock Text="兼容层" FontSize="11" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Border DockPanel.Dock="Right"
+                                                Background="{DynamicResource SystemFillColorSuccessBackgroundBrush}"
+                                                CornerRadius="999" Padding="7 1" Margin="6 0 0 0"
+                                                VerticalAlignment="Center"
+                                                IsVisible="{Binding Value.IsNativeCompatible}"
+                                                ToolTip.Tip="此插件原生支持当前 Avalonia 版本，不需要兼容层。">
+                                            <TextBlock Text="原生" FontSize="11" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock TextWrapping="Wrap"
                                                    Text="{Binding Value.Manifest.Name}"
-                                                   FontSize="16" FontWeight="Medium">
-                                    </TextBlock>
+                                                   FontSize="16" FontWeight="Medium"/>
+                                    </DockPanel>
                                     <!-- 描述 -->
                                     <TextBlock Grid.Column="1" Grid.Row="1"
                                                    TextWrapping="Wrap"

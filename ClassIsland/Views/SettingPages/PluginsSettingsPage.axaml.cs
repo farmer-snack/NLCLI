@@ -110,6 +110,11 @@ public partial class PluginsSettingsPage : SettingsPageBase
         switch (e.PropertyName)
         {
             case nameof(ViewModel.SelectedPluginInfo):
+                if (ViewModel.SelectedPluginInfo != null)
+                {
+                    ViewModel.PluginMarketService.RequestCompatibilityProbe(ViewModel.SelectedPluginInfo);
+                }
+
                 await UpdateReadmeDocument();
                 break;
         }
@@ -660,6 +665,20 @@ public partial class PluginsSettingsPage : SettingsPageBase
             return;
         }
         RequestRestart();
+    }
+
+    /// <summary>
+    /// 列表项进入视野时，按需探测该市场插件的兼容状态。
+    /// </summary>
+    /// <remarks>
+    /// 只探测用户实际滚到的插件，避免一进插件页就把整个市场的插件包下载一遍。
+    /// </remarks>
+    private void PluginList_OnContainerPrepared(object? sender, ContainerPreparedEventArgs e)
+    {
+        if (e.Container.DataContext is KeyValuePair<string, PluginInfo> pair)
+        {
+            ViewModel.PluginMarketService.RequestCompatibilityProbe(pair.Value);
+        }
     }
 
     private void PluginsSettingsPage_OnUnloaded(object sender, RoutedEventArgs e)

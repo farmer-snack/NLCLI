@@ -13,6 +13,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using ClassIsland.Core;
 using ClassIsland.Core.Compatibility;
+using ClassIsland.Core.Enums;
 using Cecil = Mono.Cecil;
 using CecilIL = Mono.Cecil.Cil;
 
@@ -25,7 +26,11 @@ namespace ClassIsland.Services.PluginCompatibility;
 /// 改写后的程序集路径。为 <see langword="null"/> 时表示无需改写，调用方应继续使用原始路径。
 /// </param>
 /// <param name="Notes">改写过程的说明，用于在插件详情里展示兼容层做了什么。</param>
-internal sealed record PluginCompatibilityResult(string? AssemblyPath, IReadOnlyList<string> Notes);
+/// <param name="Mode">插件的兼容状态：原生可用，还是需要兼容层转译。</param>
+internal sealed record PluginCompatibilityResult(
+    string? AssemblyPath,
+    IReadOnlyList<string> Notes,
+    PluginCompatibilityMode Mode = PluginCompatibilityMode.Unknown);
 
 /// <summary>
 /// 插件二进制兼容层：把按旧版 Avalonia（主版本低于宿主）编译的插件，在加载前重写其类型引用，
@@ -60,7 +65,7 @@ internal static class PluginTypeCompatibility
     /// <summary>
     /// 兼容规则的版本号。重写逻辑发生变化时必须递增，否则旧缓存会被继续复用。
     /// </summary>
-    private const int CompatibilityVersion = 5;
+    private const int CompatibilityVersion = 6;
 
     /// <summary>
     /// 宿主是否已经把 <c>Window.SystemDecorations</c> 正式改名为 <c>Window.WindowDecorations</c>（Avalonia 12 起）。
@@ -103,6 +108,13 @@ internal static class PluginTypeCompatibility
             ["Avalonia.Controls.SystemDecorations"] = ("Avalonia.Controls", "WindowDecorations", "Avalonia.Controls", true),
             ["Avalonia.Input.IDataObject"] = ("Avalonia.Input", "IDataTransfer", "Avalonia.Base", false),
             ["Avalonia.Input.DataObject"] = ("Avalonia.Input", "DataTransfer", "Avalonia.Base", false),
+            // Avalonia 12 删掉了 GotFocusEventArgs，复用 FocusChangedEventArgs。
+            // 焦点事件族（GotFocus/LostFocus）在 12 里统一换成了 FocusChangedEventArgs，
+            // 把类型别名指过去后，add_GotFocus / GotFocusEvent / OnGotFocus 的签名会自动对上。
+            ["Avalonia.Input.GotFocusEventArgs"] = ("Avalonia.Input", "FocusChangedEventArgs", "Avalonia.Base", false),
+            // Avalonia 12 移除了 IRenderRoot 接口，Visual.GetVisualRoot() 改为直接返回 Visual。
+            // 插件里常见的 (Window)this.GetVisualRoot() 在替换后依然成立（Visual 是 Window 的基类）。
+            ["Avalonia.Rendering.IRenderRoot"] = ("Avalonia", "Visual", "Avalonia.Base", false),
         };
 
 
@@ -124,17 +136,28 @@ internal static class PluginTypeCompatibility
             var pluginMajor = GetReferencedAvaloniaMajor(assemblyPath);
             var hostMajor = HostAvaloniaMajor.Value;
 
-            // 不引用 Avalonia（纯逻辑插件），或插件本身就是新版本编译的 → 一律不动。
-            if (pluginMajor is null || hostMajor <= 0 || pluginMajor >= hostMajor)
+            // 不引用 Avalonia（纯逻辑插件）→ 与 Avalonia 版本无关，天然兼容。
+            if (pluginMajor is null)
+            {
+                return new PluginCompatibilityResult(null, notes, PluginCompatibilityMode.Native);
+            }
+
+            if (hostMajor <= 0)
             {
                 return new PluginCompatibilityResult(null, notes);
+            }
+
+            // 插件本身就是按当前（或更新）版本编译的 → 原样加载。
+            if (pluginMajor >= hostMajor)
+            {
+                return new PluginCompatibilityResult(null, notes, PluginCompatibilityMode.Native);
             }
 
             var cacheFile = GetCacheFilePath(assemblyPath, hostMajor);
             if (File.Exists(cacheFile))
             {
                 notes.Add($"已按 Avalonia {pluginMajor} → {hostMajor} 兼容规则使用改写后的程序集（缓存命中）。");
-                return new PluginCompatibilityResult(cacheFile, notes);
+                return new PluginCompatibilityResult(cacheFile, notes, PluginCompatibilityMode.CompatibilityLayer);
             }
 
             var changes = new List<string>();
@@ -164,12 +187,46 @@ internal static class PluginTypeCompatibility
                 notes.Add(warning);
             }
 
-            return new PluginCompatibilityResult(cacheFile, notes);
+            return new PluginCompatibilityResult(cacheFile, notes, PluginCompatibilityMode.CompatibilityLayer);
         }
         catch (Exception ex)
         {
             notes.Add($"兼容层处理失败，将按原样加载：{ex.Message}");
             return new PluginCompatibilityResult(null, notes);
+        }
+    }
+
+    /// <summary>
+    /// 只读检测：判断指定程序集在当前宿主上是否需要兼容层，不执行任何改写。
+    /// </summary>
+    /// <remarks>
+    /// 用于插件市场列表展示「原生支持 / 需要兼容层」。真正的改写仍然由 <see cref="Prepare"/> 完成，
+    /// 这里只读取程序集引用的 Avalonia 主版本，因此可以安全地对尚未安装的插件包调用。
+    /// </remarks>
+    public static PluginCompatibilityMode Detect(string assemblyPath)
+    {
+        try
+        {
+            var pluginMajor = GetReferencedAvaloniaMajor(assemblyPath);
+            if (pluginMajor is null)
+            {
+                // 不引用 Avalonia 的纯逻辑插件，与 UI 框架版本无关。
+                return PluginCompatibilityMode.Native;
+            }
+
+            var hostMajor = HostAvaloniaMajor.Value;
+            if (hostMajor <= 0)
+            {
+                return PluginCompatibilityMode.Unknown;
+            }
+
+            return pluginMajor >= hostMajor
+                ? PluginCompatibilityMode.Native
+                : PluginCompatibilityMode.CompatibilityLayer;
+        }
+        catch
+        {
+            return PluginCompatibilityMode.Unknown;
         }
     }
 
@@ -630,7 +687,43 @@ internal static class PluginTypeCompatibility
 
             changes.Add($"IClipboard.{name} → ClipboardExtensions");
         }
+
+        // Avalonia 12 移除了 IRenderRoot 接口：Visual.GetVisualRoot() 改为返回 Visual，
+        // 屏幕坐标换算下沉为 Visual 上的扩展方法。
+        if (declaring == "Avalonia.Rendering.IRenderRoot" &&
+            parameterCount == 1 &&
+            name is "PointToScreen" or "PointToClient")
+        {
+            method.DeclaringType = MakeTypeReference(module, "Avalonia", "VisualExtensions", "Avalonia.Base");
+            method.HasThis = false;
+            method.Parameters.Insert(0, new Cecil.ParameterDefinition(
+                MakeTypeReference(module, "Avalonia", "Visual", "Avalonia.Base")));
+            changes.Add($"IRenderRoot.{name} → VisualExtensions.{name}");
+            return;
+        }
+
+        // Avalonia 12 把 InputElement.LostFocus 的参数类型从 EventHandler<RoutedEventArgs>
+        // 换成了 EventHandler<FocusChangedEventArgs>。RoutedEventArgs 这个类型本身还在，
+        // 没法用类型别名重定向；只改方法签名又会让宿主的 AddHandler 收到类型不匹配的委托，
+        // 在内部转型时抛 ArgumentException。因此整条调用转到宿主垫片，由垫片包装委托后再订阅。
+        if (declaring == "Avalonia.Input.InputElement" &&
+            parameterCount == 1 &&
+            name is "add_LostFocus" or "remove_LostFocus" &&
+            IsEventHandlerOf(method.Parameters[0].ParameterType, "Avalonia.Interactivity.RoutedEventArgs"))
+        {
+            var shimName = name == "add_LostFocus" ? "AddLostFocus" : "RemoveLostFocus";
+            RetargetToShim(module, method, shimName, "Avalonia.Input", "InputElement", "Avalonia.Base");
+            changes.Add($"InputElement.LostFocus → Avalonia12Compatibility.{shimName}（委托类型包装）");
+        }
     }
+
+    /// <summary>
+    /// 判断类型是否为 <c>EventHandler&lt;T&gt;</c>，且 <c>T</c> 正好是给定的类型。
+    /// </summary>
+    private static bool IsEventHandlerOf(Cecil.TypeReference type, string argumentFullName) =>
+        type is Cecil.GenericInstanceType { GenericArguments.Count: 1 } generic &&
+        generic.ElementType.FullName == "System.EventHandler`1" &&
+        generic.GenericArguments[0].FullName == argumentFullName;
 
     /// <summary>
     /// 重写字段引用的类型。字段本身仍然存在，只是类型变了。

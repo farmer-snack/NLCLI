@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
@@ -6,7 +7,10 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using ClassIsland.Core;
 using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Core.Helpers;
@@ -18,6 +22,7 @@ using ClassIsland.Shared;
 using ClassIsland.Shared.ComponentModels;
 using ClassIsland.Shared.Helpers;
 using ClassIsland.Core.Enums;
+using ClassIsland.Services.PluginCompatibility;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Downloader;
 using Microsoft.Extensions.Logging;
@@ -38,6 +43,11 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
     public ObservableDictionary<string, PluginIndex> Indexes { get; } = new();
     public ILogger<PluginMarketService> Logger { get; }
 
+    /// <summary>
+    /// 插件市场「原生支持 / 需要兼容层」状态的探测器。
+    /// </summary>
+    private PluginMarketCompatibilityProbe CompatibilityProbe { get; }
+
     public static ObservableDictionary<string, string> FallbackMirrors { get; } = new()
     {
         { "github", "https://github.com" },
@@ -49,6 +59,20 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
     private double _pluginSourceDownloadProgress;
     private Exception? _exception;
     private IDisposable? _pluginsUpdateProgressObserver;
+
+    /// <summary>
+    /// 下载插件市场图标、简介用的客户端。
+    /// </summary>
+    private static readonly HttpClient AssetHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(30)
+    };
+
+    /// <summary>
+    /// 正在后台缓存资源的插件 ID，避免重复排队。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _assetDownloads = new(StringComparer.Ordinal);
+
     private readonly OSPlatform _currentOSPlatform =
         OperatingSystem.IsWindows() ? OSPlatform.Windows :
         OperatingSystem.IsLinux() ? OSPlatform.Linux :
@@ -62,6 +86,7 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
         SettingsService = settingsService;
         PluginService = pluginService;
         Logger = logger;
+        CompatibilityProbe = new PluginMarketCompatibilityProbe(logger);
 
         if (DateTime.Now - SettingsService.Settings.LastRefreshPluginSourceTime >= TimeSpan.FromDays(7))
         {
@@ -191,6 +216,20 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
             transaction.Finish(ex, SpanStatus.InternalError);
             Logger.LogError(ex, "无法加载插件源。");
             Exception = ex;
+
+            // 网络不通时退回本地已有索引：插件列表、图标和简介仍然可以浏览，
+            // 不至于因为一次刷新失败就把整个插件市场清空。
+            if (MergedPlugins.Count == 0 && HasLocalPluginIndex())
+            {
+                try
+                {
+                    LoadPluginSource();
+                }
+                catch (Exception fallbackException)
+                {
+                    Logger.LogWarning(fallbackException, "回退加载本地插件源失败。");
+                }
+            }
         }
         finally
         {
@@ -217,6 +256,39 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
             SelectedMirror = SettingsService.Settings.OfficialSelectedMirror ?? "github",
             Mirrors = SettingsService.Settings.OfficialIndexMirrors
         });
+    }
+
+    /// <summary>
+    /// 本地是否已经存在一份可用的插件索引。
+    /// </summary>
+    private bool HasLocalPluginIndex()
+    {
+        try
+        {
+            return GetIndexInfos().Any(info =>
+                File.Exists(Path.Combine(Services.PluginService.PluginsIndexPath, info.Id, "index.v2.json")));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 请求探测单个市场插件的兼容状态。
+    /// </summary>
+    /// <remarks>
+    /// 由插件列表在容器准备时逐个触发：只有用户实际滚到的插件才会下载插件包用于检测，
+    /// 避免一进插件页就把整个市场的插件包拉一遍。
+    /// </remarks>
+    public void RequestCompatibilityProbe(PluginInfo plugin)
+    {
+        if (plugin.IsLocal || !plugin.IsAvailableOnMarket)
+        {
+            return;
+        }
+
+        CompatibilityProbe.Request(plugin);
     }
 
     public void UpdateAllPlugins(bool discardDisabled = false)
@@ -411,6 +483,8 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
         {
             var id = pluginLocal.Manifest.Id;
             MergedPlugins[id] = pluginLocal;
+            // 已安装插件直接读本地程序集，禁用/加载失败的插件也能标出兼容状态。
+            CompatibilityProbe.ApplyLocal(pluginLocal);
         }
 
         var indexInfos = GetIndexInfos().ToList();
@@ -457,6 +531,7 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
                 plugin.RealIconPath = plugin.RealIconPath.Replace("{root}", root);
                 plugin.Manifest.Readme = plugin.Manifest.Readme.Replace("{root}", root);
                 plugin.IsNotSupportCurrentOS = !plugin.Manifest.SupportedOSPlatforms.Contains(_currentOSPlatform);
+                ApplyCachedAssets(plugin);
                 MergedPlugins[id] = plugin;
             }
         }
@@ -467,6 +542,178 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
         SettingsService.Settings.OfficialIndexMirrors = ConfigureFileHelper.CopyObject(
             defaultIndex.DownloadMirrors);
         BindDownloadTasks();
+    }
+
+    /// <summary>
+    /// 插件市场资源（图标、简介）的本地缓存目录。
+    /// </summary>
+    private static string GetAssetCacheDirectory(string pluginId) =>
+        Path.Combine(CommonDirectories.AppCacheFolderPath, "PluginMarketAssets", pluginId);
+
+    /// <summary>
+    /// 让插件优先使用本地缓存的图标和简介；缓存缺失时在后台补一份。
+    /// </summary>
+    /// <remarks>
+    /// 插件市场的图标和 README 都是指向 GitHub 的远程地址，每次进页面都要重新联网才能显示。
+    /// 这里在首次成功加载后把资源落盘，之后即使插件源刷新失败、或者网络被墙，列表和详情页也能正常显示。
+    /// </remarks>
+    private void ApplyCachedAssets(PluginIndexItem plugin)
+    {
+        var id = plugin.Manifest.Id;
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return;
+        }
+
+        var directory = GetAssetCacheDirectory(id);
+        var icon = FindCachedIcon(directory);
+        var readme = Path.Combine(directory, "readme.md");
+        var hasIcon = icon != null && File.Exists(icon);
+        var hasReadme = File.Exists(readme);
+
+        if (hasIcon)
+        {
+            plugin.RealIconPath = icon!;
+        }
+
+        if (hasReadme)
+        {
+            plugin.Manifest.Readme = readme;
+        }
+
+        if (hasIcon && hasReadme)
+        {
+            return;
+        }
+
+        ScheduleAssetCaching(plugin, directory, hasIcon, hasReadme);
+    }
+
+    /// <summary>
+    /// 在后台下载缺失的图标与简介，成功后更新插件对象并落盘。
+    /// </summary>
+    private void ScheduleAssetCaching(PluginIndexItem plugin, string directory, bool hasIcon, bool hasReadme)
+    {
+        var id = plugin.Manifest.Id;
+        if (!_assetDownloads.TryAdd(id, 0))
+        {
+            return;
+        }
+
+        var iconUrl = plugin.RealIconPath;
+        var readmeUrl = plugin.Manifest.Readme;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                Directory.CreateDirectory(directory);
+                if (!hasIcon && IsRemoteUrl(iconUrl))
+                {
+                    var iconPath = Path.Combine(directory, "icon" + GetAssetExtension(iconUrl));
+                    if (await DownloadAssetAsync(iconUrl, iconPath).ConfigureAwait(false))
+                    {
+                        Dispatcher.UIThread.Post(() => plugin.RealIconPath = iconPath);
+                    }
+                }
+
+                if (!hasReadme && IsRemoteUrl(readmeUrl))
+                {
+                    var readmePath = Path.Combine(directory, "readme.md");
+                    if (await DownloadAssetAsync(readmeUrl, readmePath).ConfigureAwait(false))
+                    {
+                        Dispatcher.UIThread.Post(() => plugin.Manifest.Readme = readmePath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "缓存插件 {} 的市场资源失败。", id);
+            }
+            finally
+            {
+                _assetDownloads.TryRemove(id, out _);
+            }
+        });
+    }
+
+    private static string? FindCachedIcon(string directory)
+    {
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return null;
+            }
+
+            return Directory.EnumerateFiles(directory, "icon.*").FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsRemoteUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static string GetAssetExtension(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            var extension = Path.GetExtension(uri.AbsolutePath);
+            if (extension.Length is > 1 and <= 6)
+            {
+                return extension;
+            }
+        }
+
+        return ".png";
+    }
+
+    private static async Task<bool> DownloadAssetAsync(string url, string destination)
+    {
+        if (File.Exists(destination))
+        {
+            return true;
+        }
+
+        var temporary = destination + ".tmp";
+        try
+        {
+            using var response = await AssetHttpClient
+                .GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            await using var source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            await using (var target = File.Create(temporary))
+            {
+                await source.CopyToAsync(target).ConfigureAwait(false);
+            }
+
+            File.Move(temporary, destination, true);
+            return true;
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(temporary))
+                {
+                    File.Delete(temporary);
+                }
+            }
+            catch
+            {
+                // 忽略清理失败。
+            }
+
+            return false;
+        }
     }
 
     private void BindDownloadTasks()

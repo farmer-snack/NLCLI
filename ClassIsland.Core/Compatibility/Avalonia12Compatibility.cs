@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
@@ -21,9 +22,63 @@ namespace ClassIsland.Core.Compatibility;
 public static class Avalonia12Compatibility
 {
     /// <summary>
+    /// 旧版 <c>LostFocus</c> 订阅的委托包装缓存。
+    /// </summary>
+    /// <remarks>
+    /// 包装后的委托必须原样保存：<c>RemoveHandler</c> 依赖委托实例相等，
+    /// 每次重新 <c>new</c> 一个包装器会导致退订静默失效。
+    /// 用 <see cref="ConditionalWeakTable{TKey,TValue}"/> 挂在控件上，控件回收后缓存自动消失。
+    /// </remarks>
+    private static readonly ConditionalWeakTable<InputElement, Dictionary<EventHandler<RoutedEventArgs>, EventHandler<FocusChangedEventArgs>>>
+        LostFocusHandlers = new();
+
+    /// <summary>
     /// 创建带路径和模式的绑定。Avalonia 12 移除了 <c>Binding(string, BindingMode)</c> 构造函数。
     /// </summary>
     public static Binding CreateBinding(string path, BindingMode mode) => new(path) { Mode = mode };
+
+    /// <summary>
+    /// 订阅 <see cref="InputElement.LostFocus"/>。
+    /// </summary>
+    /// <remarks>
+    /// Avalonia 12 把该事件的参数类型从 <c>EventHandler&lt;RoutedEventArgs&gt;</c> 改成了
+    /// <c>EventHandler&lt;FocusChangedEventArgs&gt;</c>。<see cref="RoutedEventArgs"/> 本身没有被移除，
+    /// 无法通过类型别名重定向；只改方法签名又会让宿主收到类型不匹配的委托，
+    /// 在 <c>AddHandler</c> 内部转型失败。这里把旧委托包成新类型后再挂上去。
+    /// </remarks>
+    public static void AddLostFocus(InputElement element, EventHandler<RoutedEventArgs> handler)
+    {
+        var map = LostFocusHandlers.GetOrCreateValue(element);
+        var wrapped = new EventHandler<FocusChangedEventArgs>((sender, e) => handler(sender, e));
+        lock (map)
+        {
+            map[handler] = wrapped;
+        }
+
+        element.AddHandler(InputElement.LostFocusEvent, wrapped);
+    }
+
+    /// <summary>
+    /// 退订 <see cref="InputElement.LostFocus"/>，行为与 Avalonia 11 的 <c>LostFocus -= handler</c> 一致。
+    /// </summary>
+    public static void RemoveLostFocus(InputElement element, EventHandler<RoutedEventArgs> handler)
+    {
+        if (!LostFocusHandlers.TryGetValue(element, out var map))
+        {
+            return;
+        }
+
+        EventHandler<FocusChangedEventArgs>? wrapped;
+        lock (map)
+        {
+            if (!map.Remove(handler, out wrapped))
+            {
+                return;
+            }
+        }
+
+        element.RemoveHandler(InputElement.LostFocusEvent, wrapped);
+    }
 
     /// <summary>
     /// 取 <see cref="ToggleButton"/> 的选中事件。Avalonia 12 将 Checked/Unchecked 合并为 IsCheckedChanged。

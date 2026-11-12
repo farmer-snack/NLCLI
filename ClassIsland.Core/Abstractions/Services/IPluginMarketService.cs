@@ -78,4 +78,14 @@ public interface IPluginMarketService : INotifyPropertyChanged
     /// 更新全部插件。
     /// </summary>
     public void UpdateAllPlugins(bool discardDisabled=false);
+
+    /// <summary>
+    /// 请求探测单个市场插件的「原生支持 / 需要兼容层」状态。
+    /// </summary>
+    /// <remarks>
+    /// 探测需要下载插件包以读取入口程序集，属于网络操作。由插件列表在容器准备时逐个触发，
+    /// 只有用户实际滚到的插件才会被探测。
+    /// </remarks>
+    /// <param name="plugin">要探测的市场插件。</param>
+    public void RequestCompatibilityProbe(PluginInfo plugin);
 }

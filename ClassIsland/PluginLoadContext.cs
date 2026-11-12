@@ -340,6 +340,7 @@ public class PluginLoadContext : AssemblyLoadContext
     private Assembly LoadPluginAssembly(string assemblyPath)
     {
         var result = PluginTypeCompatibility.Prepare(assemblyPath);
+        Info.CompatibilityMode = result.Mode;
         foreach (var note in result.Notes)
         {
             Info.AddCompatibilityNote(note);
