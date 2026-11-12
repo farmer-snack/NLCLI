@@ -33,9 +33,9 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private int _theme = 2;
     private bool _iscustomBackgroundColorEnabled = false;
     private Color _backgroundColor = Colors.Black;
-    private bool _isMainWindowBackgroundMaterialEnabled;
+    private bool _isMainWindowBackgroundMaterialEnabled = true;
     private bool _isClassPlanEnabled = true;
-    private MainWindowBackgroundMaterialType _mainWindowBackgroundMaterialType = MainWindowBackgroundMaterialType.Acrylic;
+    private MainWindowBackgroundMaterialType _mainWindowBackgroundMaterialType = MainWindowBackgroundMaterialType.LiquidGlass;
     private Color _primaryColor = Colors.DeepSkyBlue;
     private Color _secondaryColor = Colors.Aquamarine;
     private DateTime _singleWeekStartTime =

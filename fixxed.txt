@@ -1,4 +1,43 @@
 ================================================
+[2026-11-12 22:40] [功能] 内置「液态玻璃」主界面主题并设为默认
+================================================
+
+需求：把社区主题 Liquid Flavored Glass（dev.lladlam.lfg）作为开箱默认主题。
+
+做法：不直接内置原主题包，而是以当前 FluentTheme 为骨架重做视觉层。
+原主题基于 2026-05 的模板，直接套用会丢掉三处关键逻辑：
+- 没有 StyleInclude /Controls/MainWindowLine.axaml，主界面线的停靠对齐、
+  显隐多重绑定、CountdownProgressValue 绑定全部失效；
+- 没有 clip-host 的 Clip MultiBinding，圆角裁剪不生效，内容会溢出成方角；
+- 绕过 MainWindowBackgroundMaterialControl，丢掉 Mica / 亚克力 / 液态玻璃
+  三种系统材质，以及 EffectiveBackgroundOpacity 的计算。
+
+新增 ClassIsland/XamlThemes/LiquidGlassTheme/Styles.axaml：
+- 材质层仍由 MainWindowBackgroundMaterialControl 负责，FallbackBrush 换成
+  乳白（浅色）/ 烟熏（深色）纯色，保证取 tint 时系统材质颜色正确；
+- 表面层 Border.line-background-frame 叠加垂直高光渐变 + 亮边描边 +
+  BoxShadow（外阴影 + 顶部 inset 高光 + 四周微弱泛光）；
+- 画刷走 ResourceDictionary.ThemeDictionaries：浅色用冷调描边衬出玻璃厚度，
+  深色抬高顶部高光；
+- 动画节奏改用原主题的 400ms / 140ms 与 0.22,1,0.36,1 缓动。
+
+默认值：
+- 内置主题 ID classisland.liquidglass，注册在主题列表首位；
+- XamlThemeService.DefaultThemeId 改为它，首次运行即启用；
+- 对「启用列表恰好只有 classisland.fluent」的旧配置做一次性迁移，写
+  DefaultThemeMigration 标记，之后不再干预用户自己的主题组合；
+- Settings 默认 MainWindowBackgroundMaterialType = LiquidGlass、
+  IsMainWindowBackgroundMaterialEnabled = true；
+  材质在平台不可用时由 MainWindowBackgroundMaterialControl 自动回退到玻璃画刷。
+
+横幅：原 2601x588 banner 顶部对齐裁成 1920x350，输出到
+Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
+
+验证：独立 themecheck 工程在 xvfb 下加载主题，确认 8 条样式、
+Light / Dark 各 4 个画刷注册成功，并渲染深浅两套预览确认高光、
+描边与阴影层次。
+
+================================================
 [2026-11-09 22:05] [修复] 兼容层：类型别名重定向漏设 IsValueType
 ================================================
 

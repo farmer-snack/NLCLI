@@ -48,6 +48,22 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
     public static readonly string EnabledThemesPath = Path.Combine(CommonDirectories.AppConfigPath, "EnabledThemes.json");
     public static readonly string ThemesPkgRootPath = Path.Combine(CommonDirectories.AppCacheFolderPath, "ThemePackages");
 
+    /// <summary>
+    /// 默认启用的主界面主题。
+    /// </summary>
+    public const string DefaultThemeId = "classisland.liquidglass";
+
+    /// <summary>
+    /// 旧版本的默认主题，仅在迁移时使用。
+    /// </summary>
+    private const string LegacyDefaultThemeId = "classisland.fluent";
+
+    /// <summary>
+    /// 默认主题迁移标记。写入后不再自动改动用户的主题选择。
+    /// </summary>
+    public static readonly string DefaultThemeMigrationPath =
+        Path.Combine(CommonDirectories.AppConfigPath, "DefaultThemeMigration");
+
     public ObservableCollection<ThemeInfo> Themes { get; } = [];
 
     public ObservableDictionary<string, ThemeInfo> MergedThemes
@@ -80,7 +96,11 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
         EnabledThemes = ConfigureFileHelper.LoadConfig<ObservableCollection<string>>(EnabledThemesPath);
         if (EnabledThemes.Count == 0)
         {
-            EnabledThemes.Add("classisland.fluent");
+            EnabledThemes.Add(DefaultThemeId);
+        }
+        else
+        {
+            MigrateLegacyDefaultTheme();
         }
         EnabledThemes.CollectionChanged +=
             (_, _) => ConfigureFileHelper.SaveConfig(EnabledThemesPath, EnabledThemes);
@@ -92,6 +112,37 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
         ProcessThemeInstall();
         // LoadAllThemes();
         //LoadThemeSource();
+    }
+
+    /// <summary>
+    /// 把旧版本的默认主题替换为新的默认主题。
+    /// </summary>
+    /// <remarks>
+    /// 只有当用户从未调整过主题（启用列表恰好是旧版默认值）时才替换，
+    /// 避免覆盖用户自己搭配的主题组合；迁移只做一次，用户之后换回旧主题也不会被改回去。
+    /// </remarks>
+    private void MigrateLegacyDefaultTheme()
+    {
+        if (File.Exists(DefaultThemeMigrationPath))
+        {
+            return;
+        }
+
+        if (EnabledThemes.Count == 1 && EnabledThemes[0] == LegacyDefaultThemeId)
+        {
+            EnabledThemes[0] = DefaultThemeId;
+            ConfigureFileHelper.SaveConfig(EnabledThemesPath, EnabledThemes);
+            Logger.LogInformation("已将默认主界面主题从 {} 迁移到 {}", LegacyDefaultThemeId, DefaultThemeId);
+        }
+
+        try
+        {
+            File.WriteAllText(DefaultThemeMigrationPath, DateTimeOffset.Now.ToString("O"));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "无法写入默认主题迁移标记，下次启动会再次尝试迁移");
+        }
     }
 
     public void LoadAllThemes()
