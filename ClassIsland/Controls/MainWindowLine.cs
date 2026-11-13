@@ -680,9 +680,24 @@ public class MainWindowLine : ContentControl, INotificationConsumer
             {
                 GridWrapper.SizeChanged -= WrapperOnSizeChanged;
             }
+
+            // 模板重建（切主题、换外观）会换掉 GridWrapper 实例。旧实例上的 Width 限制随旧模板一起消失，
+            // 但 _isRowWidthLocked 还是 true —— 不把它迁移到新实例的话，WrapperOnSizeChanged 会一直
+            // 直接 return，BackgroundWidth 再也不更新，表现为背景宽度卡死在旧值。
+            var carryLock = _isRowWidthLocked && double.IsFinite(_lockedRowWidth) && _lockedRowWidth > 0;
             GridWrapper = wrapper;
             wrapper.SizeChanged += WrapperOnSizeChanged;
             wrapper.Loaded += GridWrapperOnLoaded;
+            if (carryLock)
+            {
+                wrapper.Width = _lockedRowWidth;
+                Logger.LogTrace("模板重建，宽度锁定迁移到新行容器 {Width}", _lockedRowWidth);
+            }
+            else
+            {
+                _isRowWidthLocked = false;
+                _lockedRowWidth = 0;
+            }
         }
         base.OnApplyTemplate(e);
     }

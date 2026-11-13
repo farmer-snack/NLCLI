@@ -1,1426 +1,594 @@
 ================================================
-[2026-11-13 20:32] 同步 upstream/develop/v2/misha-alpha @ cd26ef3
+[长期] 主界面宽度与提醒排版稳定
 ================================================
 
-范围：基线 9804dec0 → cd26ef3，上游 6 个提交，改动 42 个文件。
-处理：冲突 0 个（残留 0 个）；本地定制 125 个文件保留未动；分支回退 0。
-构建：ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（增量单次）
-
-改动的文件
-----------
-- ClassIsland.Android/Application.cs — 取上游
-- ClassIsland.Android/Controls/AndroidMainView.axaml.cs — 取上游
-- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml.cs — 取上游
-- ClassIsland.Android/Services/LessonsForegroundService.cs — 取上游
-- ClassIsland.Android/Services/Platform/AndroidAccentPickerService.cs — 取上游
-- ClassIsland.Android/Services/RealtimeNotificationContentBuilder.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/IViewHost.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/ViewBase.cs — 取上游
-- ClassIsland.Core/Abstractions/Services/IAccentPickerService.cs — 取上游
-- ClassIsland.Desktop/Program.cs — 取上游
-- ClassIsland.Desktop/Services/Platform/DesktopAccentPickerService.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Services/IDesktopAccentImageSource.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Services/IScreenshotService.cs — 取上游
-- ClassIsland/App.Services.xaml.cs — 三方合并
-- ClassIsland/App.axaml.cs — 三方合并
-- ClassIsland/Controls/EditMode/EditModeView.axaml — 取上游
-- ClassIsland/Controls/NotificationEffects/StarFountainEffect.cs — 取上游
-- ClassIsland/Controls/UI/DrawerNavigationHost.axaml.cs — 取上游
-- ClassIsland/Controls/UI/WindowViewHost.axaml.cs — 取上游
-- ClassIsland/Helpers/AccentColorHelper.cs — 取上游
-- ClassIsland/MainWindow.axaml.cs — 取上游
-- ClassIsland/Models/Settings.cs — 三方合并
-- ClassIsland/Services/AccentPickerSession.cs — 取上游
-- ClassIsland/Services/SettingsService.cs — 三方合并
-- ClassIsland/Services/TaskBarIconService.cs — 取上游
-- ClassIsland/Services/ThemeService.cs — 取上游
-- ClassIsland/ViewModels/SettingsPages/AppearanceSettingsViewModel.cs — 取上游
-- ClassIsland/ViewModels/SettingsPages/InterfaceSettingsViewModel.cs — 取上游
-- ClassIsland/Views/MainViewParts/SubjectPickerView.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/AccentPreviewView.axaml — 取上游
-- ClassIsland/Views/SettingPages/AccentPreviewView.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/AppearanceSettingsPage.axaml — 取上游
-- ClassIsland/Views/SettingPages/AppearanceSettingsPage.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/InterfaceSettingsPage.axaml — 取上游
-- ClassIsland/Views/SettingPages/InterfaceSettingsPage.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/WallpaperWindowPicker.axaml — 取上游
-- ClassIsland/Views/SettingPages/WallpaperWindowPicker.axaml.cs — 取上游
-- platforms/ClassIsland.Platforms.Linux/Services/DesktopAccentImageSource.cs — 取上游
-- platforms/ClassIsland.Platforms.Linux/X.cs — 取上游
-- platforms/ClassIsland.Platforms.MacOs/Services/DesktopAccentImageSource.cs — 取上游
-- platforms/ClassIsland.Platforms.Windows/Services/DesktopAccentImageSource.cs — 取上游
-- platforms/ClassIsland.Platforms.Windows/Services/ScreenshotService.cs — 取上游
-================================================
-[2026-11-13 20:05] [修复] 轮播容器导致提醒播放时主界面宽度跳动
-================================================
-
-现象：主界面上放了「轮播容器」组件后，提醒一播放整条岛就变宽变窄；轮播每次
-切换内容，行宽也会跟着变。
-
-原因：轮播容器的 ListBox 用 Grid 作为 ItemsPanel，所有轮播项叠放在同一格里。
-未选中的项用 IsVisible=False 隐藏，而 Avalonia 中不可见元素不参与测量，于是
-ListBox 的测量宽度只等于当前显示项的内容宽度。切换一次轮播，整行宽度就变
-一次；提醒播放期间行宽被锁死，提醒结束解锁时宽度再突变一次，表现出来就是
-"提醒一播就跳"。
-
-改动：
-
-- SlideComponent 的 ItemContainerTheme 改用透明度隐藏未选中项（Opacity=0 +
-  IsHitTestVisible=False），并给选中项加 ZIndex=1 置顶。所有项都参与测量，
-  轮播宽度恒为最宽项，切换时不再改变行宽。滑动动画同步从 IsVisible 改为
-  Opacity 驱动，视觉效果不变。
-- MainWindowLine.LockRowWidth 在测量前先强制排一遍布局（TopLevel.UpdateLayout），
-  避免整行组件都被隐藏、提醒开始时行才出现、Bounds 仍为 0 导致锁定被跳过。
-
-验证：dotnet build 0 Error；用 Avalonia 12.1.4 实测叠加 Grid，IsVisible 隐藏时
-测量宽度随选中项在 14/294 之间跳，Opacity 隐藏时恒为 294。
-
-================================================
-[2026-11-13 19:30] [修复] 提醒播放期间主界面宽度仍会跳动
-================================================
-
-现象：播放提醒（上课提醒、天气提醒等）时，主界面岛会随提醒内容变宽变窄，
-一条提醒内部切换内容时也会抽动。
-
-原因有两处：
-
-1. 三套内嵌式模板（Fluent / LiquidGlass / Classic）里，GridOverlay 和
-   GridContentRoot 是 PART_GridWrapper 的并列子元素。提醒的遮罩、叠加内容
-   参与父 Grid 的测量，内容比主界面组件宽时就把整条岛撑开，提醒结束再缩回。
-   之前 94c8dcd2 的宽度锁定只写在 RectanglesNotificationPanel 里，只对
-   Rectangles 主题的气泡生效，内嵌式主题完全没有覆盖。
-
-2. Rectangles 面板的锁定用 measuredWidth 和 _lockedWidth 直接比较。文本排版
-   给出的是小数宽度，同一条提醒在两次测量之间就能差零点几像素，每差一次就
-   重启一次 333ms 宽度动画，表现出来就是气泡持续轻微抽动。
-
-改动：
-
-- MainWindowLine 新增 LockRowWidth / UnlockRowWidth，在提醒开始播放前记下
-  PART_GridWrapper 的实际宽度并写死，播放结束恢复 NaN 自适应。锁定期间
-  WrapperOnSizeChanged 不再回写 BackgroundWidth，遮罩/叠加层怎么换都不影响
-  行宽，内容改为溢出显示。因为作用在模板部件上，对所有主题统一生效。
-- RectanglesNotificationPanel 的宽度比较加 0.5px 容差，候选宽度向上取整到
-  整像素，动画重启阈值同步放宽，避免亚像素抖动反复触发动画。
-
-验证：dotnet build 0 Error。
-
-
-问题：vendors/EdgeTtsSharp 以 git 子模块引入，地址是
-git@github.com:ClassIsland/EdgeTtsSharp.git（SSH）。git clone 默认不拉子模块，
-没配 SSH key 的机器连 git submodule update --init 都走不通，结果就是克隆完
-直接 dotnet build 会因为找不到 Edge_tts_sharp.csproj 而失败。
-
-改动：
-- 删除 .gitmodules，把 vendors/EdgeTtsSharp 从 gitlink（160000）转成普通目录，
-  纳入 17 个源码/工程/资源文件（共 6.8 MB，去掉 .vs、bin、obj、csproj.user
-  和子模块自带的 .github）。
-- 新增 vendors/EdgeTtsSharp/VENDORED.md，记录上游仓库、classisland-v2 分支、
-  纳入时的提交 b7f82897 和升级方式。
-- AGENTS.md 删掉「缺子模块就跑 git submodule update」的说明，改为声明本仓库
-  没有子模块，普通 clone 即可编译。
-- .github/workflows 下 build_release.yml、build_fork.yml、
-  qodana_code_quality.yml 共 10 处 submodules: recursive 全部移除。
-  仓库另外两个 vendored 依赖（PhainonDistributionCenter.Shared、
-  System.Device.Location）本来就是直接入库的，现在三者形式统一。
-
-验证：fetch 后的干净克隆直接 dotnet build 通过，git submodule status 为空。
-
-================================================
-[2026-11-12 22:40] [功能] 内置「液态玻璃」主界面主题并设为默认
-================================================
-
-需求：把社区主题 Liquid Flavored Glass（dev.lladlam.lfg）作为开箱默认主题。
-
-做法：不直接内置原主题包，而是以当前 FluentTheme 为骨架重做视觉层。
-原主题基于 2026-05 的模板，直接套用会丢掉三处关键逻辑：
-- 没有 StyleInclude /Controls/MainWindowLine.axaml，主界面线的停靠对齐、
-  显隐多重绑定、CountdownProgressValue 绑定全部失效；
-- 没有 clip-host 的 Clip MultiBinding，圆角裁剪不生效，内容会溢出成方角；
-- 绕过 MainWindowBackgroundMaterialControl，丢掉 Mica / 亚克力 / 液态玻璃
-  三种系统材质，以及 EffectiveBackgroundOpacity 的计算。
-
-新增 ClassIsland/XamlThemes/LiquidGlassTheme/Styles.axaml：
-- 材质层仍由 MainWindowBackgroundMaterialControl 负责，FallbackBrush 换成
-  乳白（浅色）/ 烟熏（深色）纯色，保证取 tint 时系统材质颜色正确；
-- 表面层 Border.line-background-frame 叠加垂直高光渐变 + 亮边描边 +
-  BoxShadow（外阴影 + 顶部 inset 高光 + 四周微弱泛光）；
-- 画刷走 ResourceDictionary.ThemeDictionaries：浅色用冷调描边衬出玻璃厚度，
-  深色抬高顶部高光；
-- 动画节奏改用原主题的 400ms / 140ms 与 0.22,1,0.36,1 缓动。
-
-默认值：
-- 内置主题 ID classisland.liquidglass，注册在主题列表首位；
-- XamlThemeService.DefaultThemeId 改为它，首次运行即启用；
-- 对「启用列表恰好只有 classisland.fluent」的旧配置做一次性迁移，写
-  DefaultThemeMigration 标记，之后不再干预用户自己的主题组合；
-- Settings 默认 MainWindowBackgroundMaterialType = LiquidGlass、
-  IsMainWindowBackgroundMaterialEnabled = true；
-  材质在平台不可用时由 MainWindowBackgroundMaterialControl 自动回退到玻璃画刷。
-
-横幅：原 2601x588 banner 顶部对齐裁成 1920x350，输出到
-Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
-
-验证：独立 themecheck 工程在 xvfb 下加载主题，确认 8 条样式、
-Light / Dark 各 4 个画刷注册成功，并渲染深浅两套预览确认高光、
-描边与阴影层次。
-
-================================================
-[2026-11-09 22:05] [修复] 兼容层：类型别名重定向漏设 IsValueType
-================================================
-
-现象：SystemTools 2.5.1.0 的悬浮窗仍无法创建。上一版修复只覆盖了
-      Window.set_SystemDecorations 这一个方法引用，插件里其它 SystemDecorations
-      类型引用（局部变量签名、字段、泛型实参）仍被写成 class。
-
-根因：RemovedTypeAliases 只存命名空间/类型名/程序集，NormalizeType 改名时
-      没有同步 IsValueType。WindowDecorations 是枚举，写成 class 后 JIT
-      解析签名失败。
-
-修复：
-- 别名表增加 IsValueType 字段，SystemDecorations → WindowDecorations 标记为 true。
-- NormalizeType 应用别名时写入该标志。
-
-验证（对 SystemTools 2.5.1.0 做完整规则模拟）：
-- FluentAvalonia 3 的 FA 前缀重命名命中 10 个类型（ContentDialog→FAContentDialog 等）。
-- Avalonia / FluentAvalonia 无法解析的成员从 60 项降到 17 项。
-- SystemDecorations 相关引用全部通过。
-
-仍无法兼容（Avalonia 12 的真实 API 破坏，非改名可解）：
-- IClipboard.GetTextAsync / SetTextAsync（12 改为 TryGetDataAsync / SetDataAsync）
-- IDataTransfer.Contains / Get、DataTransfer.Set（数据传输接口重构）
-- DragDrop.DoDragDrop、DragEventArgs.Data
-- ToggleButton.CheckedEvent / UncheckedEvent（改为 IsCheckedChangedEvent）
-- Binding(string, BindingMode) 构造与 BindingBase.Mode
-
-================================================
-[2026-11-09 22:05] [修复] 旧版本数据迁移：Debug / Release / 便携版三形态
-================================================
-
-现象：Debug 构建里，旧版本的插件与备份都没有被复制过来，「恢复备份」列表为空。
-      旧版本有自启动项、有完整数据。
-
-根因（三处叠加）：
-1. 记账过宽：备份复制失败不计入计数，仍会被写入迁移记录，下次永远跳过。
-2. 旧目录发现太窄：只查自启项与 %AppData%\ClassIsland\Data，
-   漏掉 %LocalAppData% 和 exe 相邻目录（便携版 / Release / Debug）。
-3. 旧格式记账没有版本头，无法区分「成功」与「失败后误记」。
-
-修复：
-- 发现：自启项（.lnk + HKCU/HKLM Run，含 32 位视图）+ %AppData% / %LocalAppData%
-  + exe 相邻两级的 data 与目录自身。
-- 记账：#v2 格式，只有插件和备份都处理完才记账；旧格式自动丢弃重扫。
-- 复制：备份支持 zip 与目录；插件支持子目录与根目录文件。
-- 隔离：每个旧目录独立 try/catch，单个失败不影响其它目录。
-- 日志：扫描候选与每个目录的结果写入 Logs/legacy-migration.log。
-- 排重：跳过与当前数据目录相同、互为祖先/后代的路径，避免自我复制。
-
-三形态覆盖：
-- Debug：AppRootFolderPath = exe 目录（PackagingType 默认 folderClassic）。
-- Release / 便携版：AppRootFolderPath = 安装根/data（PackagingType=folder）。
-- 安装版：%AppData%\ClassIsland\Data（installer/msix）。
-
-================================================
-[2026-11-08 21:34] 同步 upstream/develop/v2/misha-alpha @ 9804dec
-================================================
-
-范围：基线 186f5bfe → 9804dec，上游 3 个提交，改动 7 个文件（新增 1 / 修改 6 / 删除 0）。
-处理：冲突 0 个；2 个定制文件（App.Services.xaml.cs、SettingsWindowNew.axaml.cs）三方合并均为干净合并；分支回退 0。
-构建：ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1334 warnings）
-
-改动的文件
-----------
-- ClassIsland/App.Services.xaml.cs — 三方合并
-- ClassIsland/Controls/ActionSettingsControls/NotificationActionSettingsControl.axaml — 取上游
-- ClassIsland/Controls/NotificationEffects/StarFountainEffect.cs — 取上游（新增）
-- ClassIsland/Models/Actions/NotificationActionSettings.cs — 取上游
-- ClassIsland/Services/Automation/Actions/NotificationAction.cs — 取上游
-- ClassIsland/Views/SettingsWindowNew.axaml — 取上游
-- ClassIsland/Views/SettingsWindowNew.axaml.cs — 三方合并
-
-本轮上游主要内容
-----------------
-- 新增星星喷泉提醒特效（StarFountainEffect）。
-- 应用设置导航容器重构为 NavigationPage（SettingsNavigationPage 成为独立导航页）。
-- 提醒行动（NotificationAction）可覆盖提醒特效，NotificationActionSettings 增加特效字段。
-- SettingsWindowNew 大改 213 行；「变量调试」页常显的过滤条件已随 BuildNavigationSections 保留。
-
-================================================
-[2026-11-08 21:10] [修复] 兼容层：枚举签名被写成 class，插件 JIT 报 Method not found
-================================================
-
-现象：SystemTools 2.5.1.0 加载后，FloatingWindowService.EnsureWindow() 抛
-      System.MissingMethodException: Method not found:
-      'Void Avalonia.Controls.Window.set_WindowDecorations(Avalonia.Controls.WindowDecorations)'。
-      上一版（CompatibilityVersion=4）报的是 set_SystemDecorations(WindowDecorations)。
-
-根因：Cecil 手工 new TypeReference(...) 的 IsValueType 默认为 false。WindowDecorations 是枚举，
-      按 class 写进方法签名后，JIT 解析目标方法时签名对不上 —— 宿主里方法确实存在，也报 Method not found。
-      实测签名：
-        IsValueType=false → 20 01 01 12 0D  （class，失败）
-        IsValueType=true  → 20 01 01 11 0D  （valuetype，正确）
-        宿主真签名        → 20 01 01 11 85 40（valuetype，TypeDef）
-
-修复：
-- 新增 MakeValueTypeReference()，构造时显式置 IsValueType = true。
-- Window.SystemDecorations → WindowDecorations 的 get/set 改写改用它。
-- Window.WindowDecorationsProperty（StyledProperty<Window, WindowDecorations>）与
-  Window.WindowStateProperty（DirectProperty<Window, WindowState>）的泛型实参同样改为值类型引用
-  —— WindowState 也是枚举，之前同样被写成 class，属于同一类潜在故障。
-- 宿主没有 WindowDecorations 属性（Avalonia 11）时跳过改写，保留原名原类型。
-- CompatibilityVersion 4 → 5，强制丢弃已生成的旧缓存。
-
-语义核对：Avalonia 11.0.0 的 SystemDecorations 与 12.1.4 的 WindowDecorations 数值一致
-          （None=0 / BorderOnly=1 / Full=2），改名不会改变窗口装饰行为。
-
-================================================
-[2026-11-08 17:00] 同步 upstream/develop/v2/misha-alpha @ 186f5bf
-================================================
-
-范围：基线 d62329d0 → 186f5bf，上游 8 个提交，改动 58 个文件（新增 29 / 修改 29 / 删除 0）。
-处理：冲突 1 个（残留 0 个，SettingsWindowNew.axaml.cs 手工合并并保留本地定制）；本地定制 6 个文件与上游同改，走三方合并；分支回退 0。
-构建：ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1378 warnings）
-
-改动的文件
-----------
-- .codex/config.toml — 取上游
-- ClassIsland.Android/Application.cs — 取上游
-- ClassIsland.Android/ClassIsland.Android.csproj — 取上游
-- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml.cs — 取上游
-- ClassIsland.Android/Helpers/NavigationRepeaterAutomationFix.cs — 取上游
-- ClassIsland.Android/MainActivity.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/IViewHost.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/MainViewPageBase.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/ViewBase.cs — 取上游
-- ClassIsland.Core/Abstractions/Services/INotificationWorkerService.cs — 取上游
-- ClassIsland.Core/Assists/ScrollViewerAssist.cs — 取上游
-- ClassIsland.Core/Attributes/FullWidthPageAttribute.cs — 取上游
-- ClassIsland.Core/Attributes/MainViewPageInfo.cs — 取上游
-- ClassIsland.Core/Controls/CompositionPageTransition.cs — 取上游
-- ClassIsland.Core/Controls/ConfettiAdorner.cs — 取上游
-- ClassIsland.Core/Controls/ConfettiAnimation.cs — 取上游
-- ClassIsland.Core/Controls/MyWindow.cs — 三方合并
-- ClassIsland.Core/Enums/MainView/MainViewPageCategory.cs — 取上游
-- ClassIsland.Core/Extensions/Registry/MainViewRegistryExtensions.cs — 取上游
-- ClassIsland.Core/Extensions/Registry/NotificationEffectRegistryExtensions.cs — 取上游
-- ClassIsland.Core/Helpers/UI/ConfettiHelper.cs — 取上游
-- ClassIsland.Core/Models/Notification/NotificationEffectContext.cs — 取上游
-- ClassIsland.Core/Models/Notification/NotificationEffectRegisterInfo.cs — 取上游
-- ClassIsland.Core/Models/Notification/NotificationPlayingTicket.cs — 取上游
-- ClassIsland.Core/Models/Notification/NotificationRequest.cs — 取上游
-- ClassIsland.Shared/Abstraction/Models/INotificationSettings.cs — 取上游
-- ClassIsland.Shared/Models/Notification/NotificationSettings.cs — 取上游
-- ClassIsland/App.Services.xaml.cs — 三方合并
-- ClassIsland/Controls/MainWindowLine.cs — 取上游
-- ClassIsland/Controls/NotificationEffects/ConfettiEffect.cs — 取上游
-- ClassIsland/Controls/NotificationEffects/RippleEffect.axaml.cs — 取上游
-- ClassIsland/Controls/PhonyTopmostEffectPlayer.cs — 取上游
-- ClassIsland/Controls/UI/WindowViewHost.axaml.cs — 取上游
-- ClassIsland/Helpers/TextRenderingBenchmarkReport.cs — 取上游
-- ClassIsland/Models/Settings.cs — 三方合并
-- ClassIsland/Models/TextRenderingBenchmark.cs — 取上游
-- ClassIsland/Services/NotificationWorkerService.cs — 三方合并
-- ClassIsland/ViewModels/SettingsNewViewModel.cs — 取上游
-- ClassIsland/ViewModels/TextRenderingBenchmarkViewModel.cs — 取上游
-- ClassIsland/Views/DevPortalWindow.axaml — 取上游
-- ClassIsland/Views/DevPortalWindow.axaml.cs — 取上游
-- ClassIsland/Views/MainView.axaml — 取上游
-- ClassIsland/Views/MainView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewPages/MoreMainViewPage.axaml — 取上游
-- ClassIsland/Views/MainViewPages/MoreMainViewPage.axaml.cs — 取上游
-- ClassIsland/Views/MainViewPages/ScheduleMainViewCommandBar.axaml — 取上游
-- ClassIsland/Views/MainViewPages/ScheduleMainViewCommandBar.axaml.cs — 取上游
-- ClassIsland/Views/MainViewPages/TodayMainViewPage.axaml — 取上游
-- ClassIsland/Views/MainViewPages/TodayMainViewPage.axaml.cs — 取上游
-- ClassIsland/Views/MainViewPages/WeekMainViewPage.axaml — 取上游
-- ClassIsland/Views/MainViewPages/WeekMainViewPage.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/NotificationSettingsPage.axaml — 三方合并
-- ClassIsland/Views/SettingPages/SettingsNavigationPage.axaml — 取上游
-- ClassIsland/Views/SettingPages/SettingsNavigationPage.axaml.cs — 取上游
-- ClassIsland/Views/SettingsWindowNew.axaml — 取上游
-- ClassIsland/Views/SettingsWindowNew.axaml.cs — 冲突修正
-- ClassIsland/Views/TextRenderingBenchmarkView.axaml — 取上游
-- ClassIsland/Views/TextRenderingBenchmarkView.axaml.cs — 取上游
-
-================================================
-[2026-11-06 21:10] 同步 upstream/develop/v2/misha-alpha @ d62329d0
-================================================
-
-范围：基线 329bf4b1 → d62329d0，上游 41 个提交，改动 149 个文件。
-处理：冲突 1 个（残留 0 个）；本地定制 82 个文件（9 个与上游同改已三方合并，73 个原样保留）；分支回退 0。
-构建：ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1371 warnings）
-
-改动的文件
-----------
-- .agents/acceptance/PROCESS.md — 取上游
-- .agents/acceptance/PROJECT.md — 取上游
-- .agents/acceptance/common-mistakes.md — 取上游
-- .agents/acceptance/probe-mock-patterns.md — 取上游
-- .agents/skills/acceptance/LICENSE — 取上游
-- .agents/skills/acceptance/SKILL.md — 取上游
-- .agents/skills/acceptance/agents/openai.yaml — 取上游
-- .agents/skills/acceptance/references/acceptance-checker.md — 取上游
-- .agents/skills/acceptance/references/agent-browser.md — 取上游
-- .agents/skills/acceptance/references/auth-web.md — 取上游
-- .agents/skills/acceptance/references/axe.md — 取上游
-- .agents/skills/acceptance/references/common-mistakes.md — 取上游
-- .agents/skills/acceptance/references/computer-use.md — 取上游
-- .agents/skills/acceptance/references/delegation.md — 取上游
-- .agents/skills/acceptance/references/evidence.md — 取上游
-- .agents/skills/acceptance/references/flows.md — 取上游
-- .agents/skills/acceptance/references/interaction-cost.md — 取上游
-- .agents/skills/acceptance/references/legacy-plan-handoff.md — 取上游
-- .agents/skills/acceptance/references/plan-format.md — 取上游
-- .agents/skills/acceptance/references/probe-mock-patterns.md — 取上游
-- .agents/skills/acceptance/references/project-adapter.md — 取上游
-- .agents/skills/acceptance/references/publication-recovery.md — 取上游
-- .agents/skills/acceptance/references/recording-cdp.md — 取上游
-- .agents/skills/acceptance/references/recording-ios-simulator.md — 取上游
-- .agents/skills/acceptance/references/recording-native-macos.md — 取上游
-- .agents/skills/acceptance/references/report-schema.md — 取上游
-- .agents/skills/acceptance/references/report.md — 取上游
-- .agents/skills/acceptance/references/resource-guard.md — 取上游
-- .agents/skills/acceptance/references/screenshot-helpers.md — 取上游
-- .agents/skills/acceptance/references/sim-use.md — 取上游
-- .agents/skills/acceptance/references/video-chapters.md — 取上游
-- .agents/skills/acceptance/scripts/cdp-capture.cjs — 取上游
-- .agents/skills/acceptance/scripts/cdp-screenshot.sh — 取上游
-- .agents/skills/acceptance/scripts/check-screen-recording.sh — 取上游
-- .agents/skills/acceptance/scripts/image-brightness.sh — 取上游
-- .agents/skills/acceptance/scripts/resource-guard.sh — 取上游
-- .agents/skills/acceptance/surfaces/cli.md — 取上游
-- .agents/skills/acceptance/surfaces/electron.md — 取上游
-- .agents/skills/acceptance/surfaces/ios-simulator.md — 取上游
-- .agents/skills/acceptance/surfaces/native.md — 取上游
-- .agents/skills/acceptance/surfaces/web.md — 取上游
-- .claude/skills — 取上游
-- .codex/skills — 取上游
-- .gemini/skills — 取上游
-- .github/workflows/build_release.yml — 取上游
-- .vscode/launch.json — 取上游
-- ClassIsland.Android/Application.cs — 取上游
-- ClassIsland.Android/ClassIsland.Android.csproj — 取上游
-- ClassIsland.Android/Controls/AndroidDebugOverlay.cs — 取上游
-- ClassIsland.Android/Controls/AndroidSkiaGpuMetrics.cs — 取上游
-- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml — 取上游
-- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml.cs — 取上游
-- ClassIsland.Android/Helpers/AndroidFontHelper.cs — 取上游
-- ClassIsland.Android/MainActivity.cs — 取上游
-- ClassIsland.Android/Resources/drawable-nodpi/debug_floating_icon.webp — 取上游
-- ClassIsland.Android/Services/AndroidProcessMetrics.cs — 取上游
-- ClassIsland.Android/Services/Platform/DeviceInfoService.cs — 取上游
-- ClassIsland.Android/Services/Platform/HapticFeedbackService.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/ViewBase.cs — 取上游
-- ClassIsland.Core/Assists/ComboBoxAssist.cs — 取上游
-- ClassIsland.Core/Assists/ScrollViewerAssist.cs — 取上游
-- ClassIsland.Core/Assists/ViewHostAssist.cs — 取上游
-- ClassIsland.Core/Assists/ViewboxLogicalTreeAssist.cs — 取上游
-- ClassIsland.Core/CommonDirectories.cs — 取上游
-- ClassIsland.Core/Controls/ComboBoxDrawerPage.cs — 取上游
-- ClassIsland.Core/Controls/FluentIcon.axaml.cs — 取上游
-- ClassIsland.Core/Controls/FluentIconSource.cs — 取上游
-- ClassIsland.Core/Controls/IconText.axaml.cs — 取上游
-- ClassIsland.Core/Controls/LucideIcon.axaml.cs — 取上游
-- ClassIsland.Core/Controls/LucideIconSource.cs — 取上游
-- ClassIsland.Core/Controls/VerticalDrawer.axaml — 取上游
-- ClassIsland.Core/Controls/VerticalDrawer.axaml.cs — 取上游
-- ClassIsland.Core/Helpers/AvaloniaUnsafeAccessorHelpers.cs — 取上游
-- ClassIsland.Core/Helpers/UI/FaFrameLifetimeHelper.cs — 取上游
-- ClassIsland.Core/Models/UI/DrawerOptions.cs — 取上游
-- ClassIsland.Core/StylesBase.axaml — 取上游
-- ClassIsland.Core/Themes/PopupBaseStyles.axaml — 取上游
-- ClassIsland.Desktop/Program.cs — 取上游
-- ClassIsland.Filter.Linux.slnf — 取上游
-- ClassIsland.Filter.MacOs.slnf — 取上游
-- ClassIsland.Platforms.Abstractions/Models/BlobFilePickerOpenOptions.cs — 取上游
-- ClassIsland.Platforms.Abstractions/PlatformServices.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Services/IDeviceInfoService.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Services/IHapticFeedbackService.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Services/IPlatformFilePickerService.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Stubs/Services/AvaloniaDefaultPlatformFilePickerService.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Stubs/Services/DeviceInfoServiceStub.cs — 取上游
-- ClassIsland.Platforms.Abstractions/Stubs/Services/HapticFeedbackServiceStub.cs — 取上游
-- ClassIsland/App.Services.xaml.cs — 三方合并
-- ClassIsland/App.axaml.cs — 三方合并
-- ClassIsland/Assets/Documents/ChangeLog.md — 取上游
-- ClassIsland/Assets/Fonts/Fonts.axaml — 取上游
-- ClassIsland/ClassIsland.csproj — 三方合并
-- ClassIsland/Controls/Components/ScheduleComponentSettingsControl.axaml — 取上游
-- ClassIsland/Controls/Components/WeatherComponentSettingsControl.axaml — 取上游
-- ClassIsland/Controls/EditMode/EditModeView.axaml — 取上游
-- ClassIsland/Controls/ScheduleDataGrid/ScheduleDataGrid.axaml — 取上游
-- ClassIsland/Controls/ScheduleDataGrid/ScheduleDataGrid.axaml.cs — 取上游
-- ClassIsland/Controls/ScheduleWeekEdit/ScheduleWeekEditControl.cs — 取上游
-- ClassIsland/Controls/UI/DrawerNavigationHost.axaml — 取上游
-- ClassIsland/Controls/UI/DrawerNavigationHost.axaml.cs — 取上游
-- ClassIsland/Controls/UI/WindowViewHost.axaml — 取上游
-- ClassIsland/Controls/UI/WindowViewHost.axaml.cs — 取上游
-- ClassIsland/Converters/StringToFontFamilyConverter.cs — 取上游
-- ClassIsland/Extensions/OverlayAssetLoaderExtensions.cs — 取上游
-- ClassIsland/Helpers/DefaultFontProbe.cs — 取上游
-- ClassIsland/Helpers/SkiaGpuCacheHelper.cs — 取上游
-- ClassIsland/MainWindow.axaml — 取上游
-- ClassIsland/MainWindow.axaml.cs — 取上游
-- ClassIsland/Models/Settings.cs — 三方合并
-- ClassIsland/Models/WeekClassPlanRow.cs — 取上游
-- ClassIsland/OverlayAssetLoader.cs — 取上游
-- ClassIsland/Program.cs — 冲突修正
-- ClassIsland/Services/DiagnosticService.cs — 三方合并
-- ClassIsland/Services/MemoryWatchDogService.cs — 取上游
-- ClassIsland/Services/SettingsService.cs — 三方合并
-- ClassIsland/Services/WindowRuleService.cs — 取上游
-- ClassIsland/ViewModels/DevPortalViewModel.FontProbe.cs — 取上游
-- ClassIsland/ViewModels/SettingsPages/AdvancedSettingsViewModel.cs — 取上游
-- ClassIsland/ViewModels/SettingsPages/AppearanceSettingsViewModel.cs — 取上游
-- ClassIsland/Views/DataTransferPage.axaml.cs — 取上游
-- ClassIsland/Views/DevPortalWindow.axaml — 取上游
-- ClassIsland/Views/DevPortalWindow.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/CourseEditView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/CourseInfoView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ImportExportProviderView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ImportExportView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ProfileManagementView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ScheduleModeView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/SubjectEditView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/SubjectManagementView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/SubjectPickerView.axaml — 取上游
-- ClassIsland/Views/ProfileSettingsWindow.axaml — 三方合并
-- ClassIsland/Views/RecoveryWindow.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/AdvancedSettingsPage.axaml — 取上游
-- ClassIsland/Views/SettingPages/AdvancedSettingsPage.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/AppearanceSettingsPage.axaml — 取上游
-- ClassIsland/Views/SettingPages/AppearanceSettingsPage.axaml.cs — 取上游
-- ClassIsland/Views/SettingPages/WeatherSettingsPage.axaml — 取上游
-- ClassIsland/Views/SettingPages/WeatherSettingsPage.axaml.cs — 取上游
-- ClassIsland/Views/SettingsWindowNew.axaml.cs — 三方合并
-- ClassIsland/Views/WelcomeWindow.axaml.cs — 取上游
-- ClassIsland/Views/WindowRuleDebugWindow.axaml.cs — 取上游
-- doc/ChangeLogs/2.2/2.1.2.0/App.md — 取上游
-- doc/Contributing/Scopes.md — 取上游
-- platforms/ClassIsland.Platforms.Linux/Services/DeviceInfoService.cs — 取上游
-- platforms/ClassIsland.Platforms.MacOs/Services/DeviceInfoService.cs — 取上游
-- platforms/ClassIsland.Platforms.Windows/Services/DeviceInfoService.cs — 取上游
-- vendors/EdgeTtsSharp — 取上游
-
-================================================
-[2026-11-06 20:45] [修改] 插件可选依赖改为首次使用时下载
-================================================
-
-需求：「把这次你新加的两个 DLL 作为首次用下载，其他的都正常加载」——上一版把
-OpenCvSharp4 和 DlibDotNet 打进安装包，解压后多 136MB，绝大多数人根本用不到。
-
-处理：
-
-- 移除 ClassIsland.csproj 里 OpenCvSharp4 / OpenCvSharp4.runtime.win / DlibDotNet
-  三个 PackageReference，安装包不再包含这些文件。
-- 新增 ClassIsland/Services/PluginDependencyService.cs：
-  · 内置可选依赖清单（程序集名 → NuGet 包 + 需要抽取的文件），加新依赖只需添一条；
-  · 缓存目录 <数据目录>\PluginDependencies，托管库与原生库平铺在同一层；
-  · Ensure() 首次调用时同步下载 nupkg，只抽取清单里的文件，不整包解压；
-  · 下载源 api.nuget.org/v3-flatcontainer，失败回退 www.nuget.org/api/v2/package；
-  · 下载失败记 10 分钟冷却，避免每次解析都卡在同一个下载上；
-  · Prefetch() 在插件加载时后台读插件 dll 的 AssemblyRef，命中清单的提前下好。
-- PluginLoadContext：
-  · Load 增加第 ⑥ 步——缓存命中直接 LoadFromAssemblyPath，未命中调 Ensure() 现下；
-  · LoadUnmanagedDll 增加缓存目录查找，解决 OpenCvSharpExtern、DlibDotNetNative
-    这些原生库的解析（托管库从缓存加载后，DllImport 走的是插件上下文的解析）；
-  · 构造函数里触发 Prefetch。
-- 上一段补充里「预置 OpenCvSharp4 / DlibDotNet」的方案由本节取代，那些包引用已删除。
-
-文件：ClassIsland/Services/PluginDependencyService.cs（新增）、ClassIsland/PluginLoadContext.cs、
-     ClassIsland/ClassIsland.csproj
-
-验证：Linux 与 Windows 目标编译均 0 error；实跑下载测试 13 项断言全过——
-     OpenCvSharp 3.4s / DlibDotNet 4.0s 下载完成，二次调用命中缓存 <100ms；
-     落地文件 OpenCvSharp.dll 979KB、OpenCvSharpExtern.dll 65MB、ffmpeg 27MB、
-     DlibDotNet.dll 590KB、DlibDotNetNative.dll 21MB、DlibDotNetNativeDnn.dll 20MB；
-     托管库 AssemblyName 校验通过（OpenCvSharp 4.0.0.0 / DlibDotNet 19.21.0.0）。
-     发布目录已无 opencv/dlib 文件，回到 290MB（不含 pdb），压缩后约 128MB。
-
-下次同步注意：缓存目录在 <数据目录>\PluginDependencies，卸载重装不会清；
-     清单里的版本号写死在 PluginDependencyService，升级 OpenCvSharp 要同步改这里；
-     下载是在程序集解析里同步做的，无网环境首次调用会等满超时（5 分钟）才失败，
-     之后 10 分钟内不再重试。
-
-================================================
-[2026-11-06 20:17] [新增] 启动时从旧版本安装目录迁移插件与备份包
-================================================
-
-需求：「很有可能安装了其他的版本……找上一次开机自启的目录，把它的备份包和插件复制到当前目录」。
-
-处理：新增 LegacyDataMigrationHelper，在插件扫描之前执行一次：
-
-- 定位旧版本：遍历启动文件夹 %APPDATA%\...\Startup\*.lnk（用 WScript.Shell 读 TargetPath）
-  以及注册表 HKCU/HKLM 的 Software\Microsoft\Windows\CurrentVersion\Run，
-  只接受文件名以 ClassIsland 开头的可执行文件。
-- 推导数据目录：优先 <exe目录>\data（便携版布局），其次 <exe目录>（老版本扁平布局）；
-  两者都不像数据目录时，回退到 %AppData%\ClassIsland\Data（安装版布局，覆盖「装过安装版
-  又换成便携版」的情况）。
-- 复制 Plugins\*（递归整目录）与 Backups\*.zip 到当前数据目录；同名插件目录、同名备份
-  一律跳过，不覆盖现有内容。
-- 每个旧目录只处理一次，处理记录写入 Config\legacy-migration.txt；有插件复制失败时不记账，
-  下次启动重试。删掉该文件即可强制重新扫描。
-- 启动完成后弹 Toast 汇总：复制了几个插件、几个备份包、跳过几个同名插件。
-- 整个入口包在 #if Platforms_Windows 内，其它平台是空实现。
-
-文件：ClassIsland/Helpers/LegacyDataMigrationHelper.cs（新增）、ClassIsland/App.axaml.cs、
-     ClassIsland/PluginLoadContext.cs、ClassIsland/ClassIsland.csproj
-
-补丁：update-legacy-migrate-v2.txt（2 个提交，git am 可直接套用，不含本账本）
-
-补充（20:31）：第一版有两个硬伤，已修——
-
-1. ClassIsland 项目根本不定义 Platforms_Windows（只有 ClassIsland.Desktop 定义），
-   原来用 #if 包住 Run()，方法体被整段裁掉，迁移一次都没执行过。改成运行时
-   OperatingSystem.IsWindows() 判断。
-2. 宿主目录里其实有 System.Windows.Forms.dll、System.Drawing.Common.dll、
-   Microsoft.Windows.SDK.NET.dll，但它们不在 deps.json，插件加载上下文解析不到。
-   PluginLoadContext 增加「宿主目录按需加载」，并给默认上下文注册 Resolving 兜底，
-   连带 System.Windows.Forms 的依赖链一起解决。
-3. 预置 OpenCvSharp4 4.13（OpenCvSharpExtern 66MB + ffmpeg 28MB）、DlibDotNet 19.21
-   （两个 native 各 21MB），补上截图、摄像头、人脸识别插件缺的库；发布目录 +136MB。
-   这些只在 Windows 目标下引用（PublishPlatform=windows 或构建机是 Windows）。
-
-验证：Windows 目标（net10.0-windows10.0.19041.0）编译 0 error；
-     目录复制逻辑用真实文件系统跑了 16 项断言，全部通过——同名插件跳过、同名备份保留原件、
-     递归复制子目录、带引号/不带引号命令行解析、便携版与扁平目录识别、非 ClassIsland 程序忽略。
-     补丁在 b108ba6 干净基线上 git am 成功，落地 tree 186a2a8f 与源提交一致。
-
-下次同步注意：调用点固定在 FileFolderService.CreateFolders() 之后、
-     PluginService.ProcessPluginsInstall() 之前，不能挪到插件扫描后面——
-     迁移过来的插件需要在本次启动就能被扫到。
-
-================================================
-[2026-10-31 17:15] [修复] 上游 Issues 第二批：再修 6 个 Bug（组件方案互覆盖、安全模式插件、音频设备、集控代理、关机保存、全屏判定）
-================================================
-
-需求：「其他那些你没排查的呢？」——第一段只覆盖了 9 个 issue，剩下的按 Bug 标签继续往下过。
-
-排查范围：接着第一段的 118 个 Bug issue 继续（按更新时间倒序），重点看能直接对着代码定位的：
-数据丢失类、集控类、系统集成类。能用代码证明根因的都改掉了。
-
-已修复（6 个 issue + 4 处顺手加固）：
-
-1. #2034 集控模式下切换「组件配置方案」，所有方案被覆盖成同一份内容（不可逆数据丢失）
-   - 原因有两层：
-     a) ComponentsService.LoadManagementConfig 一进来就 IsManagementMode = true，只要加入了集控就成立，
-        哪怕集控清单里根本没有 ComponentsSource（很多学校只用集控同步课表/科目）。集控模式下
-        LoadConfig 不读本地文件，切方案时内存里还是上一份配置；
-     b) 集合变更的保存目标是「当前」CurrentConfigFullPath，切换时先写回旧方案、再加载新方案，
-        加上配置名写盘有延迟，最终每个方案都被写成同一份。
-   - 处理：IsManagementMode 改为「清单真的下发了组件配置」才为 true；保存路径在加载时固定为
-     _currentConfigPath（不再随切换漂移）；切方案前解绑上一份集合的 CollectionChanged，
-     避免重复订阅；集控模式下 SaveConfig 直接返回，不把集控内容写进本地方案。
-   - 文件：ClassIsland/Services/ComponentsService.cs
-
-2. #1923 安全模式下无法管理插件（插件页空白，出问题的插件卸不掉）
-   - 原因：App.Services 里 `!ApplicationCommand.Safe` 时干脆不调用 InitializePlugins，插件页没有任何条目。
-   - 处理：安全模式照常扫描插件清单，只是不加载程序集；新增 PluginLoadStatus.Skipped 与对应徽章
-     「安全模式未加载」，插件详情页给出说明。插件仍可查看、可卸载，只是本次启动不运行。
-   - 文件：ClassIsland/App.Services.xaml.cs、ClassIsland/Services/PluginService.cs、
-     ClassIsland.Core/Enums/PluginLoadStatus.cs、ClassIsland/Views/SettingPages/PluginsSettingsPage.axaml
-
-3. #1546 切换播放设备后，ClassIsland 仍在上一个设备上出声，直到重启
-   - 原因：AudioService 缓存了 AudioPlaybackDevice，只判断「有没有被释放」，从不核对系统默认设备有没有变。
-   - 处理：每次取用前 Rent 出设备并与 AudioEngine.PlaybackDevices 里的默认设备比对 Id，
-     变了就归还租约、释放缓存并重新初始化。先租再比，租约期间设备不会被回收。
-   - 文件：ClassIsland/Services/AudioService.cs
-
-4. #2028 gRPC 模式的集控在开了系统代理的电脑上连不上
-   - 原因：GrpcChannel.ForAddress 默认走系统代理，校园网里常见的失效代理/需认证代理会直接让连接失败。
-   - 处理：统一的 CreateGrpcChannel，用 SocketsHttpHandler 关闭代理并把连接超时压到 10 秒，
-     两处建通道的地方（lightConnect 与命令流）都改用它。
-   - 文件：ClassIsland/Services/Management/ManagementServerConnection.cs
-
-5. #671 没关设置窗口就关机，配置丢失
-   - 原因：退出时靠 Stop() 里往 UI 线程投递保存任务，系统关机/注销时进程直接被结束，投递的任务来不及跑。
-   - 处理：订阅 DesktopLifetime.ShutdownRequested，在关机请求阶段同步保存一次（设置、自动化、档案、组件），
-     SaveAllConfigs 抽成方法，Stop() 复用同一份逻辑；保存本身幂等。
-   - 文件：ClassIsland/App.axaml.cs
-
-6. #569 开了「全屏时隐藏」，某些全屏程序仍然不隐藏
-   - 原因：全屏判定要求窗口矩形严格包含整个屏幕。部分游戏（启动器拉起的无边框全屏）窗口比屏幕小几个像素，
-     严格包含判定失败。
-   - 处理：严格包含仍然优先；不满足时按覆盖率兜底，覆盖屏幕 99% 以上视为全屏
-     （最大化窗口只覆盖工作区，达不到这个比例，不会误判）。
-   - 文件：platforms/ClassIsland.Platforms.Windows/Services/WindowPlatformService.cs
-
-顺手加固（没有对应 issue，改到的文件都在本批里）：
-- 弹窗宿主窗口：没有窗口处于激活状态时，原来直接退回主窗口（主界面贴屏幕顶部，对话框会压到课表上）。
-  改为选最后打开且可见、非最小化的普通窗口；顺手删掉两处 ELYSIADBG 调试打屏。
-  文件：ClassIsland.Core/Extensions/UI/FAContentDialogExtensions.cs
-- 提醒音效：自定义音效文件被删/路径失效时原来静默失败（提醒直接没声音），现在回退内置音效并记 warning；
-  播放异常也从「丢弃 Task 吞掉」改成写日志。
-  文件：ClassIsland/Services/NotificationWorkerService.cs
-- CSES 导出：保存对话框默认扩展名从 .json 改成 yml；内容先整体序列化成字节再写入，
-  避免存储流不支持 Seek 时覆盖写留下上一份文件的尾部（导出的课表变成两份拼在一起）。
-  文件：ClassIsland/Helpers/ProfileTransferHelpers/CsesExportHelper.cs
-
-已排查但没改的：
-- #1460 导出的 CSES 字符串没带引号，被部分程序误识别：序列化在第三方 CSES 库（CsesLoader.SaveToYamlString），
-  要等上游库加引号策略，本地改不了。
-- #2000 部分条件无法触发自动化：#2039 修完后仍有一批条件（窗口/进程类）需要实机验证触发时机，
-  没有可靠复现路径，先不动。
-- 其余仍按第一段的口径：需要 GUI 复现、语义不明、或卡在外部依赖的，一律不瞎改。
-
-验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 0 Error；
-      dotnet build platforms/ClassIsland.Platforms.Windows/ClassIsland.Platforms.Windows.csproj -c Release → 0 Error。
-
-产物（Filebin，2026-10-31 17:20）
-- patches.zip（大小以 Filebin 页面为准）  https://filebin.net/classisland1029/patches.zip
-  含 apply.txt、update-918.txt（15 个提交，9:18 那版起全量）、
-  update-918-last.txt（2 个提交，给「上一版补丁已打完」的仓库用）。
-- ci-win-x64.zip  https://filebin.net/classisland1029/ci-win-x64.zip
-  交叉发布 win-x64 自包含（PublishBuilding），包内已带 Mono.Cecil。
+需求（2026-10-29 起，多轮迭代到 2026-11-13）：
+提醒播放期间主界面不能变宽变窄；轮播容器切换内容不能带动整行宽度；
+所有提醒按自己的文字长度定宽，播放期间只增不减、文字不被压扁。
+
+这是一条链上的三个层次，缺任何一层都会复发，按层说明。
+
+1）面板层（Rectangles 主题的气泡）
+- RectanglesNotificationPanel：宽度规则从「弹出后 600ms 内允许增长」改为
+  「整个播放期间只增不减」——内容变长时跟上，变短时保持不变。
+- 宽度比较加 0.5px 容差，候选宽度向上取整到整像素，动画重启阈值同步放宽，
+  避免亚像素抖动反复重启 333ms 宽度动画（表现得像气泡持续抽动）。
+- RectanglesNotificationBubble.MeasureContentWidth：测量内容自然宽度时，
+  把轮播容器（ListBox 等）里所有已生成的项都算进来取最大值。
+- 宽度上限仍是窗口宽度的 80%，超长内容在该上限内裁切/省略。
+
+2）模板部件层（内嵌式主题：Fluent / LiquidGlass / Classic）
+- 三套模板里 GridOverlay / GridContentRoot 是 PART_GridWrapper 的并列子元素，
+  遮罩、叠加内容参与父 Grid 测量，内容比主界面组件宽时就把整条岛撑开。
+  只改面板层对内嵌式主题完全无效，必须在这一层锁。
+- MainWindowLine 新增 LockRowWidth / UnlockRowWidth：提醒开始播放前记下
+  PART_GridWrapper 的实际宽度并写死，播放结束恢复 NaN 自适应；锁定期间
+  WrapperOnSizeChanged 不再回写 BackgroundWidth，内容改为溢出显示。
+- 锁定前先 TopLevel.UpdateLayout() 强制排一遍布局，避免「整行组件都被隐藏、
+  提醒开始时行才出现、Bounds 仍为 0」导致锁定被跳过。
+- 模板重建（切主题、换外观）会在 OnApplyTemplate 里换掉 GridWrapper 实例。旧实例上的
+  Width 限制随旧模板一起消失，但锁标志还是 true —— 必须把 _lockedRowWidth 迁移到新实例，
+  否则 WrapperOnSizeChanged 会一直直接 return，BackgroundWidth 再也不更新，背景宽度卡死在旧值。
+  未处于锁定状态时则顺手清空锁标志与锁宽度，避免上一个模板的残留值影响下一次。
+
+3）组件层（轮播容器）
+- SlideComponent 的 ListBox 用 Grid 做 ItemsPanel，所有轮播项叠在同一格里。
+  未选中项原本用 IsVisible=False 隐藏，而 Avalonia 中不可见元素不参与测量，
+  于是 ListBox 的测量宽度只等于当前显示项——切一次轮播整行宽度变一次。
+- 改为 Opacity=0 + IsHitTestVisible=False 隐藏未选中项、选中项 ZIndex=1 置顶，
+  所有项都参与测量，轮播宽度恒为最宽项；滑动动画同步从 IsVisible 改 Opacity 驱动。
+
+涉及文件
+--------
+- ClassIsland/Controls/MainWindowLine.cs — LockRowWidth / UnlockRowWidth + 布局强制
+- ClassIsland/Controls/RectanglesNotificationPanel.cs — 只增不减 + 0.5px 容差
+- ClassIsland/Controls/RectanglesNotificationBubble.cs — 纳入轮播容器所有项
+- ClassIsland/Controls/Components/SlideComponent.axaml — Opacity 隐藏 + ZIndex
 
 下次同步注意
-- ComponentsService 的 IsManagementMode 语义变了：只有清单下发 ComponentsSource 才为 true。
-  上游如果改了集控清单结构，这里要跟着改；不要再改回「加入集控就 true」。
-- 插件加载状态多了 Skipped（安全模式专用）。上游新增状态处理分支时记得带上它，
-  尤其是「是否加载成功」这类统计。
-- AudioService 取缓存设备前会扫一次默认设备，属于每次播放都执行的路径，上游若把它挪进热循环要注意开销。
-- App.axaml.cs 的 ShutdownRequested 是关机保存的唯一入口，删了 #671 会复发。
+------------
+- 宽度锁定作用在模板部件 PART_GridWrapper 上，对所有主题统一生效；上游换模板结构时
+  先确认这个部件名还在，否则锁定会静默失效。
+- 上游在频繁改提醒动画，同步时保留「只增不减」策略与 0.5px 容差。
+- SlideComponent.axaml 的写法不能退回 IsVisible：不可见元素不参与测量，这是根因。
+- 三处改动互相兜底，不要因为「某一层看起来没用到」就删掉。
 
 ================================================
-[2026-10-31 16:35] [修复] 跟进上游 Issues：修 6 个 Bug（cron 重复触发、课表开关、删除时间表、诊断导出等）
+[长期] 插件兼容层（旧版 Avalonia 插件在新宿主加载）
 ================================================
 
-需求：去上游仓库（ClassIsland/ClassIsland）的 Issues 里找 bug 修掉，并把修过的都记在账本里。
+需求（2026-10-29 起，多轮迭代到 2026-11-09）：
+插件市场里所有 2.x 插件（含按 Avalonia 11 / FluentAvalonia 2 编译的）都要能直接加载；
+同为 Avalonia 12 编译的插件原样加载、不做任何改写。判定不能针对插件名做特判。
 
-排查范围：抓取了上游 384 个 open issue（其中 118 个带 Bug 标签，按更新时间倒序），
-逐条对照本仓库代码定位。
-
-已修复（7 项，对应 9 个 issue）：
-
-1. #2039 更改时间偏移后，以 cron 为触发器的自动化执行两次
-   - 原因：CronWorker 的循环条件读的是字段 _stopCancellationTokenSource，LoadCron 换新 CTS
-     后旧 worker 会「复活」继续跑；表达式解析失败时还会 continue 忙等烧 CPU。
-   - 处理：worker 改为持有自己的 token 和 crontab 局部变量；等待分段（最多 30 秒），醒来后
-     确认真的越过触发时刻才触发；订阅 Settings.TimeOffsetSeconds / DebugTimeOffsetSeconds，
-     时间偏移一变就重建 worker；解析失败不再启动 worker。
-   - 文件：ClassIsland/Services/Automation/Triggers/CronTrigger.cs
-
-2. #663 禁用课表后重启应用又会加载课表
-   - 原因：LessonsService.IsClassPlanEnabled 只是内存属性，没有写进配置。
-   - 处理：状态迁到 Settings.IsClassPlanEnabled（持久化），LessonsService 代理读写，
-     切换后立即刷新课表，不用等下一次计时器 tick。
-   - 文件：ClassIsland/Models/Settings.cs、ClassIsland/Services/LessonsService.cs
-
-3. #828 关闭「加载课表」后仍然显示明日课表
-   - 处理：课表组件在开关关闭时不再计算明日课表，并跳过「无课程时显示明日」的判定。
-   - 文件：ClassIsland/Controls/Components/ScheduleComponent.axaml.cs
-
-4. #2046 / #1896 点「删除时间表」没有任何反应
-   - 原因：删除确认挂在命令栏按钮的 Flyout 上，这个 Flyout 在 PrimaryCommands 里弹不出来，
-     所以看起来像点了没反应。
-   - 处理：按钮改成直接 Click，用 ContentDialogHelper 弹确认框，确认后才删除。
-   - 文件：ClassIsland/Views/ProfileSettingsWindow.axaml(.cs)
-
-5. #1423 复制诊断信息时崩溃（内存超限）
-   - 原因：导出前把所有日志拼成一个巨型字符串，拼完又没写进文件。
-   - 处理：删掉这段无用拼接，日志目录仍按原逻辑随包复制。
-   - 文件：ClassIsland/Services/DiagnosticService.cs
-
-6. #2032 / #1713 切换深/浅色后天气文字消失
-   - 部分是同一根因：主题切换后 Run 的前景色不跟随。
-   - 处理：天气组件根节点显式指定 TextElement.Foreground 为主题色。
-   - 文件：ClassIsland/Controls/Components/WeatherComponent.axaml
-   - 未覆盖：课表组件的时间文字（LessonsListBox 内部模板）仍有同样风险。
-
-7. #2031 / #1973 天气温度运行一段时间后丢失
-   - 原因：小米天气接口偶发返回 HTTP 200 的空 JSON（{}），反序列化出全默认对象，
-     代码无条件整体覆盖 LastWeatherInfo，把上一次的有效温度和天气类型一起清空。
-   - 处理：写回前校验，温度和天气类型为空时沿用上一次的有效值，并记一条 warning 日志。
-   - 文件：ClassIsland/Services/WeatherService.cs
-
-已排查但没改的（缺复现条件或语义不明确，不瞎改）：
-- #2044 #865 #1020 多行组件的行距/行数/启动时自动隐藏后不恢复：需要 GUI 复现，
-  涉及 StackPanel spacing 与隐藏行的交互，盲改容易把布局搞乱。
-- #1949 市级气象局预警覆盖区级：Alerts 的 LocationKey 语义要用真实接口数据验证，
-  贸然按城市过滤会漏报。
-- #1090 禁用时间点后课间与分割线异常：ValidTimeLayoutItems 正反向搜索的语义需要确认。
-- #780 课间小于 2 秒时显示错误：1.6/1.7 的老问题，当前课表实现已重写，没能复现。
-- #2037 EdgeTTS 接口变更：依赖 vendors/EdgeTtsSharp 子模块，要等上游库适配。
-- #1685 日期选择器从月切到日时崩溃：FluentAvalonia 控件内部实现。
-- #606 改注册表字体后托盘图标崩溃：H.NotifyIcon + System.Drawing 找不到字体。
-
-验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 0 Error。
-
-下次同步注意
-- Settings 新增 IsClassPlanEnabled 字段，旧 Settings.json 缺这个字段时默认 true，和以前行为一致。
-- 删除时间表的确认 Flyout 已从 ProfileSettingsWindow.axaml 移除，同步上游同文件时注意冲突。
-- CronTrigger 现在监听 Settings.TimeOffsetSeconds，上游要是改了时间偏移的属性名，这里要跟着改。
-
-================================================
-[2026-10-31 15:40] [修复] 插件兼容层通用化：按旧版 Avalonia 编译的插件在 12 宿主上可加载
-================================================
-
-需求：System Tools 加载失败只是一个表现，兼容逻辑要对所有按旧版 Avalonia 编译的插件生效，
-      不能针对某个插件名做特判；同为 Avalonia 12 编译的插件必须原样加载、不做任何改写。
-
-处理：
-- 新增 PluginTypeCompatibility：加载前用 Mono.Cecil 重写插件程序集的类型引用。
-  判定条件只有一条 —— 插件引用的 Avalonia 主版本 < 宿主主版本（当前 11 → 12）；
-  同主版本（12 → 12）直接跳过，不改写、不缓存、不加提示。
-- 映射关系完全由宿主发布目录的实际类型表推导（PEReader 扫全部 dll），不含任何插件名特判：
-  · 规则 A：类型换到了宿主里的另一个程序集（Avalonia.Markup → Avalonia.Base 等）；
-  · 规则 A2：原本独立的类型被收进外层类型（ClassIsland.Core.Controls.DrawerPlacementEnum
-    → DrawerHost/DrawerPlacementEnum），按「简单名唯一 + 命名空间同源」推断；
+核心机制：ClassIsland/Services/PluginCompatibility/PluginTypeCompatibility.cs
+- 加载前用 Mono.Cecil 重写插件程序集的类型引用。判定只有一条：
+  插件引用的 Avalonia 主版本 < 宿主主版本（11 → 12）才改写；同主版本直接跳过。
+- 映射表由宿主发布目录的实际类型表推导（PEReader 扫全部 dll），不含插件名特判：
+  · 规则 A：类型换到宿主里的另一个程序集（Avalonia.Markup → Avalonia.Base 等）；
+  · 规则 A2：独立类型被收进外层类型（DrawerPlacementEnum → DrawerHost/DrawerPlacementEnum），
+    按「简单名唯一 + 命名空间同源」推断；
   · 规则 B：FluentAvalonia 3 给控件统一加 FA 前缀（ContentDialog → FAContentDialog 等）；
   · 规则 C：宿主自身 API 的命名空间迁移（同名类型唯一时才生效）；
-  · 嵌套类型的全名（Outer/Inner）也进索引，避免合法的嵌套引用被误判为缺失。
-- 强名称程序集不再一刀切跳过：.NET 运行时不校验强名称签名，改写时摘掉签名标记继续处理。
+  · 嵌套类型的全名（Outer/Inner）也进索引，避免合法嵌套引用被误判成缺失。
 - 改写结果按「源文件 SHA256 + 宿主主版本」缓存，插件或宿主更新自动失效；
   任何异常都退回原文件加载，不会因为兼容层本身让插件更糟。
-- PluginLoadContext：插件目录里的每个程序集（不只入口）都走兼容层；
-  宿主自身程序集 / Avalonia 优先绑定宿主实例，缺 deps.json 时按文件名兜底。
-- PluginService：入口程序集按清单找不到时，做一次不区分大小写的全目录搜索
-  （清单大小写不一致、入口放在子目录的包都能加载）；加载失败提示区分「缺依赖」与「API 不兼容」。
-- PluginInfo 增加兼容说明列表，插件详情页能看到兼容层做了什么、还有哪些类型无法映射。
 
-改动的文件
-- ClassIsland/Services/PluginCompatibility/PluginTypeCompatibility.cs — 新增
+已经被上游改掉、必须一直垫着的兼容映射
+--------------------------------------
+- SystemDecorations → WindowDecorations：Avalonia 12 把 Window.SystemDecorations 改名。
+  RemovedTypeAliases 的四元组必须带 IsValueType 标志，NormalizeType 改名时同步写入。
+  漏设会被写成 class 签名，JIT 解析失败报 Method not found（数值一致：None=0/BorderOnly=1/Full=2）。
+- GotFocusEventArgs 在 12 里被删除 → 别名到 FocusChangedEventArgs。
+- InputElement.LostFocus / GotFocus 事件参数从 RoutedEventArgs 改成 FocusChangedEventArgs，
+  插件用 add_LostFocus(EventHandler<RoutedEventArgs>) 订阅会报 MissingMethodException。
+  → 事件访问器 add_/remove_ 重定向到 Avalonia12Compatibility.AddLostFocus / RemoveLostFocus，
+    用 ConditionalWeakTable 保存包装委托，把旧签名适配到新签名。
+- IClipboard.GetTextAsync / SetTextAsync、IDataTransfer、DragDrop.DoDragDrop、
+  ToggleButton.CheckedEvent、Binding(string, BindingMode) 属于 Avalonia 12 真实 API 破坏，
+  改名解决不了；其中已用垫片覆盖的见 Avalonia12Compatibility，其余仍会在插件侧报缺失。
+
+加载上下文（ClassIsland/PluginLoadContext.cs）
+- 插件包自带的 ClassIsland.* / Avalonia* 一律绑定宿主已加载实例，忽略插件要求的版本号
+  与包内副本——否则 PluginBase、组件基类会类型分裂，插件显示「已加载」但组件一个都不出现。
+- 无 deps.json 时按「插件目录下同名 dll」兜底加载，入口程序集也走这条路；
+  插件没打包的框架类库复用宿主已加载的同名程序集。
+- 原生库按平台命名约定在插件目录、runtimes/<平台>/native、runtimes/<平台>-<架构>/native 查找
+  （Windows .dll，Linux lib*.so / *.so，macOS lib*.dylib / *.dylib）。
+
+PluginService 与可观测性
+- ApiVersion 校验改为 CheckApiVersionCompatibility：低于 2.0.0.0 仍拒绝（1.x WPF 运行时
+  完全不兼容）；高于当前版本不再阻止，只提示；没写或写错放行；"2.0" 这种省略段位不再被误判。
+- 加载失败改为 BuildLoadException：包成中文说明（缺依赖 / 类型方法缺失 / 32 位插件跑 64 位进程），
+  完整异常链打日志。
+- 插件详情页：状态徽章旁「兼容层已介入」徽章，悬停显示调整过哪些程序集；
+  新增 CompatibilityNotes / HasCompatibilityNotes / AddCompatibilityNote（内部切 UI 线程）。
+
+插件市场
+- PluginMarketService：索引、图标、README 首次访问成功后落盘缓存到
+  AppCache/PluginMarketAssets，网络失败时回退本地，不再每次全量依赖 GitHub。
+- PluginMarketCompatibilityProbe：后台探测市场插件入口程序集引用的 Avalonia 主版本，
+  结果写 PluginInfo.CompatibilityMode（Native / CompatibilityLayer / Unknown）并落盘缓存；
+  SemaphoreSlim(2,2) 限流，独立 HttpClient。
+- 市场列表项与详情页显示「原生支持 / 需要兼容层」标签，插件页 OnLoaded 触发探测。
+
+涉及文件
+--------
+- ClassIsland/Services/PluginCompatibility/PluginTypeCompatibility.cs — 改写主逻辑
+- ClassIsland/Services/PluginCompatibility/PluginMarketCompatibilityProbe.cs — 市场探测
+- ClassIsland.Core/Compatibility/Avalonia12Compatibility.cs — LostFocus 等运行时垫片
+- ClassIsland.Core/Enums/PluginCompatibilityMode.cs — 枚举
+- ClassIsland.Core/Models/Plugin/PluginInfo.cs — 兼容说明 + 兼容模式
+- ClassIsland.Core/Abstractions/Services/IPluginMarketService.cs — StartCompatibilityProbe
 - ClassIsland/PluginLoadContext.cs — 每个插件程序集加载前走兼容层
-- ClassIsland/Services/PluginService.cs — 入口兜底 + 失败提示
-- ClassIsland.Core/Models/Plugin/PluginInfo.cs — 兼容说明
-- ClassIsland/ClassIsland.csproj — 引用 Mono.Cecil 0.11.6
-
-验证：SystemTools.cipx（Avalonia 11.3.6 / FluentAvalonia 2.4.1 编译）改写 13 处类型引用，
-      516 个类型全部可解析、成员签名 0 错误；剩余未解析类型只有插件自身缺失的 WinRT 依赖。
-
-产物（Filebin，2026-10-31 15:45）
-- patches.zip（大小以 Filebin 页面为准）  https://filebin.net/classisland1029/patches.zip
-  含 apply.txt、update-918.txt（9 个提交）、update-last.txt、update-from-sync.txt、update.txt；
-  补丁文件本身以 Filebin 页面显示的大小为准。
-- ci-win-x64.zip（121,996,438 字节）  https://filebin.net/classisland1029/ci-win-x64.zip
-  交叉发布 win-x64 自包含，包内已带 Mono.Cecil（兼容层运行时依赖）。
+- ClassIsland/Services/PluginService.cs — 入口兜底 + 失败提示 + ApiVersion
+- ClassIsland/Services/PluginMarketService.cs — 资源缓存 + 探测入口
+- ClassIsland/Views/SettingPages/PluginsSettingsPage.axaml(.cs) — 徽章与标签
 
 下次同步注意
-- 兼容层依赖宿主发布目录里的完整 dll 集合（含 Avalonia 12、FluentAvalonia 3），
-  同步上游后若 Avalonia 大版本再变，只需改判定条件（主版本比较），映射表会自动跟着宿主走。
+------------
+- 兼容层依赖宿主发布目录里的完整 dll 集合（含 Avalonia 12、FluentAvalonia 3）。
+  同步后若 Avalonia 大版本再变，只需改主版本判定，映射表会自动跟着宿主走。
+- CompatibilityVersion 每次新增映射规则都要 +1，强制丢弃已生成的旧缓存。
+- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs 与 MyWindow.ShowOssWatermark
+  是兼容垫片（标了 Obsolete），只为让引用过它的插件不崩，不再绘制水印；
+  不要因为「看起来没用到」删掉。
+- PluginLoadContext 的宿主白名单（HostAssemblyNames）、框架前缀（SharedFrameworkPrefixes）、
+  目录兜底、宿主复用兜底、原生库兜底，上游改加载逻辑时务必全部保留。
 
 ================================================
-[2026-10-31 14:50] [定制] 天气详情接入 Open-Meteo 全量数据（15 分钟逐条详情、当天默认展开）
+[长期] 旧版本数据迁移（插件与备份）
 ================================================
 
-问题：页面只展示了接口能给的很少一部分字段；15 分钟只有时间和降水量，
-      每天要手动展开才看到少量日数据，点小时看到的字段也不全。
+需求（2026-11-06）：
+换了新版/便携版之后「恢复备份」列表是空的，旧版本的插件和备份要自动找回来。
 
-处理：
-- 请求变量扩到接口上限：current 15 项 / hourly 53 项 / daily 22 项 / minutely_15 31 项，
-  空气质量 30 项；minutely_15 取 forecast_minutely_15=96（未来 24 小时）。
+入口：ClassIsland/Helpers/LegacyDataMigrationHelper.cs，在插件扫描之前执行一次
+（固定在 FileFolderService.CreateFolders() 之后、PluginService.ProcessPluginsInstall() 之前，
+不能挪到插件扫描后面——迁移过来的插件要能在本次启动被扫到）。
+
+定位旧版本（三类来源合并）
+- 启动文件夹 %APPDATA%\...\Startup\*.lnk（WScript.Shell 读 TargetPath）；
+- 注册表 HKCU / HKLM 的 Software\Microsoft\Windows\CurrentVersion\Run（含 32 位视图）；
+- exe 相邻两级目录、%AppData%\ClassIsland\Data、%LocalAppData%。
+
+迁移内容
+- Plugins\*（递归整目录）与 Backups\*.zip / 目录；同名插件目录、同名备份一律跳过，不覆盖现有内容。
+- 备份同时支持 zip 与目录两种形态。
+
+记账（三处硬伤都修过）
+- 记账格式 #v2，只有插件和备份都处理完才记账；旧格式（无版本头）自动丢弃重扫。
+- 备份复制失败不计入成功，否则会被写进迁移记录、下次永远跳过。
+- 每个旧目录独立 try/catch，单个失败不影响其它；扫描候选与每个目录的结果写 Logs/legacy-migration.log。
+- 跳过与当前数据目录相同、互为祖先/后代的路径，避免自我复制。
+
+平台形态（Debug / Release / 便携版 / 安装版）
+- Debug：AppRootFolderPath = exe 目录（PackagingType 默认 folderClassic）。
+- Release / 便携版：AppRootFolderPath = 安装根/data（folder）。
+- 安装版：%AppData%\ClassIsland\Data（installer/msix）。
+- 入口用运行时 OperatingSystem.IsWindows() 判断，不能用 #if Platforms_Windows——
+  ClassIsland 项目不定义这个符号（只有 ClassIsland.Desktop 定义），会把方法体整段裁掉，
+  迁移一次都不执行。
+
+启动后弹 Toast 汇总：复制几个插件、几个备份、跳过几个同名插件。
+
+涉及文件
+--------
+- ClassIsland/Helpers/LegacyDataMigrationHelper.cs — 新增
+- ClassIsland/App.axaml.cs — 调用点
+- ClassIsland/PluginLoadContext.cs — 宿主目录按需加载（见下）
+- ClassIsland/ClassIsland.csproj — 平台引用
+
+下次同步注意
+------------
+- 宿主目录里 System.Windows.Forms.dll / System.Drawing.Common.dll / Microsoft.Windows.SDK.NET.dll
+  存在但不在 deps.json，插件上下文解析不到 → PluginLoadContext 增加「宿主目录按需加载」，
+  并给默认上下文注册 Resolving 兜底。
+- 删掉 Config\legacy-migration.txt 可强制重新扫描，调试迁移逻辑时用这个。
+
+================================================
+[长期] 插件可选依赖按需下载
+================================================
+
+需求（2026-11-06）：
+OpenCvSharp4、DlibDotNet 打进安装包会多 136MB，绝大多数人用不到，改成首次使用时下载。
+
+实现：ClassIsland/Services/PluginDependencyService.cs（新增）
+- 内置可选依赖清单（程序集名 → NuGet 包 + 需要抽取的文件），加新依赖只需添一条。
+- 缓存目录 <数据目录>\PluginDependencies，托管库与原生库平铺同层。
+- Ensure() 首次调用同步下载 nupkg，只抽取清单里的文件，不整包解压；
+  下载源 api.nuget.org/v3-flatcontainer，失败回退 www.nuget.org/api/v2/package。
+- 下载失败记 10 分钟冷却，避免每次解析都卡在同一个下载上。
+- Prefetch() 在插件加载时后台读插件 dll 的 AssemblyRef，命中清单的提前下好。
+
+接入
+- ClassIsland/PluginLoadContext.cs：Load 增加缓存命中直接 LoadFromAssemblyPath、未命中调 Ensure()；
+  LoadUnmanagedDll 增加缓存目录查找（OpenCvSharpExtern、DlibDotNetNative 等原生库）。
+- ClassIsland/ClassIsland.csproj：移除 OpenCvSharp4 / OpenCvSharp4.runtime.win / DlibDotNet 三个引用。
+
+实测：OpenCvSharp 3.4s / DlibDotNet 4.0s 下载，二次命中缓存 <100ms；
+发布目录回到 290MB（不含 pdb），压缩后约 128MB。
+
+下次同步注意
+------------
+- 清单里的版本号写死在 PluginDependencyService，升级 OpenCvSharp 要同步改这里。
+- 下载在程序集解析里同步执行，无网环境首次调用会等满超时（5 分钟）才失败，之后 10 分钟不再重试。
+- 缓存目录卸载重装不会清，属于预期行为。
+
+================================================
+[长期] 天气：Open-Meteo 详情页 + 本地缓存 + 请求额度
+================================================
+
+需求（2026-10-25 起，多轮迭代到 2026-10-31）：
+天气 1 分钟刷新、失败退避 2/3 分钟；新增独立「天气详情」页，把接口能给的字段全铺开；
+详情页结果本地缓存、显示剩余请求额度；逐小时改「天 → 24 小时 → 小时详情」三级。
+
+刷新策略（ClassIsland/Services/WeatherService.cs）
+- UpdateTimer 间隔 1 分钟；请求失败退避 2 分钟、再失败 3 分钟。
+- 小米天气接口偶发返回 HTTP 200 的空 JSON（{}），反序列化出全默认对象。
+  写回前校验：温度与天气类型为空时沿用上一次有效值，并记 warning。
+  不校验会把上一次的有效温度一起清空（表现为「运行一段时间后温度消失」）。
+
+详情页（ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml(.cs) +
+ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
+- 请求变量扩到接口上限：current 15 / hourly 53 / daily 22 / minutely_15 31，空气质量 30 项；
+  minutely_15 取 forecast_minutely_15=96（未来 24 小时）。
 - 模型改成「time + 全部字段」的通用结构（OmBlock + 自定义 JSON 转换器），
-  页面按接口实际返回的字段自动生成条目，不再逐个字段硬编码；
-  单位直接取接口返回的 *_units（°C、mm、km/h、%、s、W/m² …）。
-- 语义化格式化：weather_code → 天气文字、wind_direction_* → 方位、
-  is_day → 白天/夜间、*_duration 秒 → 小时、visibility 米 → 公里、
-  *_probability → 百分比；其余按数值大小自动保留小数。
-- UI：
-  · 新增「当前全部数据」展开区（默认展开），列出 current 的全部字段；
-  · 15 分钟改成横向列表（96 条，默认选中当前时刻），点任意一条看该时段全部字段；
-  · 16 天列表里「今天」默认展开，展开即显示这一天的全部字段 + 24 小时；
-  · 点某小时显示该小时全部字段（交互不变，字段数从 14 项增到 53 项）；
-  · 空气质量新增「全部字段」展开区（分项 AQI、沙尘、花粉、气溶胶等）。
-- 缓存结构版本升到 2：旧缓存字段不全，读取时自动作废并重拉，不会显示半截数据。
+  页面按接口实际返回字段自动生成条目，不逐个字段硬编码；单位取接口的 *_units。
+- 语义化格式化：weather_code → 天气文字、wind_direction_* → 方位、is_day → 白天/夜间、
+  *_duration 秒 → 小时、visibility 米 → 公里、*_probability → 百分比。
+- UI：当前全部数据默认展开；15 分钟横向列表 96 条（默认选中当前时刻）；
+  16 天列表「今天」默认展开，展开显示当日全部字段 + 24 小时网格（8 列，第一格「现在」）；
+  空气质量「全部字段」展开区（分项 AQI、沙尘、花粉、气溶胶）。
+- 小时数据按当前整点裁剪，不再永远从 00:00 开始。
+- Expander 头去掉固定宽度 436，改自适应列 + 省略号，高 DPI / 窄窗口下不挡文字。
 
-改动的文件
-----------
-- ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 重写（OmBlock + 通用转换器 + 单位字典）
-- ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 重写数据装配
-- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 重做展示
-- ClassIsland/Services/Weather/OpenMeteoCacheService.cs — 缓存版本号
+缓存与额度（ClassIsland/Services/Weather/）
+- OpenMeteoCacheService：缓存写到 Settings.json 同目录 OpenMeteoCache.json
+  （主预报 + 空气质量 + 缓存时间 + 经纬度）；换城市后经纬度对不上自动作废。
+  打开页面先渲染缓存；< 30 分钟直接返回不发请求；≥ 30 分钟旧数据留在屏幕上、后台刷新，
+  失败只提示不清空旧数据。缓存结构版本号升到 2，旧缓存字段不全时自动作废重拉。
+- OpenMeteoQuotaService：每次真实请求的时间戳写到 OpenMeteoQuota.json，
+  按「每分钟 600 / 每小时 5000 / 24 小时 10000」滚动统计，页面底部显示最紧的剩余次数；计数落盘。
+- 网络层：Open-Meteo 用专用 HttpClient（gzip + 连接 10s / 整体 25s 超时），重试 3 次降到 1 次，
+  每次耗时写日志。
 
-验证
-------
-- 用北京坐标实测接口：HTTP 200；hourly 53 字段 × 384 小时、daily 22 × 16、
-  minutely_15 31 × 96、current 15 项，单位字段齐全；
-- 缓存序列化 → 反序列化 round-trip 通过（126 KB），字段数与取值一致；
-- 编译 0 error。
+天气预报提醒
+- 七天 / 逐小时提供方改成 ItemsControl，固定列宽（74 / 50）+ 外层横向滚动兜底，
+  窗口再窄也不压扁文字；逐小时 6 条改 12 条，日预报 3 天改 7 天。
+- 宽度稳定另见「主界面宽度与提醒排版稳定」段。
 
-================================================
-[2026-10-30 22:05] [修复] 打开「显示其他调试页面」后点「测试页面」必报导航错误
-================================================
-
-问题：在「变量调试」页打开「显示其他调试页面」开关后，左侧「调试」分类里多出一个
-      「测试页面」入口，点进去直接跳到「欧呦，出错啦！」错误页。
-
-原因：上游 TestSettingsPage 的构造函数里无条件 throw new Exception()（原本用来测试
-      设置页的错误处理），但 App.Services.xaml.cs 仍然把它注册进了设置页导航
-      （services.AddSettingsPage<TestSettingsPage>()）。默认开关关闭时该入口不显示，
-      一旦打开就必然踩到，属于上游遗留坑。
-
-处理：
-- App.Services.xaml.cs：不再注册 TestSettingsPage，导航里不再出现这个「点了必错」的入口；
-- TestSettingsPage.axaml.cs：把 throw 包进 #if DEBUG，避免以后有人重新注册时在 Release 崩溃；
-- ConfigDebugSettingsPage.axaml：开关说明改为「控制官方的「调试」入口」，不再提「测试页面」。
-
-改动的文件
-----------
-- ClassIsland/App.Services.xaml.cs — 修改
-- ClassIsland/Views/SettingPages/TestSettingsPage.axaml.cs — 修改
-- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 修改
-
-产物
-------
-- https://filebin.net/classisland1029/patches.zip
-  （字节数与 SHA-256 以 Filebin 页面显示的为准，每次重出都会变）
-  内含 update.txt / update-from-sync.txt / update-last.txt / apply.txt，各含多少个提交见 apply.txt。
-  三份补丁均已用临时工作树验证：应用后树哈希与主仓库 HEAD 一致。
-- apply.txt 改为按 HEAD^{tree} 判断该用哪份补丁（git am 会重写提交号，靠提交号对不上）。
-- https://filebin.net/classisland1029/ci-win-x64.zip
-  161,032,768 字节，SHA-256 ecc1ad3a41020840ec75f9b41e9ed163c9d9aba890c382db000213c8c62dd7df
-  （Release win-x64 自包含，已去掉「测试页面」入口）
-
-================================================
-[2026-10-30 21:28] [定制] 补丁新增 update-from-sync.txt：适配只同步到 329bf4b 的仓库
-================================================
-
-问题：用户本地 HEAD = b1dbee5f，提交标题「chore(sync): 同步 develop/v2/misha-alpha 至 329bf4b」，
-      内容等价于本仓库 009e38eb，但历史重建过、SHA 不同。直接 git am update.txt 会在 0001 就冲突：
-      action.txt / out.txt / RectanglesTheme/Styles.axaml 报「already exists in index」。
-
-处理：
-- 以 009e38eb 为基点重出 patches/update-from-sync.txt（27 个提交，394 KB），覆盖之后的全部定制提交；
-- 校验：临时 worktree 从 009e38eb 应用 27 个补丁 → 全部成功，
-  HEAD^{tree} = 2ebd78ed，与主仓库 HEAD 一致；
-- apply.txt 判定表加一档：HEAD 标题带「至 329bf4b」→ 用 update-from-sync.txt。
-
-产物
-------
-- https://filebin.net/classisland1029/patches.zip
-  799,091 字节，SHA-256 e1ef91780644efe785108391763a0f83c0177f526c8c6865dbcb7174f5a94ea5
-  内含 update.txt / update-last.txt / update-from-sync.txt / apply.txt
-
-================================================
-[2026-10-30 21:18] [定制] 补丁重出至 8430f933（30 个提交）并上传；Windows 包重发
-================================================
-
-处理：
-- patches/update.txt 重出为 30 个提交（a672cb1b 起，2.15 MB）；
-- patches/update-last.txt 重出为最后 1 个提交（8430f933）；
-- patches/apply.txt 判定表更新：a672cb1b → 全量；b87f7a66 → 只差最后一个；8430f933 → 已最新；
-- 校验：临时 worktree 从 a672cb1b 依次应用 30 个补丁 → 全部成功，
-  HEAD^{tree} = 2c99e449，与主仓库 HEAD 一致。
-
-产物
-------
-- https://filebin.net/classisland1029/patches.zip
-  718,522 字节，SHA-256 e7c1dc5570136c883ec957a3bbd08a3652d135fb880df4aea847cc40d9de87a9
-- https://filebin.net/classisland1029/ci-win-x64.zip
-  161,032,891 字节，SHA-256 c65618790f0b221af65dd4240b1e267af17c98a84062dee42fd7d3ad9742a53f
-
-================================================
-[2026-10-30 21:15] [定制] 去掉 Release 构建的「欢迎使用 2.2-Misha Developer Preview」对话框
-================================================
-
-需求：Release 构建启动时会弹「欢迎使用 2.2-Misha Developer Preview」，把这个窗口去掉。
-
-处理：删掉 App.axaml.cs 里 `#if RELEASE` 包住的整块 FATaskDialog（标题、正文、米沙图标、确定按钮）。
-      只影响 Release 构建；Debug 构建原本就没有这段。
-
-验证：dotnet build ClassIsland.Desktop -c Release → 0 errors；
-      dotnet publish -r win-x64 --self-contained（PublishBuilding=true）→ 成功，产物 391 MB。
-
-改动的文件（1 个，修改）
-----------
-- ClassIsland/App.axaml.cs — 删除 Release 预览提示对话框
-
-构建产物
-----------
-- /workspace/ci-win-x64.zip：161,032,891 字节
-  SHA-256 c65618790f0b221af65dd4240b1e267af17c98a84062dee42fd7d3ad9742a53f
-
-下次同步注意
-----------
-- 上游如果又往这段加内容（搜索 `#if RELEASE` + `FATaskDialog`），继续删除，别恢复。
-
-================================================
-[2026-10-30 19:18] [定制] 补丁重出：28 个提交，打包上传 Filebin
-================================================
-
-需求：要新补丁，然后上传。
-
-处理：
-- 以 a672cb1b 为基点重出全量补丁 patches/update.txt（28 个提交，2.14 MB）；
-- patches/update-last.txt 重出为最后 1 个提交（11d290cd，5 KB）；
-- patches/apply.txt 判定表更新：HEAD = a672cb1b → 全量；ef1baa28 → 只差最后一个；11d290cd → 已最新；
-  其它值一律停下反馈。补丁内容清单同步更新。
-- 校验：临时 worktree 从 a672cb1b 依次 git am 28 个补丁 → 全部成功，
-  HEAD^{tree} = 8fc556b5，与主仓库 HEAD 完全一致。
-
-产物
-------
-- /workspace/patches.zip：717,574 字节，
-  SHA-256 17847d7d5720c442c1c6743eb3d4944f2a1c54517a224931aed03c5752803818
-  内含 update.txt / update-last.txt / apply.txt
-- 下载：https://filebin.net/classisland1029/patches.zip
-
-下次同步注意
-----------
-- 重出补丁后必须做树哈希校验，一致才算通过。
-- 上传 Filebin 用 PUT 到 https://filebin.net/<bin>/<文件名>；POST 会被 Varnish 拒（400），
-  带尾斜杠的 POST 还可能直接连接重置。
-
-================================================
-[2026-10-30 19:05] [定制] 变量调试页默认显示：不用先开「启用调试菜单」
-================================================
-
-需求：Debug 调试模式（变量调试页）一般情况下也要显示。
-
-原因：变量调试页注册在 SettingsPageCategory.Debug 分类下，而设置窗口构建导航时有这条过滤：
-      !IsDebugOptionsEnabled && Category == Debug → 隐藏。
-      该开关默认 false（Settings._isDebugOptionsEnabled = false），所以全新安装、没动过开关的用户
-      打开设置窗口根本看不到「变量调试」，必须先手动开「启用调试菜单」才会冒出来。
-
-处理：
-- ConfigDebugSettingsPage 增加公开常量 PageId = "config-debug"，页面特性改用这个常量；
-- SettingsWindowNew.BuildNavigationMenuItems() 的过滤对 config-debug 开例外：只受集控策略
-  DisableDebugMenu 约束，不再受 IsDebugOptionsEnabled 影响，开关关着也照常显示；
-- 页内开关改名「显示其他调试页面」，说明它只控制官方「调试」「测试页面」等入口，本页始终显示。
-
-改动的文件（3 个，均为修改）
-----------
-- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 开关标题 / 说明改写
-- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml.cs — 新增 PageId 常量
-- ClassIsland/Views/SettingsWindowNew.axaml.cs — 导航过滤加 config-debug 例外
-
-验证：dotnet build ClassIsland/ClassIsland.csproj -c Release → 通过（0 errors）。
-
-下次同步注意
-----------
-- SettingsWindowNew.axaml.cs 从本次起进入定制清单。上游改这个文件时，保留过滤里的
-  `x.Id != SettingPages.ConfigDebugSettingsPage.PageId` 这一条。
-- 不要图省事把 IsDebugOptionsEnabled 默认值改成 true：那会连带把官方「调试」页和「测试页面」
-  也默认暴露出来，而且集控端可能依赖「默认关闭」的语义。
-- 管理策略 DisableDebugMenu 仍然优先：被集控禁用调试菜单时本页同样隐藏，这是有意为之。
-
-================================================
-[2026-10-29 22:50] [定制] 插件兼容层：让插件市场里的所有 2.x 插件都能直接加载
-================================================
-
-需求：这个分支和官方不一样，不确定能不能装市场里的插件，包括 2.1 的插件；
-     要求「插件市场里出现的所有 2.x 插件都能适配」。
-处理：改动 60 个文件（相对同步点 329bf4b1）；构建 ClassIsland/ClassIsland.csproj → 通过（0 errors）
-
-实测数据（拉取官方插件市场 index.v2.json）
-----------------------------------------
-共 68 个插件，ApiVersion 分布：
-  2.0.0.0 × 60、2.0.0.1 × 2、2.0.0.2 × 1、2.0.2.0 × 1
-  2.1.0.1 × 1、2.1.1.0 × 1、2.1.1.1 × 1
-  空值 × 1（官方示例插件）
-本分支程序集版本 = 2.1.1.1，不低于市场里任何一个插件的 ApiVersion，
-所以「版本号不够」本身不是问题，真正会造成插件装不上或装上不工作的是下面几条。
-
-修复的 5 个问题
---------------
-1) 插件包自带的 ClassIsland.Core.dll 会被当成真的核心库加载。
-   插件作者常直接 dotnet publish 后整包打包，里面会带上 ClassIsland.Core / ClassIsland.Shared。
-   原逻辑会按 deps.json 解析到插件目录的副本，于是插件里的 PluginBase、组件基类和宿主里的
-   不是同一个类型：插件显示「已加载」，但注册的组件一个都不出现，也没有任何报错。
-   → 加载时把 ClassIsland / ClassIsland.Desktop / ClassIsland.Core / ClassIsland.Shared /
-     ClassIsland.Shared.IPC / ClassIsland.Platforms.Abstractions 一律绑定到宿主已加载的实例，
-     忽略插件要求的版本号和插件包里的副本。
-
-2) 插件包自带 Avalonia.dll 会造成同样的类型分裂。
-   两份 Avalonia 同时存在时，插件创建的控件加入宿主视觉树会抛类型转换异常，或者干脆什么都不显示。
-   → Avalonia* 前缀的程序集同样强制绑定宿主版本。
-
-3) 插件包没有 deps.json（打包不规范，或者手工压缩）时，依赖全部解析失败。
-   → 解析器返回空之后，按「插件目录下同名 dll」兜底加载；入口程序集也能这样找到。
-
-4) 插件没打包某个依赖（多为框架类库），一加载就抛 FileNotFoundException。
-   → 兜底复用宿主已经加载的同名程序集。
-
-5) 插件带原生库（dll / so / dylib）但没有 deps.json，调用到原生依赖时直接闪退。
-   → 在插件目录、runtimes/<平台>/native、runtimes/<平台>-<架构>/native 里按平台命名约定查找：
-     Windows 补 .dll，Linux 试 lib*.so 与 *.so，macOS 试 lib*.dylib 与 *.dylib。
-
-另外两处放宽 / 改进
-------------------
-6) API 版本校验原来只拦「低于 2.0.0.0」，现在：
-   - 低于 2.0.0.0 的旧插件仍然拒绝（1.x 时代的 WPF 插件运行时 API 完全不兼容）；
-   - 高于当前应用版本的不再阻止，只写一条提示，交给实际加载去检验；
-   - 没写或写错 ApiVersion 的放行；
-   - 顺手修了 "2.0" 这种省略段位的写法会被误判成低于 2.0.0.0 的问题（Version 默认段位是 -1）。
-
-7) 插件加载失败时原来只吞掉一个异常对象，界面上看不出原因。现在：
-   - 异常被包装成中文说明（「插件 X 加载失败：… 可能原因：…」），插件详情页直接可读；
-   - 针对缺依赖、类型/方法缺失、架构不匹配（32 位插件跑在 64 位进程）分别给出对应提示；
-   - 完整异常链同时打到控制台日志，方便反馈给插件作者。
-
-可观测
-------
-插件详情页的状态徽章旁边，如果兼容层对这个插件做过调整，会多出一个「兼容层已介入」徽章，
-悬停可以看到具体调整了哪些程序集（例如「ClassIsland.Core 2.0.0.0 已重定向到宿主版本 2.1.1.1」）。
-正常情况下这个徽章不会出现。
-
-验证方式
+涉及文件
 --------
-搭了最小复现（两个版本的依赖库 + 引用旧版本的插件 dll + 两种加载策略）：
-- 不做重定向：插件加载了自己那份旧依赖，与宿主那份 ReferenceEquals = False（两份不同类型）；
-- 做重定向：插件直接用到宿主的高版本，插件调用返回的是宿主版本的结果。
-说明「高版本宿主接住低版本引用」这条路是通的，这也是兼容层的核心假设。
+- ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — OmBlock + 通用转换器 + 单位字典
+- ClassIsland/Helpers/WeatherCodeHelper.cs — 新增，天气码转文字
+- ClassIsland/Services/WeatherService.cs — 刷新与退避 + 空 JSON 校验
+- ClassIsland/Services/Weather/OpenMeteoCacheService.cs / OpenMeteoQuotaService.cs — 新增
+- ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 数据装配
+- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml(.cs) — 新增
+- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml(.cs)
+- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml(.cs)
+- ClassIsland/Controls/ActionSettingsControls/WeatherNotificationActionSettingControl.axaml
+- ClassIsland/Services/ActionService.cs
+- ClassIsland/App.Services.xaml.cs — 注册两行（Cache / Quota 与详情页）
 
 下次同步注意
 ------------
-- ClassIsland/PluginLoadContext.cs 是本轮核心，上游改插件加载逻辑时务必保留：
-  宿主程序集白名单（HostAssemblyNames）、框架前缀（SharedFrameworkPrefixes）、
-  目录兜底（④）、宿主复用兜底（⑤）、原生库兜底（LoadUnmanagedDllFromFallback）。
-- ClassIsland/Services/PluginService.cs：ApiVersion 校验改成了 CheckApiVersionCompatibility，
-  加载失败改成了 BuildLoadException，上游如果重写这段要注意合并。
-- ClassIsland.Core/Models/Plugin/PluginInfo.cs：新增 CompatibilityNotes / HasCompatibilityNotes /
-  AddCompatibilityNote（内部用 Dispatcher 切 UI 线程，别改成直接 Add）。
-- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs 是重新加回来的兼容垫片（标了 Obsolete），
-  只为让引用过它的插件不崩，不再绘制水印；不要因为「看起来没用到」又删掉。
-- ClassIsland.Core/Controls/MyWindow.cs 的 ShowOssWatermark 同理，是兼容垫片，保留即可。
-- PluginsSettingsPage.axaml：状态徽章加了「兼容层已介入」，异常页改成绑定 Exception.Message。
+- WeatherService.cs 的 UpdateTimer 间隔与退避被改过，上游动这个文件必冲突。
+- 两个 NotificationProvider 的页面结构已从硬编码改成 ItemsControl，与上游差异大，
+  冲突时取上游后重新套用固定列宽 + 滚动兜底。
+- 上游原「天气」设置页（WeatherSettingsPage / WeatherSettingsViewModel）一行未动，
+  冲突时直接取上游。
+- App.Services.xaml.cs 里天气详情相关注册行不能丢，丢了新页面直接消失。
 
 ================================================
-[2026-10-29 21:26] [定制] 提醒宽度统一规则：所有提醒各自定宽、只增不减、不压扁
+[长期] 变量调试页
 ================================================
 
-需求：不只是「七天预报」和「逐小时预报」，所有提醒都要按自己的文字长度定好宽度，
-     播放期间不随轮播容器/内容切换变化，文字不能被压扁。
-处理：改动 55 个文件（相对同步点 329bf4b1）；构建 ClassIsland/ClassIsland.csproj → 通过（0 errors）
+需求（2026-10-27 → 2026-10-30）：
+要一个独立调试页，既能开调试模式又能查看/修改 Settings.json 里每个变量；
+该页不受「启用调试菜单」开关影响，装好就能看到；页内要有完整改动记录入口。
 
-实现
-----
-1) RectanglesNotificationPanel：宽度锁定规则从「弹出后 600ms 内允许增长」改为
-   「整个播放期间只增不减」——内容确实变长时跟上一次，内容变短时保持不变，
-   避免上下课提醒等 ListBox 轮播切换时窗口宽度来回抖动。
-   规则做在提醒面板层，所有提醒提供方（含第三方插件）自动生效，不依赖各自布局写法。
-2) RectanglesNotificationBubble.MeasureContentWidth：测量内容自然宽度时，
-   把轮播容器（ListBox 等）里所有已生成的项都算进来取最大值，
-   避免切到更长的一项时文字被裁掉/压扁。
+页面本身
+- 新增设置页「变量调试」（设置 → 调试 → 变量调试），反射列出 Settings 全部属性，
+  按类型生成开关 / 数字框 / 下拉框 / 文本框，支持搜索、按类型筛选、单项恢复默认值；
+  修改直接走属性 setter，由 SettingsService 自动写 Settings.json。
+- 新增文件：ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml(.cs)、
+  ViewModels/SettingsPages/ConfigDebugSettingsViewModel.cs、
+  ClassIsland/Controls/SettingsVariableEditor.cs、Models/Debugging/ConfigVariableItem.cs。
 
-改动的文件
-----------
-- ClassIsland/Controls/RectanglesNotificationPanel.cs — 宽度锁定改为只增不减
-- ClassIsland/Controls/RectanglesNotificationBubble.cs — 内容宽度测量纳入轮播容器所有项
+默认可见
+- ConfigDebugSettingsPage 增加公开常量 PageId = "config-debug"，页面特性改用这个常量。
+- SettingsWindowNew.BuildNavigationMenuItems() 的过滤对该 PageId 开例外：只受集控策略
+  DisableDebugMenu 约束，不再受 IsDebugOptionsEnabled 影响，开关关着也照常显示。
+- 页内开关改名「显示其他调试页面」，说明它只控制官方的调试 / 测试页面入口。
+- 不要图省事把 IsDebugOptionsEnabled 默认值改成 true：那会连带把官方「调试」页和
+  「测试页面」也默认暴露，且集控端可能依赖「默认关闭」的语义。
 
-下次同步注意
-------------
-- 这两个文件上游也在频繁改动提醒动画，同步时保留「只增不减」的宽度策略，
-  否则轮播容器会让提醒窗口宽度反复变化。
-- 宽度上限仍是窗口宽度的 80%，超长内容会在该上限内被裁切/省略。
+维护者标识与改动记录入口
+- 天气详情页与变量调试页顶部各一个徽章「该页面由 farmer-snack/NLCLI 维护」。
+- 变量调试页头部新增「完整改动记录」说明行 + 两个可点击入口：
+  · GitHub 主源 https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt
+  · jsDelivr 备用源 https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt
+  两个完整 URL 同时以可选文本显示；点击按平台调浏览器（ShellExecute / open / xdg-open）。
+- 换分支或换仓库时，这两处 URL 要同步改。
 
-================================================
-[2026-10-29 21:20] [定制] 变量调试页增加「完整改动记录」入口（GitHub 主源 + jsDelivr CDN 备用源）
-================================================
+测试页面入口（上游遗留坑）
+- 上游 TestSettingsPage 构造函数无条件 throw new Exception()（用来测试设置页错误处理），
+  但 App.Services.xaml.cs 仍然注册了它。默认开关关闭时不显示，一旦打开「显示其他调试页面」
+  就必然踩到，点进去直接跳「欧呦，出错啦！」错误页。
+- 处理：App.Services.xaml.cs 不再注册 TestSettingsPage；TestSettingsPage.axaml.cs 把 throw
+  包进 #if DEBUG；ConfigDebugSettingsPage.axaml 的开关说明同步改写。
 
-需求：调试页面上要能看到完整改动记录的入口，指向仓库里的 fixxed.txt；
-     同时再给一个 CDN 备用源，两个地址都要显示。
-处理：改动 55 个文件（相对同步点 329bf4b1）；构建 ClassIsland/ClassIsland.csproj → 通过（0 errors）
-
-实现
-----
-1) 页面头部（维护者徽章下方）新增说明行：「完整改动记录：每次改动都写进 fixxed.txt…」；
-2) 显示两个可点击入口：
-   - 主源（GitHub）：https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt
-   - 备用源（jsDelivr）：https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt
-   两个地址内容相同，GitHub 打不开时用 CDN 备用源；
-3) 两个完整 URL 同时以可选文本显示，方便直接复制；
-4) 点击入口按平台调起浏览器：Windows 用 ShellExecute，macOS 用 open，Linux 用 xdg-open。
-
-改动的文件
-----------
-- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 新增链接区块
-- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml.cs — 新增 HyperlinkOpenLink_OnClick
-
-下次同步注意
-------------
-- 这两个文件都是本地定制文件，上游没有；同步时直接保留。
-- 链接里的分支名是 develop/v2/misha-alpha，若以后换分支或换仓库，记得同步改这两处 URL。
-
-================================================
-[2026-10-29 20:40] [定制] 天气详情：本地缓存 + 请求额度 + 按天三级展开；提醒排版与宽度固定
-================================================
-
-需求：1) 天气详情页和变量调试页都标注「该页面由 farmer-snack/NLCLI 维护」；
-     2) 天气详情把上一次请求结果保存到本地（重启客户端后仍在）：30 分钟内打开直接用本地结果，
-        超过 30 分钟才请求，请求回来之前继续显示本地结果；
-     3) 页面底部显示还剩多少次请求机会；
-     4) 天气详情排版有文字被挡住；逐小时不要平铺 384 小时，改成
-        「一天 → 这一天的 24 小时 → 小时详情」三级；小时数据要从当前时刻开始，不要永远从 0 点；
-     5) 天气提醒（七天 / 逐小时）排版被压扁；
-     6) 提醒播放时宽度会随轮播容器变化而抖动，要把宽度固定下来。
-处理：改动 55 个文件（相对同步点 329bf4b1）；构建 ClassIsland/ClassIsland.csproj → 通过（0 errors）
-
-实现
-----
-1) 维护者标识：天气详情页顶部、变量调试页顶部各加一个徽章「该页面由 farmer-snack/NLCLI 维护」。
-2) 本地缓存：新增 OpenMeteoCacheService，缓存写到 Settings.json 同目录的 OpenMeteoCache.json
-   （主预报 + 空气质量 + 缓存时间 + 经纬度）。换城市后经纬度对不上会自动作废。
-   - 打开页面：先渲染缓存；缓存 < 30 分钟直接返回，不发请求；
-   - 缓存 ≥ 30 分钟：旧数据留在屏幕上，后台刷新，成功后写回缓存；失败只提示，不清空旧数据。
-3) 请求额度：新增 OpenMeteoQuotaService，把每次真实请求的时间戳写到 OpenMeteoQuota.json，
-   按「每分钟 600 / 每小时 5000 / 24 小时 10000」滚动统计，页面底部显示三个窗口里最紧的剩余次数。
-   计数落盘，重启后不会归零。
-4) 排版与三级展开：
-   - 删掉原来 384 小时的横向长条；
-   - 每天一行（日期 + 星期 + 图标 + 温度 + 降水 + 风 + UV），点开显示该日 16 项完整字段
-     + 这一天的小时网格（8 列，第一格是「现在」），再点某个小时显示该小时 14 项完整字段；
-   - 小时数据按「当前整点」裁剪，不再永远从 00:00 开始；
-   - Expander 头去掉固定宽度 436，改成自适应列 + 省略号，窗口缩放 / 高 DPI 下不再挡住文字；
-   - 15 分钟预报从 12 列改成 6 列，窄窗口不再挤成一团。
-5) 提醒排版：七天 / 逐小时改成固定列宽（74 / 50）+ 外层横向滚动兜底，窗口再窄也不会把文字压扁。
-6) 提醒宽度锁定：RectanglesNotificationPanel 在提醒弹出时锁定宽度，600ms 内只允许变宽，
-   之后即使主界面的轮播容器切换、内容长度变化，提醒宽度也不再抖动。
-7) 网络层：Open-Meteo 改用专用 HttpClient（gzip 压缩 + 连接 10s / 整体 25s 超时），
-   重试从 3 次降到 1 次；日志记录每次耗时，方便排查「一直转圈」。
-
-下次同步注意
-------------
-- 新增文件：ClassIsland/Services/Weather/OpenMeteoCacheService.cs、OpenMeteoQuotaService.cs 上游没有，不会冲突。
-- WeatherDetailSettingsViewModel.cs 依赖上面两个服务，App.Services.xaml.cs 里注册了两行，同步时保留。
-- RectanglesNotificationPanel.cs 改了 MeasureOverride 的宽度策略（锁定宽度），上游更新提醒动画时注意合并。
-- 天气提醒两个 axaml 只是布局调整，冲突时取上游重新套用即可。
-
-================================================
-[2026-10-27 22:20] [定制] 修复提醒语音/音效无声 + 新增「变量调试」页
-================================================
-
-需求：提醒页面里开了「语音提醒」/「提醒音效」却完全没有声音（选了自定义音效也不响）；
-     另外要一个独立的调试页面，既能开调试模式，又能查看并修改 Settings.json 里的每一个变量。
-处理：改动 52 个文件（相对同步点 329bf4b1）；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors）（修复轮次 0）
-
-原因与修复
-----------
-1) 全局总开关默认关闭：AllowNotificationSpeech / AllowNotificationSound 默认 false，
-   而提醒链路 NotificationWorkerService 会同时检查「提供方设置」和这两个总开关，
-   任何一个是 false 都不会发声，界面上却没有任何提示。
-   → 默认值改为 true；新增 HasMigratedNotificationAudioSettings 标记，升级后一次性把两个开关打开
-     （之后用户仍可自行关闭）；两个开关的说明文字补上「这是总开关」。
-2) EdgeTTS 不可用时会完全静音：实测 speech.platform.bing.com 返回 403，EdgeTtsService 只写日志、
-   吞掉失败，用户听不到任何声音。
-   → 失败时自动回退到系统 TTS（Windows SAPI），连续失败 2 次后 10 分钟内直接走系统 TTS；
-     系统 TTS 优先选择中文语音。
-3) 新增独立「变量调试」页（设置 → 调试 → 变量调试）：
-   反射列出 Settings 的全部属性，按类型生成开关 / 数字框 / 下拉框 / 文本框，
-   支持搜索、按类型筛选、单项恢复默认值；修改直接走属性 setter，由 SettingsService 自动写入 Settings.json。
-
-改动的文件
-----------
-（52 个，见下方 [长期] 本地定制清单）
-
-下次同步注意
-------------
-- Settings.cs / SettingsService.cs：新增了 HasMigratedNotificationAudioSettings 与一次性迁移逻辑，上游改这两个文件时必须保留。
-- EdgeTtsService.cs / EdgeTtsPlayInfo.cs / SystemSpeechService.cs：加了系统 TTS 回退与中文语音选择，上游重写语音链路时注意别丢。
-- NotificationSettingsPage.axaml：只改了两处 Description 文案，冲突时取上游再补文案即可。
-- 新增文件（SettingsVariableEditor.cs、ConfigVariableItem.cs、ConfigDebugSettingsViewModel.cs、ConfigDebugSettingsPage.axaml/.cs）上游没有，不会冲突。
-- App.Services.xaml.cs：新增两行注册（ConfigDebugSettingsViewModel / ConfigDebugSettingsPage），上游改这个文件时保留。
-
-================================================
-[2026-10-25 17:20] [定制] 基于同步点 329bf4b1
-================================================
-
-需求：天气 1 分钟刷新一次；请求失败时退到 2 分钟、再失败退到 3 分钟；设置里新增独立的
-     「天气详情」页（Open-Meteo，16 天日预报 / 384 小时逐小时 / 12 小时逐 15 分钟 / 空气质量 /
-     当前指标全铺开；逐小时和每一天都可以点开，展开后显示接口返回的全部字段）；
-     精确时间同步改成自适应间隔 + 多服务器回退，并加关闭按钮；
-     三天预报改七天、逐小时预报改 12 小时；patches/ 不进版本库。
-     原有的「天气」设置页保持上游原样，一行未动。
-处理：改动 41 个文件；构建 ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（0 errors / 1280 warnings）（修复轮次 0）
-
-改动的文件
-----------
-- .gitignore — 修改
-- ClassIsland/App.Services.xaml.cs — 修改
-- ClassIsland/Services/WeatherService.cs — 修改
-- ClassIsland/Services/ActionService.cs — 修改
-- ClassIsland/Controls/ActionSettingsControls/WeatherNotificationActionSettingControl.axaml — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml.cs — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
-- ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 新增
-- ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
-- ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 新增
-- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
-- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml.cs — 新增
-
-下次同步注意
-------------
-- WeatherService.cs：UpdateTimer 间隔被改过（1 分钟 + 失败退避 2/3 分钟），上游动这个文件必冲突。
-- 两个 NotificationProvider：逐小时从 6 条改成 12 条、日预报从 3 天改成 7 天，页面结构已从硬编码改成 ItemsControl，和上游差异大。
-- App.Services.xaml.cs：加了两行注册（WeatherDetailSettingsViewModel / WeatherDetailSettingsPage），上游改这个文件时保留这两行，否则新页面消失。
-- OpenMeteoForecast.cs、WeatherCodeHelper.cs、WeatherDetailSettings*.cs/.axaml 都是新增文件，上游没有，不会冲突。
-- 原天气设置页（WeatherSettingsPage / WeatherSettingsViewModel）没有改动，冲突时直接取上游即可。
-- .gitignore 加了 patches/，上游改这个文件时要保留这一行。
-
-================================================
-[长期] 本地定制清单（fork 特有，同步时一律保留）
-================================================
-
-说明：下面是当前分支相对上游 329bf4b1 的**全部**差异文件（含本轮天气定制）。
-     同步时一律保留本地版本；上游改动同一文件时按「功能定制」的口径合并，拿不准就停下来问。
-
-功能定制
+涉及文件
 --------
-- 更新页：整页删除（UpdateSettingsPage.axaml/.cs、UpdateSettingsPageViewModel.cs），
-  ClassIsland.csproj 里的 Compile 项、App.Services 里的注册一并移除
-- 关于页：整页删除（AboutSettingsPage.axaml/.cs、AboutSettingsViewModel.cs），注册移除
-- 开源水印：DevelopmentBuildAdorner.axaml/.cs 删除；MyWindow.cs、App.axaml.cs、Program.cs、
-  ApplicationCommand.cs 去掉 ShowOssWatermark 相关代码；Generic.axaml 去掉 ResourceInclude；
-  launchSettings.json 去掉「(水印)」启动配置
-- 通用页开源反诈提示：GeneralSettingsPage.axaml 移除 FAInfoBar
-- 欢迎页开源反诈 Toast：WelcomePage.axaml.cs 移除
-- 隐私政策强制同意：LicensePage.axaml/.cs 移除勾选与「下一步」的绑定
-- 贡献者：.all-contributorsrc 与 README.md 只保留 farmer-snack
-- 天气：刷新改 1 分钟 + 失败退避 2/3 分钟；新增独立「天气详情」页（Open-Meteo，见本轮 [定制] 段）
-- 精确时间：自适应间隔（成功 6h / 偏差大 1h / 失败 1-5-15-60min）、多服务器回退、
-  状态消息回 UI 线程、并发保护；时钟页新增「关闭时间同步」按钮
-- 提醒语音/音效：两个总开关默认开启 + 升级时一次性迁移；EdgeTTS 失败自动回退系统 TTS（优先中文语音），
-  连续失败 2 次后 10 分钟内直接使用系统 TTS
-- 变量调试：新增独立「变量调试」设置页（Settings 全部属性的可视化编辑，支持搜索 / 类型筛选 / 恢复默认值）
-- 变量调试默认可见：该页不受「启用调试菜单」开关影响，装好就能在设置窗口看到（仅集控策略可禁用）
-- 变量调试页头部：维护者标识 + 完整改动记录入口（GitHub 主源 / jsDelivr CDN 备用源，两个 URL 均可点击、可复制）
-- 天气详情：本地缓存 30 分钟（重启后仍有效）+ 请求额度统计 + 按天三级展开（天 → 24 小时 → 小时详情）+ 小时从当前整点开始 + 版面自适应；两页标注维护者
-- 提醒：七天/逐小时固定列宽 + 横向滚动兜底；提醒宽度播放期间锁定，不随轮播容器抖动
-- 提醒宽度统一规则（面板层，所有提醒含插件生效）：只增不减、不缩不抖；测量时纳入轮播容器所有项，取最长项
-- 插件兼容层：ClassIsland.* 与 Avalonia* 强制绑定宿主版本（插件包自带副本一律忽略）、无 deps.json 时按目录兜底、缺依赖复用宿主、原生库按平台约定查找；API 版本校验放宽并给出可读错误；插件详情页显示「兼容层已介入」徽章
-
-改动的文件（62 个）
-----------
-- .all-contributorsrc — 修改
-- .gitignore — 修改
-- ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml — 删除
-- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs — 修改
-- ClassIsland.Core/Controls/MyWindow.cs — 修改
-- ClassIsland.Core/Models/Plugin/PluginInfo.cs — 修改
-- ClassIsland.Core/Models/Weather/OpenMeteoForecast.cs — 新增
-- ClassIsland.Core/Themes/Generic.axaml — 修改
-- ClassIsland.Desktop/Properties/launchSettings.json — 修改
-- ClassIsland/App.Services.xaml.cs — 修改
-- ClassIsland/App.axaml.cs — 修改
-- ClassIsland/ClassIsland.csproj — 修改
-- ClassIsland/Controls/ActionSettingsControls/WeatherNotificationActionSettingControl.axaml — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherForecastNotificationProvider.axaml.cs — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml — 修改
-- ClassIsland/Controls/NotificationProviders/WeatherHourlyForecastNotificationProvider.axaml.cs — 修改
-- ClassIsland/Controls/RectanglesNotificationBubble.cs — 修改
-- ClassIsland/Controls/RectanglesNotificationPanel.cs — 修改
-- ClassIsland/Controls/SettingsVariableEditor.cs — 新增
-- ClassIsland/Helpers/WeatherCodeHelper.cs — 新增
-- ClassIsland/Models/ApplicationCommand.cs — 修改
-- ClassIsland/Models/Debugging/ConfigVariableItem.cs — 新增
-- ClassIsland/Models/Settings.cs — 修改
-- ClassIsland/PluginLoadContext.cs — 修改
-- ClassIsland/Program.cs — 修改
-- ClassIsland/Services/ActionService.cs — 修改
-- ClassIsland/Services/ExactTimeService.cs — 修改
-- ClassIsland/Services/PluginService.cs — 修改
-- ClassIsland/Services/SettingsService.cs — 修改
-- ClassIsland/Services/SpeechService/EdgeTtsPlayInfo.cs — 修改
-- ClassIsland/Services/SpeechService/EdgeTtsService.cs — 修改
-- ClassIsland/Services/SpeechService/SystemSpeechService.cs — 修改
-- ClassIsland/Services/Weather/OpenMeteoCacheService.cs — 新增
-- ClassIsland/Services/Weather/OpenMeteoQuotaService.cs — 新增
-- ClassIsland/Services/WeatherService.cs — 修改
-- ClassIsland/ViewModels/SettingsPages/AboutSettingsViewModel.cs — 删除
+- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml(.cs) — 新增 / PageId / 链接
 - ClassIsland/ViewModels/SettingsPages/ConfigDebugSettingsViewModel.cs — 新增
+- ClassIsland/Controls/SettingsVariableEditor.cs、Models/Debugging/ConfigVariableItem.cs — 新增
+- ClassIsland/Views/SettingsWindowNew.axaml.cs — 导航过滤加 PageId 例外
+- ClassIsland/Views/SettingPages/TestSettingsPage.axaml.cs — throw 收进 #if DEBUG
+- ClassIsland/App.Services.xaml.cs — 注册 / 取消注册
+
+下次同步注意
+------------
+- SettingsWindowNew.axaml.cs 属定制文件，上游改这个文件时保留过滤里的
+  `x.Id != SettingPages.ConfigDebugSettingsPage.PageId` 这一条。
+- 管理策略 DisableDebugMenu 仍然优先：集控禁用调试菜单时本页同样隐藏，这是有意为之。
+- 上游若重新注册 TestSettingsPage，会把这个「点了必错」的入口带回来，同步后要复查。
+
+================================================
+[长期] 提醒语音与音效
+================================================
+
+需求（2026-10-27）：
+提醒里开了「语音提醒」/「提醒音效」却完全没有声音，选了自定义音效也不响。
+
+原因（两层）
+1. 全局总开关默认关闭：AllowNotificationSpeech / AllowNotificationSound 默认 false，
+   而 NotificationWorkerService 会同时检查提供方设置和这两个总开关，任一 false 都不发声，
+   界面上没有任何提示。
+2. EdgeTTS 不可用时会完全静音：speech.platform.bing.com 返回 403，EdgeTtsService 只写日志
+   吞掉失败，用户听不到任何声音。
+
+修复
+- 两个总开关默认值改 true；新增 HasMigratedNotificationAudioSettings 标记，升级后一次性打开
+  （之后用户仍可自行关闭）；两个开关说明文字补上「这是总开关」。
+- EdgeTTS 失败自动回退系统 TTS（Windows SAPI），连续失败 2 次后 10 分钟内直接走系统 TTS；
+  系统 TTS 优先选中文语音。
+- 自定义音效文件被删/路径失效时回退内置音效并记 warning；播放异常从「丢弃 Task 吞掉」改为写日志。
+- NotificationSettingsPage.axaml 两处 Description 文案改写。
+
+涉及文件
+--------
+- ClassIsland/Models/Settings.cs、ClassIsland/Services/SettingsService.cs — 默认值与一次性迁移
+- ClassIsland/Services/SpeechService/EdgeTtsService.cs、EdgeTtsPlayInfo.cs、SystemSpeechService.cs
+- ClassIsland/Services/NotificationWorkerService.cs
+- ClassIsland/Views/SettingPages/NotificationSettingsPage.axaml
+
+下次同步注意
+------------
+- Settings.cs / SettingsService.cs 的 HasMigratedNotificationAudioSettings 迁移逻辑，
+  上游改这两个文件时必须保留。
+- EdgeTtsService 的系统 TTS 回退与中文语音选择，上游重写语音链路时别丢。
+
+================================================
+[长期] 液态玻璃主题（默认主题）
+================================================
+
+需求（2026-11-12）：
+把社区主题 Liquid Flavored Glass（dev.lladlam.lfg）作为开箱默认主题。
+
+做法：不内置原主题包，以当前 FluentTheme 为骨架重做视觉层。
+原主题基于 2026-05 的模板，直接套用会丢三处关键逻辑：
+- 没有 StyleInclude /Controls/MainWindowLine.axaml，主界面线的停靠对齐、显隐多重绑定、
+  CountdownProgressValue 绑定全部失效；
+- 没有 clip-host 的 Clip MultiBinding，圆角裁剪失效，内容溢出成方角；
+- 绕过 MainWindowBackgroundMaterialControl，丢掉 Mica / 亚克力 / 液态玻璃三种系统材质
+  以及 EffectiveBackgroundOpacity 的计算。
+
+实现：ClassIsland/XamlThemes/LiquidGlassTheme/Styles.axaml
+- 材质层仍由 MainWindowBackgroundMaterialControl 负责，FallbackBrush 换成乳白（浅）/ 烟熏（深）
+  纯色，保证取 tint 时系统材质颜色正确。
+- 表面层 Border.line-background-frame 叠加垂直高光渐变 + 亮边描边 + BoxShadow
+  （外阴影 + 顶部 inset 高光 + 四周微弱泛光）。
+- 画刷走 ResourceDictionary.ThemeDictionaries：浅色冷调描边衬出玻璃厚度，深色抬高顶部高光。
+- 动画节奏沿用原主题 400ms / 140ms 与 0.22,1,0.36,1 缓动。
+- BoxShadows 只能用内联字面量，不能绑 DynamicResource（Avalonia 会报 AVLN 错误）。
+
+默认值
+- 内置主题 ID classisland.liquidglass，注册在主题列表首位（App.Services.xaml.cs）。
+- XamlThemeService.DefaultThemeId 改为它，首次运行即启用。
+- 对「启用列表恰好只有 classisland.fluent」的旧配置做一次性迁移，写 DefaultThemeMigration 标记，
+  之后不再干预用户自己的主题组合。
+- Settings 默认 MainWindowBackgroundMaterialType = LiquidGlass、
+  IsMainWindowBackgroundMaterialEnabled = true；平台不支持时由
+  MainWindowBackgroundMaterialControl 自动回退到玻璃画刷。
+
+横幅：原 2601x588 banner 顶部对齐裁成 1920x350 →
+ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
+
+涉及文件
+--------
+- ClassIsland/XamlThemes/LiquidGlassTheme/Styles.axaml — 新增（约 524 行）
+- ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png — 新增
+- ClassIsland/App.Services.xaml.cs — 主题注册
+- ClassIsland/Services/XamlThemeService.cs — DefaultThemeId + 一次性迁移
+- ClassIsland/Models/Settings.cs — 默认材质
+
+下次同步注意
+------------
+- 主题骨架跟随上游 FluentTheme：上游改 MainWindowLine.axaml 或主窗口模板时，
+  要确认本主题的 StyleInclude / clip-host / 材质层三处引用还在。
+- 主题是本地新增文件，上游没有，不会冲突；冲突只可能来自 App.Services / XamlThemeService / Settings。
+
+================================================
+[长期] 界面精简（去水印 / 移除更新页与关于页 / 去反诈提示）
+================================================
+
+需求（长期）：这个 fork 去掉上游的推广与提示元素。
+
+已完成
+- 更新页：整页删除（UpdateSettingsPage.axaml/.cs、UpdateSettingsPageViewModel.cs），
+  ClassIsland.csproj 里的 Compile 项、App.Services 里的注册一并移除。
+- 关于页：整页删除（AboutSettingsPage.axaml/.cs、AboutSettingsViewModel.cs），注册移除。
+- 开源水印：DevelopmentBuildAdorner.axaml 删除；MyWindow.cs、App.axaml.cs、Program.cs、
+  ApplicationCommand.cs 去掉 ShowOssWatermark 相关代码；Generic.axaml 去掉 ResourceInclude；
+  launchSettings.json 去掉「(水印)」启动配置。
+- 通用页开源反诈提示：GeneralSettingsPage.axaml 移除 FAInfoBar。
+- 欢迎页开源反诈 Toast：WelcomePage.axaml.cs 移除。
+- 隐私政策强制同意：LicensePage.axaml/.cs 移除勾选与「下一步」的绑定。
+- 贡献者：.all-contributorsrc 与 README.md 只保留 farmer-snack。
+- Release 构建的「欢迎使用 2.2-Misha Developer Preview」对话框：
+  删掉 App.axaml.cs 里 #if RELEASE 包住的整块 FATaskDialog（标题、正文、米沙图标、确定按钮）。
+  上游若又往这段加内容（搜 `#if RELEASE` + FATaskDialog），继续删除，别恢复。
+
+涉及文件
+--------
+- ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml(.cs) — 删除
 - ClassIsland/ViewModels/SettingsPages/UpdateSettingsPageViewModel.cs — 删除
-- ClassIsland/ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs — 新增
-- ClassIsland/Views/SettingPages/AboutSettingsPage.axaml — 删除
-- ClassIsland/Views/SettingPages/AboutSettingsPage.axaml.cs — 删除
-- ClassIsland/Views/SettingPages/ClockSettingsPage.axaml — 修改
-- ClassIsland/Views/SettingPages/ClockSettingsPage.axaml.cs — 修改
-- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml — 新增
-- ClassIsland/Views/SettingPages/ConfigDebugSettingsPage.axaml.cs — 新增
-- ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml — 修改
-- ClassIsland/Views/SettingPages/NotificationSettingsPage.axaml — 修改
-- ClassIsland/Views/SettingPages/PluginsSettingsPage.axaml — 修改
-- ClassIsland/Views/SettingPages/TestSettingsPage.axaml.cs — 修改
-- ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml — 删除
-- ClassIsland/Views/SettingPages/UpdateSettingsPage.axaml.cs — 删除
-- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml — 新增
-- ClassIsland/Views/SettingPages/WeatherDetailSettingsPage.axaml.cs — 新增
-- ClassIsland/Views/SettingsWindowNew.axaml.cs — 修改
-- ClassIsland/Views/WelcomePages/LicensePage.axaml — 修改
-- ClassIsland/Views/WelcomePages/LicensePage.axaml.cs — 修改
-- ClassIsland/Views/WelcomePages/WelcomePage.axaml.cs — 修改
-- README.md — 修改
-- action.txt — 新增
-- fixxed.txt — 新增
-- out.txt — 新增
+- ClassIsland/Views/SettingPages/AboutSettingsPage.axaml(.cs) — 删除
+- ClassIsland/ViewModels/SettingsPages/AboutSettingsViewModel.cs — 删除
+- ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml — 删除
+- ClassIsland.Core/Controls/DevelopmentBuildAdorner.cs、MyWindow.cs — 兼容垫片保留
+- ClassIsland/App.axaml.cs、Program.cs、Models/ApplicationCommand.cs
+- ClassIsland.Core/Themes/Generic.axaml
+- ClassIsland.Desktop/Properties/launchSettings.json
+- ClassIsland/Views/SettingPages/GeneralSettingsPage.axaml
+- ClassIsland/Views/WelcomePages/WelcomePage.axaml.cs、LicensePage.axaml(.cs)
+- .all-contributorsrc、README.md
+
+下次同步注意
+------------
+- 上游新增「推广 / 提示」类页面或对话框时按同一口径处理：先问，不擅自扩大范围。
+- DevelopmentBuildAdorner.cs 与 MyWindow.ShowOssWatermark 已降级为兼容垫片（Obsolete），
+  上游若删了引用的插件会少一类崩溃；这边不要删。
 
 ================================================
-[2026-10-24 07:25] 同步 upstream/develop/v2/misha-alpha @ 329bf4b1
+[长期] 上游 Issues 修复
 ================================================
 
-范围：基线 41fc7035 → 329bf4b1，上游 1 个提交，改动 50 个文件。
-处理：冲突 0 个（残留 0 个）；本地定制 25 个文件保留未动；分支回退 0。
-构建：ClassIsland.Desktop → 通过（0 errors / 1294 warnings）
+需求（2026-10-31）：
+去上游仓库的 Issues 里找 bug 修掉，共跟进两批、修复 12 个 issue + 4 处顺手加固。
 
-改动的文件
+第一批（修 7 项，对应 9 个 issue）
+- #2039 cron 触发器在时间偏移后执行两次：CronWorker 读的是共享字段，LoadCron 换新 CTS 后旧 worker
+  会「复活」；表达式解析失败还会 continue 忙等烧 CPU。改为 worker 持有自己的 token 与 crontab，
+  等待分段（最多 30 秒），醒来确认真的越过触发时刻才触发；订阅 TimeOffsetSeconds / DebugTimeOffsetSeconds，
+  偏移一变就重建 worker；解析失败不启动。
+  文件：ClassIsland/Services/Automation/Triggers/CronTrigger.cs
+- #663 禁用课表后重启又加载：IsClassPlanEnabled 只是内存属性没落盘。
+  迁到 Settings.IsClassPlanEnabled，LessonsService 代理读写，切换后立即刷新课表。
+  文件：ClassIsland/Models/Settings.cs、ClassIsland/Services/LessonsService.cs
+- #828 关闭「加载课表」后仍显示明日课表：开关关闭时不计算明日课表，跳过「无课程时显示明日」判定。
+  文件：ClassIsland/Controls/Components/ScheduleComponent.axaml.cs
+- #2046 / #1896 点「删除时间表」没反应：删除确认挂在命令栏按钮的 Flyout 上，PrimaryCommands 里弹不出来。
+  改为直接 Click + ContentDialogHelper 确认框。
+  文件：ClassIsland/Views/ProfileSettingsWindow.axaml(.cs)
+- #1423 复制诊断信息时内存超限崩溃：导出前把全部日志拼成巨型字符串，拼完又没写进文件。
+  删掉这段无用拼接，日志目录仍随包复制。
+  文件：ClassIsland/Services/DiagnosticService.cs
+- #2032 / #1713 切换深浅色后天气文字消失：主题切换后 Run 前景色不跟随。
+  天气组件根节点显式指定 TextElement.Foreground 为主题色。
+  文件：ClassIsland/Controls/Components/WeatherComponent.axaml
+  未覆盖：课表组件的时间文字（LessonsListBox 内部模板）仍有同样风险。
+- #2031 / #1973 天气温度运行一段时间后丢失：见「天气」段的空 JSON 校验。
+
+第二批（修 6 项 + 4 处加固）
+- #2034 集控模式下切「组件配置方案」所有方案被覆盖（不可逆数据丢失）：
+  IsManagementMode 一进来就 true（只要加入集控就成立，哪怕清单没下发 ComponentsSource），
+  集控模式下 LoadConfig 不读本地文件；加上保存目标是「当前」CurrentConfigFullPath，
+  切换时先写回旧方案再加载新方案，最终每个方案都写成同一份。
+  → IsManagementMode 改为「清单真的下发了组件配置」才 true；保存路径在加载时固定为 _currentConfigPath
+   （不随切换漂移）；切方案前解绑上一份集合的 CollectionChanged；集控模式下 SaveConfig 直接返回。
+  文件：ClassIsland/Services/ComponentsService.cs
+- #1923 安全模式下插件页空白、出问题的插件卸不掉：`!ApplicationCommand.Safe` 时干脆不调 InitializePlugins。
+  → 安全模式照常扫描插件清单、只是不加载程序集；新增 PluginLoadStatus.Skipped 与「安全模式未加载」徽章，
+  插件仍可查看可卸载。
+  文件：ClassIsland/App.Services.xaml.cs、ClassIsland/Services/PluginService.cs、
+  ClassIsland.Core/Enums/PluginLoadStatus.cs、ClassIsland/Views/SettingPages/PluginsSettingsPage.axaml
+- #1546 切换播放设备后仍在上一个设备出声：AudioService 缓存 AudioPlaybackDevice 只判断有没有释放，
+  从不核对系统默认设备是否变化。→ 每次取用前 Rent 出设备与 AudioEngine.PlaybackDevices 的默认设备比对 Id，
+  变了就归还租约、释放缓存、重新初始化（先租再比，租约期间不会被回收）。
+  文件：ClassIsland/Services/AudioService.cs
+- #2028 gRPC 集控在开系统代理的电脑上连不上：GrpcChannel.ForAddress 默认走系统代理。
+  → 统一 CreateGrpcChannel，用 SocketsHttpHandler 关闭代理、连接超时压到 10 秒，
+  两处建通道（lightConnect 与命令流）都用它。
+  文件：ClassIsland/Services/Management/ManagementServerConnection.cs
+- #671 没关设置窗口就关机配置丢失：Stop() 往 UI 线程投递保存任务，系统关机时进程直接被结束。
+  → 订阅 DesktopLifetime.ShutdownRequested，在关机请求阶段同步保存一次（设置、自动化、档案、组件）；
+  SaveAllConfigs 抽成方法，Stop() 复用；保存幂等。
+  文件：ClassIsland/App.axaml.cs
+- #569 全屏时隐藏在某些全屏程序下失效：要求窗口矩形严格包含整个屏幕，无边框全屏游戏比屏幕小几像素。
+  → 严格包含仍优先，不满足时按覆盖率兜底，覆盖 99% 以上视为全屏（最大化只覆盖工作区，不会误判）。
+  文件：platforms/ClassIsland.Platforms.Windows/Services/WindowPlatformService.cs
+
+顺手加固
+- 弹窗宿主窗口：没有激活窗口时原来退回主窗口（主界面贴屏幕顶部，对话框会压到课表上）。
+  改为选最后打开且可见、非最小化的普通窗口；顺手删两处 ELYSIADBG 调试打屏。
+  文件：ClassIsland.Core/Extensions/UI/FAContentDialogExtensions.cs
+- 提醒音效回退与日志：见「提醒语音与音效」段。
+- CSES 导出：保存对话框默认扩展名 .json 改 yml；内容先整体序列化再写入，
+  避免存储流不支持 Seek 时覆盖写留下上一份尾部（导出课表变成两份拼在一起）。
+  文件：ClassIsland/Helpers/ProfileTransferHelpers/CsesExportHelper.cs
+- 天气空 JSON 校验：见「天气」段。
+
+已排查但没改（缺复现条件或语义不明，不瞎改）
+- #1460 导出 CSES 字符串没带引号：在第三方 CsesLoader 里，要等上游库。
+- #2000 部分条件无法触发自动化：需要实机验证触发时机。
+- #2044 / #865 / #1020 多行组件行距/行数/自动隐藏后不恢复：需要 GUI 复现。
+- #1949 市级气象局预警覆盖区级：Alerts 的 LocationKey 语义要用真实接口验证。
+- #1090 禁用时间点后课间与分割线异常：ValidTimeLayoutItems 正反向搜索语义待确认。
+- #780 课间小于 2 秒显示错误：课表实现已重写，没能复现。
+- #2037 EdgeTTS 接口变更：等上游库适配。
+- #1685 日期选择器从月切到日崩溃：FluentAvalonia 控件内部实现。
+- #606 改注册表字体后托盘图标崩溃：H.NotifyIcon + System.Drawing 找不到字体。
+
+下次同步注意
+------------
+- ComponentsService 的 IsManagementMode 语义变了：只有清单下发 ComponentsSource 才为 true。
+  上游改集控清单结构时要跟着改，不要再改回「加入集控就 true」。
+- PluginLoadStatus 多了 Skipped（安全模式专用），上游新增状态处理分支时记得带上，
+  尤其是「是否加载成功」这类统计。
+- AudioService 每次播放前扫一次默认设备，上游若把它挪进热循环要注意开销。
+- App.axaml.cs 的 ShutdownRequested 是关机保存的唯一入口，删了 #671 会复发。
+- ProfileSettingsWindow.axaml 的删除确认 Flyout 已移除，同步这个文件时注意冲突。
+- Settings 新增 IsClassPlanEnabled，旧 Settings.json 缺这个字段时默认 true，与以前行为一致。
+
+================================================
+[长期] 本地定制总表（fork 特有，同步时一律保留）
+================================================
+
+说明：下面是本分支相对上游的全部定制大类。具体文件以 git 实际差异为准
+      （`git diff --name-only <上游基线>..HEAD`），本表用于「看到某个文件时判断它是不是定制」。
+      同步时一律保留本地版本；上游改动同一文件时按对应段落的「下次同步注意」合并，拿不准就停下来问。
+
+按大类索引
 ----------
-- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml — 取上游
-- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml.cs — 取上游
-- ClassIsland.Android/MainActivity.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/IViewHost.cs — 取上游
-- ClassIsland.Core/Abstractions/Controls/ViewBase.cs — 取上游
-- ClassIsland.Core/Assists/ViewHostAssist.cs — 取上游
-- ClassIsland.Core/Controls/VerticalDrawer.axaml — 取上游
-- ClassIsland.Core/Controls/VerticalDrawer.axaml.cs — 取上游
-- ClassIsland.Core/Models/UI/DrawerOptions.cs — 取上游
-- ClassIsland.Shared/Models/Management/ManagementPolicy.cs — 取上游
-- ClassIsland/Controls/ScheduleWeekEdit/ScheduleWeekEditControl.cs — 取上游
-- ClassIsland/Controls/UI/DrawerNavigationHost.axaml — 取上游
-- ClassIsland/Controls/UI/DrawerNavigationHost.axaml.cs — 取上游
-- ClassIsland/Controls/UI/WindowViewHost.axaml — 取上游
-- ClassIsland/Controls/UI/WindowViewHost.axaml.cs — 取上游
-- ClassIsland/Converters/SubjectPreviewConverters.cs — 取上游
-- ClassIsland/Extensions/ProfileServiceExtensions.cs — 取上游
-- ClassIsland/Helpers/ScheduleItemEditHelper.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/CourseEditViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/CourseInfoViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/ImportExportProviderViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/ImportExportViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/ProfileManagementViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/SubjectEditViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/SubjectManagementViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewParts/SubjectPickerViewModel.cs — 取上游
-- ClassIsland/ViewModels/MainViewViewModel.ScheduleEditing.cs — 取上游
-- ClassIsland/ViewModels/MainViewViewModel.ScheduleWeek.cs — 取上游
-- ClassIsland/ViewModels/ProfileEntry.cs — 取上游
-- ClassIsland/ViewModels/ProfileSettingsViewModel.ScheduleWeek.cs — 取上游
-- ClassIsland/Views/MainView.axaml — 取上游
-- ClassIsland/Views/MainView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/CourseEditView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/CourseEditView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/CourseInfoView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/CourseInfoView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/ImportExportProviderView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ImportExportProviderView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/ImportExportView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ImportExportView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/ProfileManagementView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ProfileManagementView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/ScheduleModeView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/ScheduleModeView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/SubjectEditView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/SubjectEditView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/SubjectManagementView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/SubjectManagementView.axaml.cs — 取上游
-- ClassIsland/Views/MainViewParts/SubjectPickerView.axaml — 取上游
-- ClassIsland/Views/MainViewParts/SubjectPickerView.axaml.cs — 取上游
+1. 主界面宽度与提醒排版稳定 —— 见同名段；文件：MainWindowLine.cs、RectanglesNotificationPanel.cs、
+   RectanglesNotificationBubble.cs、SlideComponent.axaml
+2. 插件兼容层 —— 见同名段；文件：PluginCompatibility/、Avalonia12Compatibility.cs、PluginLoadContext.cs、
+   PluginService.cs、PluginInfo.cs、PluginMarketService.cs、PluginsSettingsPage.axaml
+3. 旧版本数据迁移 —— 见同名段；文件：LegacyDataMigrationHelper.cs、App.axaml.cs、PluginLoadContext.cs
+4. 插件可选依赖按需下载 —— 见同名段；文件：PluginDependencyService.cs、ClassIsland.csproj
+5. 天气详情 —— 见同名段；文件：Weather/、WeatherDetailSettingsPage*、OpenMeteoForecast.cs、
+   WeatherCodeHelper.cs、WeatherService.cs、两个 WeatherForecastNotificationProvider、WeatherComponent.axaml
+6. 变量调试页 —— 见同名段；文件：ConfigDebugSettingsPage*、ConfigDebugSettingsViewModel.cs、
+   SettingsVariableEditor.cs、ConfigVariableItem.cs、SettingsWindowNew.axaml.cs
+7. 提醒语音与音效 —— 见同名段；文件：Settings.cs、SettingsService.cs、SpeechService/、NotificationWorkerService.cs
+8. 液态玻璃主题 —— 见同名段；文件：XamlThemes/LiquidGlassTheme/、XamlThemePreviews/classisland.liquidglass.png、
+   App.Services.xaml.cs、XamlThemeService.cs、Settings.cs
+9. 界面精简 —— 见同名段；文件：UpdateSettingsPage*、AboutSettingsPage*、DevelopmentBuildAdorner*、
+   MyWindow.cs、Generic.axaml、GeneralSettingsPage.axaml、WelcomePage.axaml.cs、LicensePage.axaml(.cs)、
+   .all-contributorsrc、README.md
+10. 上游 Issues 修复 —— 见同名段；文件：ComponentsService.cs、CronTrigger.cs、LessonsService.cs、
+    ScheduleComponent.axaml.cs、ProfileSettingsWindow.axaml(.cs)、DiagnosticService.cs、AudioService.cs、
+    ManagementServerConnection.cs、FAContentDialogExtensions.cs、CsesExportHelper.cs、
+    PluginLoadStatus.cs、WindowPlatformService.cs
+11. 记录文件 —— action.txt（同步进度锚点）、out.txt（同步记录）、fixxed.txt（本文件）。
+    三者都是仓库内容，随提交走，不写进补丁说明之外的任何地方。
 
-================================================
-[2026-10-18 21:44] 同步 upstream/develop/v2/misha-alpha @ 41fc703
-================================================
-
-范围：基线 fd83102 → 41fc703，5 个提交，改动 25 个文件（全为修改）。
-处理：冲突 0 个（交集为空，25 个文件直接取上游）；本地定制 25 个保留未动。
-构建：ClassIsland.Desktop 通过（0 errors / 1319 warnings）。
-
-================================================
-[2026-10-17 17:45] 同步 upstream/develop/v2/misha-alpha @ fd83102
-================================================
-
-范围：基线 a8af81ba → fd83102，43 个提交，改动 173 个文件（75 新增 / 96 修改 / 2 删除）。
-处理：冲突 2 个 —— MyWindow.cs 保留 SetButtonIsPressed、删 ShowOssWatermark；
-      LicensePage.axaml.cs 保持删除。
-构建：通过（中途修过子模块未初始化和缺 tag，未改业务代码）。
-定制：删更新页 / 关于页 / 开源水印，均保持删除。
+判定口径
+--------
+- 定制 = 账本里有记录的改动，或 git 显示本地确实改过。
+- 上游同步本身（取上游 / 三方合并 / 冲突修正 / 同步引起的编译修复）不写进本账本。
+- 每个大类一段，同类改动追加到已有段落里，不按时间各开一段。
