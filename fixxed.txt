@@ -1,4 +1,56 @@
 ================================================
+[2026-11-13 20:32] 同步 upstream/develop/v2/misha-alpha @ cd26ef3
+================================================
+
+范围：基线 9804dec0 → cd26ef3，上游 6 个提交，改动 42 个文件。
+处理：冲突 0 个（残留 0 个）；本地定制 125 个文件保留未动；分支回退 0。
+构建：ClassIsland.Desktop/ClassIsland.Desktop.csproj → 通过（增量单次）
+
+改动的文件
+----------
+- ClassIsland.Android/Application.cs — 取上游
+- ClassIsland.Android/Controls/AndroidMainView.axaml.cs — 取上游
+- ClassIsland.Android/Controls/UI/AndroidViewHost.axaml.cs — 取上游
+- ClassIsland.Android/Services/LessonsForegroundService.cs — 取上游
+- ClassIsland.Android/Services/Platform/AndroidAccentPickerService.cs — 取上游
+- ClassIsland.Android/Services/RealtimeNotificationContentBuilder.cs — 取上游
+- ClassIsland.Core/Abstractions/Controls/IViewHost.cs — 取上游
+- ClassIsland.Core/Abstractions/Controls/ViewBase.cs — 取上游
+- ClassIsland.Core/Abstractions/Services/IAccentPickerService.cs — 取上游
+- ClassIsland.Desktop/Program.cs — 取上游
+- ClassIsland.Desktop/Services/Platform/DesktopAccentPickerService.cs — 取上游
+- ClassIsland.Platforms.Abstractions/Services/IDesktopAccentImageSource.cs — 取上游
+- ClassIsland.Platforms.Abstractions/Services/IScreenshotService.cs — 取上游
+- ClassIsland/App.Services.xaml.cs — 三方合并
+- ClassIsland/App.axaml.cs — 三方合并
+- ClassIsland/Controls/EditMode/EditModeView.axaml — 取上游
+- ClassIsland/Controls/NotificationEffects/StarFountainEffect.cs — 取上游
+- ClassIsland/Controls/UI/DrawerNavigationHost.axaml.cs — 取上游
+- ClassIsland/Controls/UI/WindowViewHost.axaml.cs — 取上游
+- ClassIsland/Helpers/AccentColorHelper.cs — 取上游
+- ClassIsland/MainWindow.axaml.cs — 取上游
+- ClassIsland/Models/Settings.cs — 三方合并
+- ClassIsland/Services/AccentPickerSession.cs — 取上游
+- ClassIsland/Services/SettingsService.cs — 三方合并
+- ClassIsland/Services/TaskBarIconService.cs — 取上游
+- ClassIsland/Services/ThemeService.cs — 取上游
+- ClassIsland/ViewModels/SettingsPages/AppearanceSettingsViewModel.cs — 取上游
+- ClassIsland/ViewModels/SettingsPages/InterfaceSettingsViewModel.cs — 取上游
+- ClassIsland/Views/MainViewParts/SubjectPickerView.axaml.cs — 取上游
+- ClassIsland/Views/SettingPages/AccentPreviewView.axaml — 取上游
+- ClassIsland/Views/SettingPages/AccentPreviewView.axaml.cs — 取上游
+- ClassIsland/Views/SettingPages/AppearanceSettingsPage.axaml — 取上游
+- ClassIsland/Views/SettingPages/AppearanceSettingsPage.axaml.cs — 取上游
+- ClassIsland/Views/SettingPages/InterfaceSettingsPage.axaml — 取上游
+- ClassIsland/Views/SettingPages/InterfaceSettingsPage.axaml.cs — 取上游
+- ClassIsland/Views/SettingPages/WallpaperWindowPicker.axaml — 取上游
+- ClassIsland/Views/SettingPages/WallpaperWindowPicker.axaml.cs — 取上游
+- platforms/ClassIsland.Platforms.Linux/Services/DesktopAccentImageSource.cs — 取上游
+- platforms/ClassIsland.Platforms.Linux/X.cs — 取上游
+- platforms/ClassIsland.Platforms.MacOs/Services/DesktopAccentImageSource.cs — 取上游
+- platforms/ClassIsland.Platforms.Windows/Services/DesktopAccentImageSource.cs — 取上游
+- platforms/ClassIsland.Platforms.Windows/Services/ScreenshotService.cs — 取上游
+================================================
 [2026-11-13 20:05] [修复] 轮播容器导致提醒播放时主界面宽度跳动
 ================================================
 

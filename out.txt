@@ -2,6 +2,35 @@
 （最新记录在最上方，越往下越旧）
 
 ================================================================
+## 2026-11-13 20:31:55  同步 cd26ef3
+上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (cd26ef3)
+本次基线 : 9804dec0
+本地分支 : develop/v2/misha-alpha  →  本地提交见本次 commit
+
+新增:
+  - (无)
+修改:
+  - (无)
+删除:
+  - (无)
+未变更:
+  - build_release.yml (Build)
+  - close_stale_issues.yml (Close inactive issues)
+  - issues_similarity_analysis.yml (Issues Similarity Analysis)
+  - qodana_code_quality.yml (Qodana)
+本次无 Action 变更
+
+本次同步的上游提交（6 个，全部列出，每条附改动文件数）:
+  - cd26ef36 refactor(ui): 将抽屉视图重构为一个独立的 IViewHost（7 个文件）
+  - eab81761 Merge remote-tracking branch 'origin/develop/v2/misha-alpha' into develop/v2/misha-alpha（2 个文件）
+  - 17fc9d31 feat(ui): 重新移植壁纸和屏幕取色功能（25 个文件）
+  - f35fa9b4 fix(app): 修复 macOS 托盘菜单初始化导致的启动停滞 (#2058)（2 个文件）
+  - 5395d52e feat(platform/android): 优化实时通知内容（2 个文件）
+  - a11fee53 feat(ui/settings): 将界面设置从主界面外观设置中拆分出来（14 个文件）
+冲突修正 : 无
+================================================================
+
+================================================================
 ## 2026-11-08 21:34:00  同步 9804dec
 上游目标 : ClassIsland/ClassIsland @ develop/v2/misha-alpha (9804dec)
 本次基线 : 186f5bfe
