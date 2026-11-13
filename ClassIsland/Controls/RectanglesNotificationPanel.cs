@@ -53,8 +53,7 @@ public class RectanglesNotificationPanel : Panel
     public static readonly StyledProperty<double> NotificationWidthProperty =
         AvaloniaProperty.Register<RectanglesNotificationPanel, double>(nameof(NotificationWidth));
 
-    private static readonly TimeSpan EntranceDuration = TimeSpan.FromMilliseconds(333);
-    private static readonly TimeSpan ExitDuration = TimeSpan.FromMilliseconds(167);
+    private static readonly TimeSpan EntranceDuration = TimeSpan.FromMilliseconds(333);    private static readonly TimeSpan ExitDuration = TimeSpan.FromMilliseconds(167);
     private static readonly TimeSpan EntranceInertiaDuration = TimeSpan.FromMilliseconds(1000);
     private static readonly TimeSpan ExitInertiaDuration = TimeSpan.FromMilliseconds(501.14);
     private static readonly Easing EntranceEasing = Easing.Parse("0,0,0,1");
@@ -87,6 +86,9 @@ public class RectanglesNotificationPanel : Panel
     // 提醒宽度锁定：同一条提醒播放期间宽度不再随内容/轮播容器变化而抖动。
     // 宽度只增不减：内容变长时跟上（避免被裁切/压扁），内容变短时保持不变（避免来回跳）。
     private double _lockedWidth;
+    // 文本排版的小数宽度会在亚像素范围内来回跳，没有容差时宽度动画会每帧重启，
+    // 表现出来就是气泡一直在轻微抽动，所以比较时统一留半个像素的余量。
+    private const double WidthLockTolerance = 0.5;
     private bool _isOverlayPresentation;
     private readonly TranslateTransform _inertiaTransform = new();
     private readonly MatrixTransform _revealTransform = new();
@@ -234,20 +236,22 @@ public class RectanglesNotificationPanel : Panel
         }
         else
         {
+            // 取整到整像素，避免小数宽度在测量之间反复变化把宽度动画一直重启。
+            var candidate = Math.Ceiling(measuredWidth);
             if (_lockedWidth <= 0)
             {
-                _lockedWidth = measuredWidth;
+                _lockedWidth = candidate;
             }
-            else if (measuredWidth > _lockedWidth)
+            else if (candidate > _lockedWidth + WidthLockTolerance)
             {
-                _lockedWidth = measuredWidth;
+                _lockedWidth = candidate;
             }
         }
 
         var targetWidth = IsOpened && _lockedWidth > 0
             ? Math.Min(maximumBodyWidth, _lockedWidth)
             : measuredWidth;
-        if (Math.Abs(_targetWidth - targetWidth) > 0.01)
+        if (Math.Abs(_targetWidth - targetWidth) > WidthLockTolerance)
         {
             _targetWidth = targetWidth;
             AnimateProgress(NotificationWidthProperty, targetWidth, EntranceDuration, SwitchEasing,

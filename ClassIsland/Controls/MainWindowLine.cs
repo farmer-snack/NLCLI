@@ -310,6 +310,16 @@ public class MainWindowLine : ContentControl, INotificationConsumer
 
     private Grid? GridWrapper;
 
+    /// <summary>
+    /// 提醒播放期间主界面行的锁定宽度。
+    /// </summary>
+    private double _lockedRowWidth;
+
+    /// <summary>
+    /// 主界面行的宽度是否已被提醒锁定。
+    /// </summary>
+    private bool _isRowWidthLocked;
+
     private Control? _notificationWrapper;
 
     private PixelPoint _centerPointCache = new PixelPoint(0, 0);
@@ -752,7 +762,68 @@ public class MainWindowLine : ContentControl, INotificationConsumer
 
     private async void WrapperOnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
+        // 提醒播放期间主界面行的宽度由 LockRowWidth 固定。遮罩、叠加层的内容一换，
+        // 行宽就会跟着内容重新测量，表现出来就是提醒播放时整条岛不断抽动。
+        if (_isRowWidthLocked)
+        {
+            return;
+        }
+
         BackgroundWidth = e.NewSize.Width;
+    }
+
+    /// <summary>
+    /// 固定主界面行的宽度，避免提醒内容（遮罩层、叠加层）把整条岛撑宽或压窄。
+    /// </summary>
+    /// <remarks>
+    /// 提醒内容通常比主界面组件宽。这些内容参与行内容的测量后，行宽会跟随提醒内容变化，
+    /// 于是提醒出现、切换、消失时都能看到宽度跳动。这里在提醒开始播放前记录当前宽度并写死，
+    /// 让提醒内容溢出显示而不是改变行宽，播放结束后再恢复自适应。
+    /// 该逻辑作用于模板中的 <c>PART_GridWrapper</c>，因此对所有主题生效。
+    /// </remarks>
+    private void LockRowWidth()
+    {
+        if (_isRowWidthLocked || GridWrapper is null)
+        {
+            return;
+        }
+
+        var width = GridWrapper.Bounds.Width;
+        if (!double.IsFinite(width) || width <= 0)
+        {
+            return;
+        }
+
+        _lockedRowWidth = width;
+        _isRowWidthLocked = true;
+        GridWrapper.Width = width;
+        BackgroundWidth = width;
+        Logger.LogTrace("提醒开始播放，锁定主界面行宽度 {Width}", width);
+    }
+
+    /// <summary>
+    /// 解除 <see cref="LockRowWidth"/> 设置的宽度锁定，恢复按内容自适应。
+    /// </summary>
+    private void UnlockRowWidth()
+    {
+        if (!_isRowWidthLocked)
+        {
+            return;
+        }
+
+        _isRowWidthLocked = false;
+        _lockedRowWidth = 0;
+        if (GridWrapper is not null)
+        {
+            GridWrapper.Width = double.NaN;
+            var width = GridWrapper.Bounds.Width;
+            if (double.IsFinite(width) && width > 0)
+            {
+                BackgroundWidth = width;
+            }
+        }
+
+        Logger.LogTrace("提醒播放结束，恢复主界面行宽度自适应");
     }
 
     private bool GetMouseStatusByPos(Point ptr)
@@ -858,6 +929,8 @@ public class MainWindowLine : ContentControl, INotificationConsumer
         CancellationTokenSource? stopNotificationSoundCts = null;
         while (_notificationQueue.Count > 0)
         {
+            // 首批提醒到这里才确定要播放，此时还没换过任何提醒内容，量到的行宽是干净的。
+            LockRowWidth();
             var ticket = _notificationQueue.Dequeue();
             _notificationPlayingTickets.Add(ticket);
             var request = CurrentNotificationRequest = ticket.Request;
@@ -965,6 +1038,7 @@ public class MainWindowLine : ContentControl, INotificationConsumer
         OverlayContent = null;
         MaskContent = null;
         _isOverlayOpen = false;
+        UnlockRowWidth();
         if (stopNotificationSoundCts?.IsCancellationRequested == false)
         {
             await stopNotificationSoundCts.CancelAsync();
