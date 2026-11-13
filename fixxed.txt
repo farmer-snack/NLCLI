@@ -1,4 +1,80 @@
 ================================================
+[2026-11-13 20:05] [修复] 轮播容器导致提醒播放时主界面宽度跳动
+================================================
+
+现象：主界面上放了「轮播容器」组件后，提醒一播放整条岛就变宽变窄；轮播每次
+切换内容，行宽也会跟着变。
+
+原因：轮播容器的 ListBox 用 Grid 作为 ItemsPanel，所有轮播项叠放在同一格里。
+未选中的项用 IsVisible=False 隐藏，而 Avalonia 中不可见元素不参与测量，于是
+ListBox 的测量宽度只等于当前显示项的内容宽度。切换一次轮播，整行宽度就变
+一次；提醒播放期间行宽被锁死，提醒结束解锁时宽度再突变一次，表现出来就是
+"提醒一播就跳"。
+
+改动：
+
+- SlideComponent 的 ItemContainerTheme 改用透明度隐藏未选中项（Opacity=0 +
+  IsHitTestVisible=False），并给选中项加 ZIndex=1 置顶。所有项都参与测量，
+  轮播宽度恒为最宽项，切换时不再改变行宽。滑动动画同步从 IsVisible 改为
+  Opacity 驱动，视觉效果不变。
+- MainWindowLine.LockRowWidth 在测量前先强制排一遍布局（TopLevel.UpdateLayout），
+  避免整行组件都被隐藏、提醒开始时行才出现、Bounds 仍为 0 导致锁定被跳过。
+
+验证：dotnet build 0 Error；用 Avalonia 12.1.4 实测叠加 Grid，IsVisible 隐藏时
+测量宽度随选中项在 14/294 之间跳，Opacity 隐藏时恒为 294。
+
+================================================
+[2026-11-13 19:30] [修复] 提醒播放期间主界面宽度仍会跳动
+================================================
+
+现象：播放提醒（上课提醒、天气提醒等）时，主界面岛会随提醒内容变宽变窄，
+一条提醒内部切换内容时也会抽动。
+
+原因有两处：
+
+1. 三套内嵌式模板（Fluent / LiquidGlass / Classic）里，GridOverlay 和
+   GridContentRoot 是 PART_GridWrapper 的并列子元素。提醒的遮罩、叠加内容
+   参与父 Grid 的测量，内容比主界面组件宽时就把整条岛撑开，提醒结束再缩回。
+   之前 94c8dcd2 的宽度锁定只写在 RectanglesNotificationPanel 里，只对
+   Rectangles 主题的气泡生效，内嵌式主题完全没有覆盖。
+
+2. Rectangles 面板的锁定用 measuredWidth 和 _lockedWidth 直接比较。文本排版
+   给出的是小数宽度，同一条提醒在两次测量之间就能差零点几像素，每差一次就
+   重启一次 333ms 宽度动画，表现出来就是气泡持续轻微抽动。
+
+改动：
+
+- MainWindowLine 新增 LockRowWidth / UnlockRowWidth，在提醒开始播放前记下
+  PART_GridWrapper 的实际宽度并写死，播放结束恢复 NaN 自适应。锁定期间
+  WrapperOnSizeChanged 不再回写 BackgroundWidth，遮罩/叠加层怎么换都不影响
+  行宽，内容改为溢出显示。因为作用在模板部件上，对所有主题统一生效。
+- RectanglesNotificationPanel 的宽度比较加 0.5px 容差，候选宽度向上取整到
+  整像素，动画重启阈值同步放宽，避免亚像素抖动反复触发动画。
+
+验证：dotnet build 0 Error。
+
+
+问题：vendors/EdgeTtsSharp 以 git 子模块引入，地址是
+git@github.com:ClassIsland/EdgeTtsSharp.git（SSH）。git clone 默认不拉子模块，
+没配 SSH key 的机器连 git submodule update --init 都走不通，结果就是克隆完
+直接 dotnet build 会因为找不到 Edge_tts_sharp.csproj 而失败。
+
+改动：
+- 删除 .gitmodules，把 vendors/EdgeTtsSharp 从 gitlink（160000）转成普通目录，
+  纳入 17 个源码/工程/资源文件（共 6.8 MB，去掉 .vs、bin、obj、csproj.user
+  和子模块自带的 .github）。
+- 新增 vendors/EdgeTtsSharp/VENDORED.md，记录上游仓库、classisland-v2 分支、
+  纳入时的提交 b7f82897 和升级方式。
+- AGENTS.md 删掉「缺子模块就跑 git submodule update」的说明，改为声明本仓库
+  没有子模块，普通 clone 即可编译。
+- .github/workflows 下 build_release.yml、build_fork.yml、
+  qodana_code_quality.yml 共 10 处 submodules: recursive 全部移除。
+  仓库另外两个 vendored 依赖（PhainonDistributionCenter.Shared、
+  System.Device.Location）本来就是直接入库的，现在三者形式统一。
+
+验证：fetch 后的干净克隆直接 dotnet build 通过，git submodule status 为空。
+
+================================================
 [2026-11-12 22:40] [功能] 内置「液态玻璃」主界面主题并设为默认
 ================================================
 

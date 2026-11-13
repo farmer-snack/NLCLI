@@ -48,8 +48,20 @@
                         </Setter.Value>
                     </Setter>
                     <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                    <!--
+                        未选中的项必须继续参与测量。
+                        如果直接 IsVisible=False，ListBox 的测量宽度就只由当前显示的项决定，轮播每切换一次，
+                        整条主界面就会跟着内容忽宽忽窄；提醒播放期间行宽被锁死后，解锁瞬间还会再突变一次。
+                        这里改用透明度隐藏：视觉上仍然只有一项可见，但所有项都会共同撑出稳定的宽度。
+                    -->
+                    <Style Selector="^[IsSelected=False]">
+                        <Setter Property="IsHitTestVisible" Value="False"/>
+                    </Style>
                     <Style Selector="^[IsSelected=False][(local|SlideComponent.IsAnimationEnabled)=False]">
-                        <Setter Property="IsVisible" Value="False"/>
+                        <Setter Property="Opacity" Value="0"/>
+                    </Style>
+                    <Style Selector="^[IsSelected=True]">
+                        <Setter Property="Panel.ZIndex" Value="1"/>
                     </Style>
                     <Style Selector="^[(local|SlideComponent.IsAnimationEnabled)=True]">
                         <Setter Property="Template">
@@ -71,7 +83,6 @@
                             <Style.Animations>
                                 <Animation Duration="00:00:00.25" FillMode="Forward">
                                     <KeyFrame Cue="0%">
-                                        <Setter Property="IsVisible" Value="True"/>
                                         <Setter Property="Opacity" Value="0.0"/>
                                         <Setter Property="TranslateTransform.Y" Value="-40"/>
                                     </KeyFrame>
@@ -83,27 +94,24 @@
                                     </KeyFrame>
                                 </Animation>
                             </Style.Animations>
-                            <Setter Property="IsVisible" Value="True"/>
                         </Style>
                         <!-- Slide out -->
                         <Style Selector="^[IsSelected=False] /template/ ContentPresenter#ContentPresenter">
                             <Style.Animations>
                                 <Animation Duration="00:00:00.25" FillMode="Forward">
                                     <KeyFrame Cue="0%">
-                                        <Setter Property="IsVisible" Value="True"/>
+                                        <Setter Property="Opacity" Value="1.0"/>
                                     </KeyFrame>
                                     <KeyFrame Cue="100%">
                                         <Setter Property="Opacity" Value="0.0"/>
                                     </KeyFrame>
                                     <KeyFrame Cue="100%" KeySpline="0.65, 0, 0.35, 1">
                                         <Setter Property="TranslateTransform.Y" Value="40"/>
-                                        <Setter Property="IsVisible" Value="False"/>
                                     </KeyFrame>
                                 </Animation>
                             </Style.Animations>
                             <Setter Property="Opacity" Value="0"/>
                             <Setter Property="TranslateTransform.Y" Value="-40"/>
-                            <Setter Property="IsVisible" Value="False"/>
                         </Style>
                     </Style>
                 </ControlTheme>

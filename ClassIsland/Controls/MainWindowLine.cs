@@ -788,6 +788,11 @@ public class MainWindowLine : ContentControl, INotificationConsumer
             return;
         }
 
+        // 整行组件都被隐藏时，行要等提醒开始播放才会显示，此刻还没跑过布局，
+        // Bounds 仍是 0。先强制排一遍布局，否则会量到 0 而直接放弃锁定，
+        // 提醒内容就会把行宽撑开。
+        TopLevel.GetTopLevel(this)?.UpdateLayout();
+
         var width = GridWrapper.Bounds.Width;
         if (!double.IsFinite(width) || width <= 0)
         {
