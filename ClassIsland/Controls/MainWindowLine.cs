@@ -788,6 +788,18 @@ public class MainWindowLine : ContentControl, INotificationConsumer
     }
 
     /// <summary>
+    /// 重置 Rectangles 主题提醒面板的宽度锁，让下一条提醒按自己的内容重新定宽。
+    /// 其他主题没有这个面板，找不到时直接跳过。
+    /// </summary>
+    private void ResetRectanglesWidthLock()
+    {
+        if (GridWrapper?.GetVisualParent() is RectanglesNotificationPanel panel)
+        {
+            panel.ResetWidthLock();
+        }
+    }
+
+    /// <summary>
     /// 固定主界面行的宽度，避免提醒内容（遮罩层、叠加层）把整条岛撑宽或压窄。
     /// </summary>
     /// <remarks>
@@ -935,137 +947,164 @@ public class MainWindowLine : ContentControl, INotificationConsumer
         _isOverlayOpen = true;  // 上锁
 
         var notificationsShowed = false;
-
-        if (_firstProcessNotificationsTime == DateTime.MinValue)
-            _firstProcessNotificationsTime = ExactTimeService.GetCurrentLocalDateTime();
-        if (!SettingsService.Settings.IsNotificationEnabled ||
-            (ExactTimeService.GetCurrentLocalDateTime() - _firstProcessNotificationsTime <= TimeSpan.FromSeconds(10) &&
-             App.ApplicationCommand.Quiet) // 静默启动
-           )
-        {
-            NotificationHostService.RequestQueue.Clear();
-        }
-
         CancellationTokenSource? stopNotificationSoundCts = null;
-        while (_notificationQueue.Count > 0)
+        try
         {
-            // 首批提醒到这里才确定要播放，此时还没换过任何提醒内容，量到的行宽是干净的。
-            LockRowWidth();
-            var ticket = _notificationQueue.Dequeue();
-            _notificationPlayingTickets.Add(ticket);
-            var request = CurrentNotificationRequest = ticket.Request;
-            var settings = ticket.Settings;
-            Logger.LogTrace("nid = {notificationId}, tid={ticketId}", request.GetHashCode(), ticket.GetHashCode());
+            if (_firstProcessNotificationsTime == DateTime.MinValue)
+                _firstProcessNotificationsTime = ExactTimeService.GetCurrentLocalDateTime();
+            if (!SettingsService.Settings.IsNotificationEnabled ||
+                (ExactTimeService.GetCurrentLocalDateTime() - _firstProcessNotificationsTime <= TimeSpan.FromSeconds(10) &&
+                 App.ApplicationCommand.Quiet) // 静默启动
+               )
+            {
+                NotificationHostService.RequestQueue.Clear();
+            }
 
-            var mask = request.MaskContent;
-            var overlay = request.OverlayContent;
-            Logger.LogInformation("处理通知请求：{} {}", request.MaskContent, request.OverlayContent);
-            var cancellationToken = request.CancellationTokenSource.Token;
+            while (_notificationQueue.Count > 0)
+            {
+                // 首批提醒到这里才确定要播放，此时还没换过任何提醒内容，量到的行宽是干净的。
+                LockRowWidth();
+                var ticket = _notificationQueue.Dequeue();
+                _notificationPlayingTickets.Add(ticket);
+                var request = CurrentNotificationRequest = ticket.Request;
+                var settings = ticket.Settings;
+                Logger.LogTrace("nid = {notificationId}, tid={ticketId}", request.GetHashCode(), ticket.GetHashCode());
 
-            PreProcessNotificationContent(mask);
+                var mask = request.MaskContent;
+                var overlay = request.OverlayContent;
+                Logger.LogInformation("处理通知请求：{} {}", request.MaskContent, request.OverlayContent);
+                var cancellationToken = request.CancellationTokenSource.Token;
 
+                PreProcessNotificationContent(mask);
+
+                try
+                {
+                    if (request.MaskContent.Duration > TimeSpan.Zero && !cancellationToken.IsCancellationRequested)
+                    {
+                        PseudoClasses.Set(":mask-anim", false);
+                        PseudoClasses.Set(":overlay-out", false);
+                        PseudoClasses.Set(":mask-in", false);
+                        PseudoClasses.Set(":mask-out", false);
+                        notificationsShowed = true;
+                        MaskContent = request.MaskContent;  // 加载 Mask 元素
+                        // 换成新提醒内容后要按这条提醒重新量一次宽度。Rectangles 主题的宽度锁是
+                        // 「播放期间只增不减」，不重置的话上一条宽提醒的宽度会一直沿用到下一条短提醒。
+                        ResetRectanglesWidthLock();
+                        if (settings.IsNotificationTopmostEnabled && SettingsService.Settings.AllowNotificationTopmost)
+                        {
+                            _mainWindow?.AcquireTopmostLock(TopmostLock);
+                            _notificationVisibilityHost?.AcquireTopmostLock(TopmostLock);
+                        }
+                        else
+                        {
+                            _mainWindow?.ReleaseTopmostLock(TopmostLock);
+                            _notificationVisibilityHost?.ReleaseTopmostLock(TopmostLock);
+                        }
+
+                        PseudoClasses.Set(":mask-anim", true);
+                        PseudoClasses.Set(":mask-in", true);
+                        PseudoClasses.Set(":overlay-anim", false);
+
+                        // 播放提醒特效
+                        if (!IsAllComponentsHid && SettingsService.Settings.IsMainWindowVisible && !request.MaskSession.HasSoundsPlayed)
+                        {
+                            var center = GetCenter();
+                            ticket.TryPlayNotificationEffect(new NotificationEffectContext
+                            {
+                                Center = center,
+                                Request = request,
+                                Content = MaskContent
+                            });
+                        }
+
+                        await ticket.ProcessMask();
+                        if (overlay is null || cancellationToken.IsCancellationRequested || overlay.Duration <= TimeSpan.Zero)
+                        {
+                            PseudoClasses.Set(":overlay-anim", true);
+                            PseudoClasses.Set(":mask-in", false);
+                            PseudoClasses.Set(":mask-out", true);
+                            PseudoClasses.Set(":overlay-in", false);
+                            PseudoClasses.Set(":overlay-out", true);
+                        }
+                        else
+                        {
+                            PreProcessNotificationContent(overlay);
+                            OverlayContent = overlay;
+                            PseudoClasses.Set(":mask-out", true);
+                            PseudoClasses.Set(":mask-in", false);
+                            PseudoClasses.Set(":overlay-out", false);
+                            PseudoClasses.Set(":overlay-in", true);
+                            await ticket.ProcessOverlay();
+                        }
+                    }
+                }
+                catch (TaskCanceledException)
+                {
+                    Logger.LogTrace("CANCELLED! tid={ticketId}, {}", ticket.GetHashCode(), request);
+                }
+                catch (Exception ex)
+                {
+                    // 单条提醒的内容/模板出错时不能让整个消费循环卡死：异常一旦穿透 async void，
+                    // _isOverlayOpen 会永远为 true（后续提醒全被挡在门外），UnlockRowWidth 也不会执行，
+                    // 主界面行宽会被永久锁死。
+                    Logger.LogError(ex, "处理提醒 {notificationId} 时发生错误，跳过该条提醒", request.GetHashCode());
+                }
+
+                if (_isUnloading)
+                {
+                    break;
+                }
+
+                if (NotificationHostService.RequestQueue.Count + _notificationQueue.Count < 1 && notificationsShowed)
+                {
+                    PseudoClasses.Set(":overlay-anim", true);
+                    PseudoClasses.Set(":mask-out", true);
+                    PseudoClasses.Set(":mask-in", false);
+                    PseudoClasses.Set(":overlay-out", true);
+                    PseudoClasses.Set(":overlay-in", false);
+                }
+
+                _notificationPlayingTickets.Remove(ticket);
+                PullPendingNotifications();
+
+                if (_notificationQueue.Count == 0 && notificationsShowed)
+                {
+                    await WaitForNotificationExitAsync();
+                    if (!_isUnloading && NotificationExitDuration > TimeSpan.Zero)
+                    {
+                        // The consumer stays occupied during exit, so the host may have received more requests.
+                        PullPendingNotifications();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "提醒播放循环异常终止，已恢复主界面状态");
+        }
+        finally
+        {
+            OverlayContent = null;
+            MaskContent = null;
+            _isOverlayOpen = false;
+            UnlockRowWidth();
+            // 收尾动作本身也不能再抛异常：任何一步漏掉都会留下残余状态
+            // （提示音不停、Topmost 锁不释放导致窗口永久置顶）。
             try
             {
-                if (request.MaskContent.Duration > TimeSpan.Zero && !cancellationToken.IsCancellationRequested)
+                if (stopNotificationSoundCts?.IsCancellationRequested == false)
                 {
-                    PseudoClasses.Set(":mask-anim", false);
-                    PseudoClasses.Set(":overlay-out", false);
-                    PseudoClasses.Set(":mask-in", false);
-                    PseudoClasses.Set(":mask-out", false);
-                    notificationsShowed = true;
-                    MaskContent = request.MaskContent;  // 加载 Mask 元素
-                    if (settings.IsNotificationTopmostEnabled && SettingsService.Settings.AllowNotificationTopmost)
-                    {
-                        _mainWindow?.AcquireTopmostLock(TopmostLock);
-                        _notificationVisibilityHost?.AcquireTopmostLock(TopmostLock);
-                    }
-                    else
-                    {
-                        _mainWindow?.ReleaseTopmostLock(TopmostLock);
-                        _notificationVisibilityHost?.ReleaseTopmostLock(TopmostLock);
-                    }
-
-                    PseudoClasses.Set(":mask-anim", true);
-                    PseudoClasses.Set(":mask-in", true);
-                    PseudoClasses.Set(":overlay-anim", false);
-
-                    // 播放提醒特效
-                    if (!IsAllComponentsHid && SettingsService.Settings.IsMainWindowVisible && !request.MaskSession.HasSoundsPlayed)
-                    {
-                        var center = GetCenter();
-                        ticket.TryPlayNotificationEffect(new NotificationEffectContext
-                        {
-                            Center = center,
-                            Request = request,
-                            Content = MaskContent
-                        });
-                    }
-
-                    await ticket.ProcessMask();
-                    if (overlay is null || cancellationToken.IsCancellationRequested || overlay.Duration <= TimeSpan.Zero)
-                    {
-                        PseudoClasses.Set(":overlay-anim", true);
-                        PseudoClasses.Set(":mask-in", false);
-                        PseudoClasses.Set(":mask-out", true);
-                        PseudoClasses.Set(":overlay-in", false);
-                        PseudoClasses.Set(":overlay-out", true);
-                    }
-                    else
-                    {
-                        PreProcessNotificationContent(overlay);
-                        OverlayContent = overlay;
-                        PseudoClasses.Set(":mask-out", true);
-                        PseudoClasses.Set(":mask-in", false);
-                        PseudoClasses.Set(":overlay-out", false);
-                        PseudoClasses.Set(":overlay-in", true);
-                        await ticket.ProcessOverlay();
-                    }
+                    await stopNotificationSoundCts.CancelAsync();
                 }
+                stopNotificationSoundCts?.Dispose();
             }
-            catch (TaskCanceledException)
+            catch (Exception ex)
             {
-                Logger.LogTrace("CANCELLED! tid={ticketId}, {}", ticket.GetHashCode(), request);
+                Logger.LogWarning(ex, "停止提醒提示音时发生错误");
             }
-
-            if (_isUnloading)
-            {
-                break;
-            }
-
-            if (NotificationHostService.RequestQueue.Count + _notificationQueue.Count < 1 && notificationsShowed)
-            {
-                PseudoClasses.Set(":overlay-anim", true);
-                PseudoClasses.Set(":mask-out", true);
-                PseudoClasses.Set(":mask-in", false);
-                PseudoClasses.Set(":overlay-out", true);
-                PseudoClasses.Set(":overlay-in", false);
-            }
-
-            _notificationPlayingTickets.Remove(ticket);
-            PullPendingNotifications();
-
-            if (_notificationQueue.Count == 0 && notificationsShowed)
-            {
-                await WaitForNotificationExitAsync();
-                if (!_isUnloading && NotificationExitDuration > TimeSpan.Zero)
-                {
-                    // The consumer stays occupied during exit, so the host may have received more requests.
-                    PullPendingNotifications();
-                }
-            }
+            _mainWindow?.ReleaseTopmostLock(TopmostLock);
+            _notificationVisibilityHost?.ReleaseTopmostLock(TopmostLock);
         }
-
-        OverlayContent = null;
-        MaskContent = null;
-        _isOverlayOpen = false;
-        UnlockRowWidth();
-        if (stopNotificationSoundCts?.IsCancellationRequested == false)
-        {
-            await stopNotificationSoundCts.CancelAsync();
-        }
-        stopNotificationSoundCts?.Dispose();
-        _mainWindow?.ReleaseTopmostLock(TopmostLock);
-        _notificationVisibilityHost?.ReleaseTopmostLock(TopmostLock);
     }
 
     private void PullPendingNotifications()

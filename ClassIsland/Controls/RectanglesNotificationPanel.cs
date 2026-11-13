@@ -53,7 +53,8 @@ public class RectanglesNotificationPanel : Panel
     public static readonly StyledProperty<double> NotificationWidthProperty =
         AvaloniaProperty.Register<RectanglesNotificationPanel, double>(nameof(NotificationWidth));
 
-    private static readonly TimeSpan EntranceDuration = TimeSpan.FromMilliseconds(333);    private static readonly TimeSpan ExitDuration = TimeSpan.FromMilliseconds(167);
+    private static readonly TimeSpan EntranceDuration = TimeSpan.FromMilliseconds(333);
+    private static readonly TimeSpan ExitDuration = TimeSpan.FromMilliseconds(167);
     private static readonly TimeSpan EntranceInertiaDuration = TimeSpan.FromMilliseconds(1000);
     private static readonly TimeSpan ExitInertiaDuration = TimeSpan.FromMilliseconds(501.14);
     private static readonly Easing EntranceEasing = Easing.Parse("0,0,0,1");
@@ -148,6 +149,15 @@ public class RectanglesNotificationPanel : Panel
     }
 
     private bool IsCentered => WindowDockingLocation is 1 or 4;
+
+    /// <summary>
+    /// 清除「播放期间只增不减」的宽度锁。面板实例会在多条提醒之间复用，
+    /// 换内容时必须在测量前重置，否则上一条宽提醒的宽度会一直沿用到下一条短提醒。
+    /// </summary>
+    internal void ResetWidthLock()
+    {
+        _lockedWidth = 0;
+    }
 
     private bool CanAnimate => this.IsAttachedToVisualTree() && IThemeService.AnimationLevel != 0 &&
                                !MainWindowStylesAssist.GetMainWindowInEditMode(this);

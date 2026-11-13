@@ -989,10 +989,17 @@ if [ -f fixxed.txt ]; then
 elif [ -f fixed.txt ]; then
   FIXLOG=fixed.txt
 else
-  # 用 git ls-files 而不是 ls：ls 只看当前目录，
-  # 日志被放进 doc/ 或 .config/ 这类子目录时，ls 找不到就会"新建"一个空的，
-  # 你原来那份定制记录从此再也不会被读到。
-  FIXLOG=$(git ls-files | grep -iE '(^|/)fix+ed\.txt$' | head -1)
+  # 不用 ls：ls 只看当前目录，日志被放进 doc/ 或 .config/ 这类子目录时，
+  # ls 找不到就会"新建"一个空的，你原来那份定制记录从此再也不会被读到。
+  # 也不能只用 git ls-files：它只列已跟踪文件，日志刚建好还没 git add、
+  # 或者被 .gitignore 挡住时同样查不到，一样会新建空账本把历史记录冲掉。
+  # 所以已跟踪的优先（排前面），再用 find 兜一遍未跟踪的。
+  FIXLOG=$( { git ls-files 2>/dev/null
+              find . -type f -iname 'fix*ed.txt' \
+                   -not -path './.git/*' -not -path '*/node_modules/*' \
+                   -not -path '*/bin/*' -not -path '*/obj/*' 2>/dev/null \
+                | sed 's|^\./||'
+            } | grep -iE '(^|/)fix+ed\.txt$' | head -1)
   if [ -z "$FIXLOG" ]; then
     FIXLOG=fixxed.txt
     echo "NO_FIXLOG: 全仓库都没找到日志文件，稍后将新建 fixxed.txt（若你确实有历史记录，请告诉我路径）"
@@ -1000,7 +1007,12 @@ else
 fi
 
 # 多个候选并存时明确提示，不要静默挑一个
-CANDS=$(git ls-files | grep -icE '(^|/)fix+ed\.txt$' || true)
+CANDS=$( { git ls-files 2>/dev/null
+           find . -type f -iname 'fix*ed.txt' \
+                -not -path './.git/*' -not -path '*/node_modules/*' \
+                -not -path '*/bin/*' -not -path '*/obj/*' 2>/dev/null \
+             | sed 's|^\./||'
+         } | grep -iE '(^|/)fix+ed\.txt$' | sort -u | wc -l | tr -d ' ')
 [ "$CANDS" -le 1 ] || { echo "WARN: 仓库里有 $CANDS 个疑似日志文件，本次用 $FIXLOG，其余的我没有动"; }
 
 [ -f "$FIXLOG" ] && echo "FIXLOG=$FIXLOG（已存在，$(wc -l < "$FIXLOG") 行）" || echo "FIXLOG=$FIXLOG（将新建）"
@@ -4107,13 +4119,24 @@ cd "$REPO_ROOT" || exit 1
 CAT=$(head -1 /tmp/custom-category.txt)
 
 # 找到该段的起止行：段头「==== / [长期] 大类名 / ====」，到下一个段头为止
+# trim 同时去掉 CR 与尾随空白：账本被 Windows 记事本另存过后行尾是 CRLF，
+# `[长期] 甲` 会读成 `[长期] 甲\r`，精确比较永远不相等，段落会被判定为不存在。
+# 整份读进数组后一次性判定：边读边 getline 的写法会把「非目标段」的段头也打出来，
+# 于是「输出为空 = 没有这个大类」这条判据永远不成立，写错分类名也不会报错。
 awk -v cat="$CAT" '
-  BEGIN { inblk=0 }
-  /^=+$/ && length($0) >= 10 { hold=$0; if ((getline nxt) > 0) {
-      if (nxt == "[长期] " cat) { inblk=1; print hold; print nxt; if ((getline n3)>0) print n3; next }
-      if (nxt ~ /^\[/ && inblk) { exit }
-      print hold; print nxt; next } }
-  inblk { print }
+  function trim(s) { sub(/\r$/, "", s); sub(/[ \t]+$/, "", s); return s }
+  { line[NR] = $0 }
+  END {
+    want = trim("[长期] " cat)
+    start = 0
+    for (i = 1; i < NR; i++)
+      if (line[i] ~ /^=+\r?$/ && trim(line[i+1]) == want) { start = i; break }
+    if (start == 0) exit
+    end = NR
+    for (j = start + 3; j < NR; j++)
+      if (line[j] ~ /^=+\r?$/ && trim(line[j+1]) ~ /^\[/) { end = j - 1; break }
+    for (k = start; k <= end; k++) print line[k]
+  }
 ' "$FIXLOG" > /tmp/category-block.txt
 [ -s /tmp/category-block.txt ] || { echo "FAIL: 账本里没有大类「$CAT」，改用新建模式"; exit 1; }
 echo "找到段落 $(wc -l < /tmp/category-block.txt) 行"
@@ -4130,12 +4153,18 @@ BLOCK
 python3 - "$FIXLOG" "$CAT" /tmp/append-entry.txt <<'PYEOF'
 import sys
 p, cat, entryf = sys.argv[1], sys.argv[2], sys.argv[3]
-lines = open(p, encoding='utf-8').read().split('\n')
-entry = open(entryf, encoding='utf-8').read().rstrip('\n') + '\n'
+# newline='' 保留原始行尾：账本在 Windows 记事本里另存过就是 CRLF，
+# 若统一按 LF 写回，新插入的行是 LF、原有行是 CRLF，整份文件的 diff 会变成全改。
+raw = open(p, encoding='utf-8', newline='').read()
+crlf = '\r\n' in raw
+lines = raw.replace('\r\n', '\n').split('\n')
+entry = open(entryf, encoding='utf-8', newline='').read().replace('\r\n', '\n').rstrip('\n') + '\n'
 hdr = '[长期] ' + cat
 start = None
-for i in range(len(lines) - 2):
-    if lines[i].startswith('====') and lines[i+1] == hdr:
+for i in range(len(lines) - 1):
+    # 用 strip 比较：段落头被编辑器加上尾随空格时，精确匹配会找不到段，
+    # 然后静默落到新建模式，凭空多出一个重复大类。
+    if lines[i].startswith('====') and lines[i+1].strip() == hdr:
         start = i
         break
 if start is None:
@@ -4149,15 +4178,22 @@ for j in range(start + 3, len(lines) - 1):
 k = end - 1
 while k > start and lines[k].strip() == '':
     k -= 1
-out = lines[:k+1] + entry.rstrip('\n').split('\n') + [''] + lines[end:]
-open(p, 'w', encoding='utf-8').write('\n'.join(out))
+# 段尾原有的空行必须原样保留。目标段是最后一段时 end == len(lines)，
+# 若这里固定补一个空行，原文件末尾的多余空行会被吃掉，git diff 就出现「-」行，
+# 而下面的复核要求「-」行为空 —— 追加会被判失败回滚，重来还是失败，卡死在死循环里。
+tail = lines[k+1:end] or ['']
+out = lines[:k+1] + entry.rstrip('\n').split('\n') + tail + lines[end:]
+out = '\n'.join(out)
+if crlf:
+    out = out.replace('\n', '\r\n')
+open(p, 'w', encoding='utf-8', newline='').write(out)
 print('APPENDED: 段落 %s 末尾 +%d 行' % (cat, len(entry.strip().split('\n'))))
 PYEOF
 ```
 
 追加模式没有 `cmp` 那样的逐字节保护，所以**写完必须复核**：
-`git diff -- "$FIXLOG"` 只能出现「+」行、不能出现「-」行（除段间空行调整外）。
-看到任何原有内容被删，立刻 `git checkout -- "$FIXLOG"` 重来。
+`git diff -- "$FIXLOG"` 只允许出现「+」行，**不允许出现任何「-」行**。
+看到原有内容被删，立刻 `git checkout -- "$FIXLOG"` 重来。
 
 ---
 

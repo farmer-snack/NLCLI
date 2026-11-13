@@ -162,17 +162,30 @@ public static class PluginDependencyService
             WriteLog($"首次使用可选依赖 {assemblyName}，开始下载 " +
                      string.Join("、", packages.Select(package => $"{package.PackageId} {package.Version}")));
 
-            if (!Download(packages, out var downloadError))
+            try
             {
+                if (!Download(packages, out var downloadError))
+                {
+                    FailedAt[assemblyName] = DateTime.UtcNow;
+                    error = downloadError;
+                    WriteLog($"可选依赖 {assemblyName} 下载失败：{downloadError}");
+                    return false;
+                }
+
+                FailedAt.Remove(assemblyName);
+                WriteLog($"可选依赖 {assemblyName} 已缓存到 {CacheDirectory}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // 解压或往缓存目录拷贝时可能撞上文件占用/磁盘权限问题。
+                // 这里必须自己收住：异常一旦冒到程序集解析回调，整个插件会直接加载失败，
+                // 而按设计「可选依赖下载失败」只应该退化成对应功能不可用。
                 FailedAt[assemblyName] = DateTime.UtcNow;
-                error = downloadError;
-                WriteLog($"可选依赖 {assemblyName} 下载失败：{downloadError}");
+                error = ex.Message;
+                WriteLog($"可选依赖 {assemblyName} 写入缓存失败：{ex.Message}");
                 return false;
             }
-
-            FailedAt.Remove(assemblyName);
-            WriteLog($"可选依赖 {assemblyName} 已缓存到 {CacheDirectory}");
-            return true;
         }
     }
 

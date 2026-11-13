@@ -184,6 +184,9 @@ public static class LegacyDataMigrationHelper
                 }
                 catch (Exception ex)
                 {
+                    // 复制到一半失败时，目标目录里会留下残缺的插件。不清理的话，
+                    // 下次启动会把它当成「同名插件已存在」直接跳过，残缺插件就永远修不回来了。
+                    TryDeleteDirectory(target);
                     failedPlugins++;
                     pluginsComplete = false;
                     Console.WriteLine($"[旧版本迁移] 复制插件 {name} 失败：{ex.Message}");
@@ -264,6 +267,7 @@ public static class LegacyDataMigrationHelper
                 }
                 catch (Exception ex)
                 {
+                    TryDeleteDirectory(target);
                     failedBackups++;
                     backupsComplete = false;
                     Console.WriteLine($"[旧版本迁移] 复制备份目录 {name} 失败：{ex.Message}");
@@ -390,6 +394,9 @@ public static class LegacyDataMigrationHelper
 
         for (var i = 0; i < 2 && current?.Parent is not null; i++)
         {
+            // 当前目录自身也要试：Debug 构建的数据目录就是 exe 所在目录本身，
+            // 而自启项被清理后只能靠这里兜底，漏了它就会漏掉整个 Debug/绿色版旧目录。
+            yield return current.FullName;
             yield return Path.Combine(current.Parent.FullName, "data");
             yield return current.Parent.FullName;
             yield return Path.Combine(current.FullName, "data");
@@ -688,6 +695,25 @@ public static class LegacyDataMigrationHelper
         foreach (var directory in Directory.EnumerateDirectories(source))
         {
             CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
+        }
+    }
+
+    /// <summary>
+    /// 删除复制失败留下的半成品目录。删不掉时保持原样（下次会被当成同名目录跳过），
+    /// 但至少不会在本次迁移里留下一个「看起来成功」的假象。
+    /// </summary>
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[旧版本迁移] 清理半成品目录 {path} 失败：{ex.Message}");
         }
     }
 

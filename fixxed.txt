@@ -38,6 +38,19 @@
 - 改为 Opacity=0 + IsHitTestVisible=False 隐藏未选中项、选中项 ZIndex=1 置顶，
   所有项都参与测量，轮播宽度恒为最宽项；滑动动画同步从 IsVisible 改 Opacity 驱动。
 
+4）异常穿透与面板复用（审计补充）
+- ProcessNotification 是 async void，原来整段只 catch (TaskCanceledException)。
+  其它异常（内容绑定/模板出错、GetCenter 拿不到窗口）会直接穿透 async void 终止方法：
+  _isOverlayOpen 永远停在 true，后续提醒全被挡在门外；UnlockRowWidth 不执行，行宽永久锁死。
+  改为整段 try/catch/finally —— 单条提醒加通用 catch，记日志后跳过继续下一条；
+  finally 统一清 OverlayContent / MaskContent、复位 _isOverlayOpen、解锁行宽、释放 Topmost 锁。
+  finally 里的 CancelAsync / Dispose 再包一层 try/catch，收尾自身抛异常也不能让 Topmost 锁漏释放。
+- 面板宽度锁「播放期间只增不减」的前提是「一次播放一个面板」，但 RectanglesNotificationPanel
+  实例会在多条提醒之间复用。同一 IsOpened 周期内只换 MaskContent 不会重置 _lockedWidth，
+  上一条宽提醒的宽度会一直沿用到下一条短提醒，表现的正是「短提醒被撑宽」。
+  新增 ResetWidthLock() 清 _lockedWidth，MainWindowLine 在给 MaskContent 赋值之后调用；
+  其他主题没有这个面板，GetVisualParent 找不到时直接跳过。
+
 涉及文件
 --------
 - ClassIsland/Controls/MainWindowLine.cs — LockRowWidth / UnlockRowWidth + 布局强制
@@ -170,6 +183,16 @@ PluginService 与可观测性
   ClassIsland 项目不定义这个符号（只有 ClassIsland.Desktop 定义），会把方法体整段裁掉，
   迁移一次都不执行。
 
+残缺目录与自身目录（审计补充）
+- CopyDirectory 中途失败（磁盘满、目标被占用、权限不足）会沿途留下半成品目录。
+  下次启动时它已经「同名存在」，被「同名一律跳过」的规则当成已迁移过，永久跳过 ——
+  用户既拿不到那份插件/备份，日志里也只有一条「跳过同名」看不出是残骸。
+  改为复制失败后 TryDeleteDirectory(target) 清掉残骸（删除本身失败只记日志，不抛），让下次能重试。
+  插件目录与备份目录两条路径都要清。
+- EnumerateWellKnownCandidates() 原来只 yield return current.Parent 的两级上级，
+  唯独漏了 current 自己。Debug 构建和绿色便携版的数据目录就在 exe 同级，
+  按原逻辑这两类部署永远扫不到旧数据。补 yield return current.FullName。
+
 启动后弹 Toast 汇总：复制几个插件、几个备份、跳过几个同名插件。
 
 涉及文件
@@ -208,6 +231,14 @@ OpenCvSharp4、DlibDotNet 打进安装包会多 136MB，绝大多数人用不到
 
 实测：OpenCvSharp 3.4s / DlibDotNet 4.0s 下载，二次命中缓存 <100ms；
 发布目录回到 290MB（不含 pdb），压缩后约 128MB。
+
+异常收口（审计补充）
+- Ensure() 由 AssemblyLoadContext.Load 的解析回调同步调用。原来只有 Download() 内部收异常，
+  之后的解压、抽取文件、覆盖同层托管库一旦抛（磁盘满、文件被占用、无写权限），
+  异常会直接冒到解析回调，整个插件被判「加载错误」。
+  这跟「可选依赖不可用」是两件事：应该是这个功能用不了，而不是插件起不来。
+  改为整段包 try/catch，捕获后写 FailedAt、返回 false，调用方按「依赖不可用」降级；
+  顺带进 10 分钟冷却，避免每次解析都在同一处重复失败拖慢启动。
 
 下次同步注意
 ------------
