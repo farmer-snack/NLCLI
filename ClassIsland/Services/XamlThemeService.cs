@@ -49,20 +49,26 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
     public static readonly string ThemesPkgRootPath = Path.Combine(CommonDirectories.AppCacheFolderPath, "ThemePackages");
 
     /// <summary>
-    /// 默认启用的主界面主题。
+    /// 默认启用的主界面主题。液态玻璃只是主题页面里的一个可选项，不作为默认。
     /// </summary>
-    public const string DefaultThemeId = "classisland.liquidglass";
+    public const string DefaultThemeId = "classisland.fluent";
 
     /// <summary>
-    /// 旧版本的默认主题，仅在迁移时使用。
+    /// 曾被设为默认、现在仅作为可选项保留的内置主题。
     /// </summary>
-    private const string LegacyDefaultThemeId = "classisland.fluent";
+    private const string LegacyLiquidGlassThemeId = "classisland.liquidglass";
 
     /// <summary>
-    /// 默认主题迁移标记。写入后不再自动改动用户的主题选择。
+    /// 旧版本把液态玻璃设为默认时写下的迁移标记，只用于清理，不再参与判断。
     /// </summary>
-    public static readonly string DefaultThemeMigrationPath =
+    private static readonly string LegacyDefaultThemeMigrationPath =
         Path.Combine(CommonDirectories.AppConfigPath, "DefaultThemeMigration");
+
+    /// <summary>
+    /// 「取消液态玻璃默认」回滚标记。写入后不再自动改动用户的主题选择。
+    /// </summary>
+    public static readonly string LiquidGlassDefaultRollbackPath =
+        Path.Combine(CommonDirectories.AppConfigPath, "LiquidGlassDefaultRollback");
 
     public ObservableCollection<ThemeInfo> Themes { get; } = [];
 
@@ -97,10 +103,14 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
         if (EnabledThemes.Count == 0)
         {
             EnabledThemes.Add(DefaultThemeId);
+            // 全新安装没有经历过「液态玻璃被设为默认」的旧版本，配置里不会有需要回滚的痕迹，
+            // 但同样要落下回滚标记：否则用户以后在主题页主动选中液态玻璃（启用列表恰好只有它）时，
+            // 下次启动会被 RollbackLiquidGlassDefault 误判为旧版残留，强制改回 Fluent。
+            TryWriteLiquidGlassRollbackMarker();
         }
         else
         {
-            MigrateLegacyDefaultTheme();
+            RollbackLiquidGlassDefault();
         }
         EnabledThemes.CollectionChanged +=
             (_, _) => ConfigureFileHelper.SaveConfig(EnabledThemesPath, EnabledThemes);
@@ -115,33 +125,78 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
     }
 
     /// <summary>
-    /// 把旧版本的默认主题替换为新的默认主题。
+    /// 撤销旧版本「把液态玻璃设为默认」的一次性迁移。
     /// </summary>
     /// <remarks>
-    /// 只有当用户从未调整过主题（启用列表恰好是旧版默认值）时才替换，
-    /// 避免覆盖用户自己搭配的主题组合；迁移只做一次，用户之后换回旧主题也不会被改回去。
+    /// 旧版本会把从未调整过主题的配置从 classisland.fluent 改成 classisland.liquidglass，
+    /// 首次运行更是直接写入液态玻璃。只改代码里的默认值对这些已有配置无效，升级后
+    /// 看到的仍然是液态玻璃，所以要把「启用列表恰好只有液态玻璃」的配置回滚成默认主题。
+    /// 标记必须先写成功再改配置：否则写标记失败时，每次启动都会把用户后来主动选的
+    /// 液态玻璃又改回去。只做一次，之后用户主动选回液态玻璃不会再被干预。
     /// </remarks>
-    private void MigrateLegacyDefaultTheme()
+    private void RollbackLiquidGlassDefault()
     {
-        if (File.Exists(DefaultThemeMigrationPath))
+        if (File.Exists(LiquidGlassDefaultRollbackPath) || !TryWriteLiquidGlassRollbackMarker())
         {
             return;
         }
 
-        if (EnabledThemes.Count == 1 && EnabledThemes[0] == LegacyDefaultThemeId)
+        if (EnabledThemes.Count == 1 && EnabledThemes[0] == LegacyLiquidGlassThemeId)
         {
             EnabledThemes[0] = DefaultThemeId;
-            ConfigureFileHelper.SaveConfig(EnabledThemesPath, EnabledThemes);
-            Logger.LogInformation("已将默认主界面主题从 {} 迁移到 {}", LegacyDefaultThemeId, DefaultThemeId);
+            try
+            {
+                // 这里 EnabledThemes 的 CollectionChanged 还没订阅，必须显式落盘。
+                ConfigureFileHelper.SaveConfig(EnabledThemesPath, EnabledThemes);
+                Logger.LogInformation("已将默认主界面主题从 {} 回滚到 {}", LegacyLiquidGlassThemeId, DefaultThemeId);
+            }
+            catch (Exception ex)
+            {
+                // 内存里改了、磁盘上没改，本次会话看起来已经回滚。标记保持已写状态，
+                // 不删标记重试：磁盘故障恢复后用户可能已经主动选了液态玻璃，重试会把
+                // 用户自己的选择又改掉。液态玻璃现在是可选项，用户可在主题页自行换回。
+                Logger.LogWarning(ex, "回滚后的主题配置保存失败，本次不再重试");
+            }
+        }
+
+        // 旧迁移标记已经没有作用，顺手清掉，避免配置目录里留下无意义的残留文件。
+        try
+        {
+            if (File.Exists(LegacyDefaultThemeMigrationPath))
+            {
+                File.Delete(LegacyDefaultThemeMigrationPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "无法清理旧的主题迁移标记");
+        }
+    }
+
+    /// <summary>
+    /// 写入「已处理过液态玻璃默认回滚」标记。只有写成功才允许改动用户配置。
+    /// </summary>
+    private bool TryWriteLiquidGlassRollbackMarker()
+    {
+        if (File.Exists(LiquidGlassDefaultRollbackPath))
+        {
+            return true;
         }
 
         try
         {
-            File.WriteAllText(DefaultThemeMigrationPath, DateTimeOffset.Now.ToString("O"));
+            var directory = Path.GetDirectoryName(LiquidGlassDefaultRollbackPath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            File.WriteAllText(LiquidGlassDefaultRollbackPath, DateTimeOffset.Now.ToString("O"));
+            return true;
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "无法写入默认主题迁移标记，下次启动会再次尝试迁移");
+            Logger.LogWarning(ex, "无法写入主题回滚标记，跳过本次回滚以免反复改动用户选择");
+            return false;
         }
     }
 

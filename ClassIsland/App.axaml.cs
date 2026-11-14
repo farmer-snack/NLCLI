@@ -1340,7 +1340,9 @@ public partial class App : AppBase, IAppHost
         {
             return;
         }
-        IAppHost.GetService<SettingsWindowNew>().Open("about");
+        // 关于页已经整页移除。继续传 "about" 会命中 null 页面、静默什么都不做，
+        // 这里改为打开设置窗口的默认页，至少让菜单项有可见反馈。
+        IAppHost.GetService<SettingsWindowNew>().Open();
     }
 
     private void NativeMenuItemExit_OnClick(object? sender, EventArgs e)

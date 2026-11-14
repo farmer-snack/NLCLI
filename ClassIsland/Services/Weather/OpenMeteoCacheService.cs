@@ -31,10 +31,10 @@ public class OpenMeteoCacheEntry
     [JsonPropertyName("airQuality")] public OpenMeteoAirQuality? AirQuality { get; set; }
 
     /// <summary>
-    /// 缓存年龄。系统时间被回拨（或缓存来自另一台时区设置不同的机器）时
-    /// <see cref="DateTime.Now"/> 可能早于 <see cref="CachedAt"/>，差值为负。
-    /// 负年龄会绕过下面的 TTL 判断，让缓存永远被视为「新鲜」，页面再也不会联网刷新；
-    /// 界面上还会显示「-xx 分钟前」。这里统一钳到 0。
+    /// 缓存年龄。系统时间被回拨时 <see cref="DateTime.Now"/> 可能早于 <see cref="CachedAt"/>，
+    /// 差值为负；界面会显示「-xx 分钟前」，所以这里钳到 0。
+    /// 但钳到 0 并不能让 TTL 判断把「未来时间戳」的缓存判为过期（0 仍然小于 30 分钟），
+    /// 必须另用 <see cref="IsFromFuture"/> 显式强制刷新。
     /// </summary>
     [JsonIgnore]
     public TimeSpan Age
@@ -45,6 +45,13 @@ public class OpenMeteoCacheEntry
             return age < TimeSpan.Zero ? TimeSpan.Zero : age;
         }
     }
+
+    /// <summary>
+    /// 缓存写入时间晚于当前系统时间（时钟被回拨、或缓存文件里写死了未来时间）。
+    /// 这种缓存不能直接复用，否则页面会一直把它当成「刚刚更新」而不再联网。
+    /// </summary>
+    [JsonIgnore]
+    public bool IsFromFuture => CachedAt > DateTime.Now;
 }
 
 /// <summary>
@@ -87,9 +94,11 @@ public class OpenMeteoCacheService(ILogger<OpenMeteoCacheService> logger)
                 return null;
             }
 
-            if (entry.Version < OpenMeteoCacheEntry.CurrentVersion)
+            // 只丢低版本会放过「来自更新版本、结构已经不同」的缓存，
+            // 按当前模型反序列化后字段对不上，页面会拿到一片空白却以为命中了缓存。
+            if (entry.Version != OpenMeteoCacheEntry.CurrentVersion)
             {
-                _logger.LogInformation("Open-Meteo 缓存结构版本过旧（{} < {}），忽略缓存",
+                _logger.LogInformation("Open-Meteo 缓存结构版本不一致（{} != {}），忽略缓存",
                     entry.Version, OpenMeteoCacheEntry.CurrentVersion);
                 return null;
             }

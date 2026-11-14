@@ -15,6 +15,7 @@ using ClassIsland.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 using Avalonia.Controls;
+using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Services.SpeechService;
 using ClassIsland.Helpers;
 using ClassIsland.Platforms.Abstraction;
@@ -255,8 +256,7 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
     }
 
     /// <summary>
-    /// 执行挂起的延迟保存。定时器回调发生在后台线程，
-    /// 这里必须吞掉所有异常：Timer 回调里逃逸的异常会直接终止进程。
+    /// 执行挂起的延迟保存。定时器回调发生在后台线程。
     /// </summary>
     private void FlushPendingSave()
     {
@@ -273,6 +273,30 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
             return;
         }
 
+        // 序列化必须回到 UI 线程执行。Settings 上有大量 ObservableDictionary /
+        // ObservableCollection（提醒提供方、通知渠道、叠层、插件索引……），
+        // 用户在这 400ms 窗口里增删排序时，后台线程枚举集合会直接抛「集合已修改」；
+        // 这一次保存被吞掉，而 _pendingSaveNote 已经清空，后面没有新的属性变更
+        // 就不会再触发保存，改动会静默丢失。回到 UI 线程后序列化与集合修改天然串行。
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            TrySaveSettings(note);
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => TrySaveSettings(note));
+        }
+    }
+
+    /// <summary>
+    /// 在 UI 线程执行一次保存，并吞掉异常。
+    /// </summary>
+    /// <remarks>
+    /// 异常不能从 Timer 回调逃逸（会终止进程），也不能从 Dispatcher 回调逃逸
+    /// （会变成 UI 线程未处理异常）。
+    /// </remarks>
+    private void TrySaveSettings(string note)
+    {
         try
         {
             SaveSettings(note);

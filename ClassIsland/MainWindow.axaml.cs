@@ -1162,7 +1162,8 @@ public partial class MainWindow : Window, ITopmostEffectPlayer
     
     private void MenuItemAbout_OnClick(object sender, EventArgs e)
     {
-        App.GetService<SettingsWindowNew>().Open("about");
+        // 关于页已经整页移除，这里不再传 "about"（会命中 null 页面、点了没反应）。
+        App.GetService<SettingsWindowNew>().Open();
     }
 
     private void MenuItemDebugWelcomeWindow_OnClick(object sender, RoutedEventArgs e)

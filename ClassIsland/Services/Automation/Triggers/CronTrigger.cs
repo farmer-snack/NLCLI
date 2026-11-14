@@ -122,11 +122,14 @@ public class CronTrigger : TriggerBase<CronTriggerSettings>
             return;
         }
 
-        // 开启调试时间加速后，DebugTimeOffsetSeconds 每 50ms 就被改写一次。
-        // 每次都跟着重建 worker，旧 worker 活不过 50ms，永远睡不满一轮 ——
-        // cron 规则一条都不会触发，日志还会以每秒 20 条的速度增长。
-        // 加速期间时间本来就不可信，干脆沿用手上的 worker。
-        if (SettingsService.Settings.DebugTimeSpeed != 0)
+        // DebugTimeSpeed 的默认值就是 1.0（正常速度），只有不等于 1 才是加速/冻结。
+        // 加速时 DebugTimeOffsetSeconds 每 50ms 被改写一次，跟着重建 worker 会让旧
+        // worker 活不过 50ms，cron 一条都不触发，日志还会以每秒 20 条的速度增长。
+        // 但只屏蔽「加速期间的调试偏移」：TimeOffsetSeconds（设置页调时、自动校时）
+        // 的变化必须始终重建，否则 worker 还攥着按调整前算出的触发时刻，会重复触发
+        // 或漏掉跳过区间的时刻。写成 DebugTimeSpeed != 0 会把默认速度也一并屏蔽掉。
+        if (e.PropertyName == nameof(ClassIsland.Models.Settings.DebugTimeOffsetSeconds) &&
+            SettingsService.Settings.DebugTimeSpeed != 1)
         {
             return;
         }
@@ -179,10 +182,10 @@ public class CronTrigger : TriggerBase<CronTriggerSettings>
             }
             catch (Exception ex)
             {
-                // 纯粹为了打日志而多算的一次，不能因为它把 LoadCron 带崩。
-                // 表达式合法但算不出下一次触发（例如永不命中）时就是这条路。
+                // 纯粹为了打日志而多算的一次，不能因为它就不启动 worker。
+                // 这里以前直接 return，会把一个合法的 cron 表达式变成静默失效
+                // （只有一条 Warning，worker 根本没起来，也不会再重试）。
                 Logger.LogWarning(ex, "cron 表达式无法计算下次触发时间：{Expression}", Settings.CronExpression);
-                return;
             }
 
             _ = Task.Run(() => CronWorker(crontab, cts.Token), cts.Token);

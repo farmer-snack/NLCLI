@@ -330,16 +330,7 @@ public partial class App
         services.AddProfileTransferProvider<ClassWidgets2ImportProvider>("classisland.profileTransfer.import.classWidgets2", "从 Class Widgets 2 导入", ProfileTransferProviderType.Import);
         services.AddProfileTransferProvider("classisland.profileTransfer.export.cses", "导出到 CSES", ProfileTransferProviderType.Export, CsesExportHelper.CsesExportHandler, "\ue6cb");
         // Themes
-        services.AddXamlTheme(new Uri("avares://ClassIsland/XamlThemes/LiquidGlassTheme/Styles.axaml"), new ThemeManifest()
-        {
-            Id = "classisland.liquidglass",
-            Name = "液态玻璃",
-            Description = "受 Apple Liquid Glass 启发的玻璃质感外观，带有折射高光、亮边描边与柔和内阴影。",
-            Banner = "avares://ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png",
-            Author = "ClassIsland（移植自 lladlam 的 Liquid Flavored Glass）",
-            Url = "https://github.com/lladlam/ClassIsland-Theme-LFG",
-            VerticalSafeAreaPx = 20
-        });
+        // 液态玻璃只是主题页面里的一个可选项，默认仍是 Fluent（见 XamlThemeService.DefaultThemeId）。
         services.AddXamlTheme(new Uri("avares://ClassIsland/XamlThemes/ClassicTheme/Styles.axaml"), new ThemeManifest()
         {
             Id = "classisland.classic",
@@ -368,6 +359,16 @@ public partial class App
             Author = "ClassIsland",
             Url = "https://github.com/ClassIsland/ClassIsland",
             VerticalSafeAreaPx = 10
+        });
+        services.AddXamlTheme(new Uri("avares://ClassIsland/XamlThemes/LiquidGlassTheme/Styles.axaml"), new ThemeManifest()
+        {
+            Id = "classisland.liquidglass",
+            Name = "液态玻璃",
+            Description = "受 Apple Liquid Glass 启发的玻璃质感外观，带有折射高光、亮边描边与柔和内阴影。",
+            Banner = "avares://ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png",
+            Author = "ClassIsland（移植自 lladlam 的 Liquid Flavored Glass）",
+            Url = "https://github.com/lladlam/ClassIsland-Theme-LFG",
+            VerticalSafeAreaPx = 20
         });
         // 教程
         if (System.OperatingSystem.IsWindows() || System.OperatingSystem.IsMacOS() || System.OperatingSystem.IsLinux())

@@ -340,7 +340,15 @@ public class PluginLoadContext : AssemblyLoadContext
     private Assembly LoadPluginAssembly(string assemblyPath)
     {
         var result = PluginTypeCompatibility.Prepare(assemblyPath);
-        Info.CompatibilityMode = result.Mode;
+        // 兼容状态是「整个插件」的结论，只能单向变严格：只要有一个程序集需要兼容层，
+        // 这个插件就需要兼容层。插件里的纯逻辑库不引用 Avalonia，会被判定为 Native，
+        // 如果让每个程序集都无条件覆盖，用户点开某个功能、触发这个库加载时，
+        // 「需要兼容层」的标记会突然变回「原生支持」——列表和详情页会同时显示错误结论。
+        if (result.Mode == Core.Enums.PluginCompatibilityMode.CompatibilityLayer ||
+            Info.CompatibilityMode == Core.Enums.PluginCompatibilityMode.Unknown)
+        {
+            Info.CompatibilityMode = result.Mode;
+        }
         foreach (var note in result.Notes)
         {
             Info.AddCompatibilityNote(note);

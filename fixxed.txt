@@ -80,6 +80,36 @@
   * NotificationPriority 的插队比较违反反对称性（两个插队项互相返回 1），且最小堆下
     普通项反而排在插队项前面。→ 只在插队状态不同时返回 -1/1。
 
+补充（2026-11-14 二次审计：提醒重排链路）
+--------
+- 撤掉全局派发闸门。上一轮用 _pendingRescheduleCount 拦住所有派发、等票据收尾后再重排，
+  它有三个问题：① 全局计数，任意一条提醒移交/卸载期间所有新提醒最长 5 秒派发不出去；
+  ② 超时分支直接丢弃提醒；③ 收尾信号本身存在「永不完成」的路径（见下），闸门会长期为真。
+  → 改成按票据异步重排：取消回调只做同步清理，收尾等待放在独立 Task 里，不影响别的提醒；
+  超时则把请求标记为已结束并放行 CompletedToken，避免自动化行动永久挂起。
+- 取消回调是 async void，原 try 只包住 await，前置的集合修改、UpdateNotificationPlayingState、
+  重排入队全在 try 外，异常会经 Cancel() 抛给调用方（窗口卸载）或成为未观察异常。
+  → 整段收口；宿主集合与 IsNotificationsPlaying 统一 marshal 到 UI 线程（插件可从后台线程
+  调 ShowNotification，裸集合会被并发修改）。
+- 票据收尾信号必须无条件完成：ProcessNotificationSessionCore 的 finally 里
+  await soundsCts.CancelAsync() 一旦抛异常就跳过 TrySetResult，宿主永远等不到。
+  → 收尾整体兜底，TrySetResult 放到最外层 finally；遮罩正常结束但正文因时长为 0 被跳过时
+  也要给出信号（延迟兜底）。
+- PopRequests 用破坏性的 PoppedRequests.Remove(head) 判重：do-while 在同一轮里会多次检查
+  同一个链头，第一次 Remove 返回 true 并删掉记录，第二次返回 false，于是把已投递过的整条链
+  再投一遍 —— 链式提醒的链尾被播放两次。→ 只读 Contains 判重，跳过已有活跃票据的请求，
+  并删掉不可达的 `if (headPopped) return []`。
+- 先建票再判断消费者会留下永远不会播放的孤儿票据（一请求两票据）。→ 先确认有消费者再接单；
+  消费者抛异常时回滚 PlayingNotifications 并返回失败。
+- 外层 catch 丢弃当前票据时漏了状态转移与 CompletedToken：当前票据已出队、不在队列里，
+  外层 catch 引用不到它，宿主集合永久残留；队列里被 Cancel 的票据则会被宿主当成
+  「被移交」重新入队，过一会儿又弹出来。→ 用 currentTicket 跟踪当前票据，
+  统一走 DiscardNotificationTicket（先 State/CompletedToken，再 Cancel）。
+- RectanglesNotificationPanel.AnimateRevealProgress 的 setup（预留窗口渲染尺寸、
+  抑制后续行动画）原本在 try 之外，任一步抛异常都不会走恢复分支：窗口尺寸被永久锁死、
+  后续行的位移动画永久失效。→ setup 移入 try，异常路径同步归还租约；
+  ReserveWindowRenderSize 内部失败也会把已写入的尺寸租约还回去。
+
 ================================================
 [长期] 插件兼容层（旧版 Avalonia 插件在新宿主加载）
 ================================================
@@ -170,6 +200,13 @@ PluginService 与可观测性
 - 泛型约束未规范化：插件 `where T : 被改名类型` 的约束仍指向旧名字，类型加载即失败。
   → 遍历类型与方法的 GenericParameters.Constraints 一起改写。
 
+补充（2026-11-14 二次审计）
+--------
+- CompatibilityMode 只能单向变严格。它是对「整个插件」的结论，但原来每个被加载的程序集
+  都会覆盖一次：插件里的纯逻辑库不引用 Avalonia，会被判定为 Native，用户点开某个功能
+  触发该库加载时，「需要兼容层」的标记会突然变回「原生支持」，列表页和详情页同时显示错误值。
+  → 只有 CompatibilityLayer 或当前为 Unknown 时才写入，Native 不会把已有结论降级。
+
 ================================================
 [长期] 旧版本数据迁移（插件与备份）
 ================================================
@@ -213,6 +250,13 @@ PluginService 与可观测性
 - EnumerateWellKnownCandidates() 原来只 yield return current.Parent 的两级上级，
   唯独漏了 current 自己。Debug 构建和绿色便携版的数据目录就在 exe 同级，
   按原逻辑这两类部署永远扫不到旧数据。补 yield return current.FullName。
+
+补充（2026-11-14 二次审计）
+--------
+- 祖先目录误杀：原来用「双向包含」判断重复（IsSameOrNested），把「旧目录是当前目录的父级」
+  也一并跳过。而旧版把数据放在 %AppData%\ClassIsland、新版放在 %AppData%\ClassIsland\Data，
+  正是这种布局 —— 旧版插件永远不会被迁移过来。→ 只跳过「相同」与「旧目录位于当前目录内部」，
+  允许从父级目录迁移。
 
 启动后弹 Toast 汇总：复制几个插件、几个备份、跳过几个同名插件。
 
@@ -462,8 +506,17 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   ClearSpeechQueue 与播放循环的 finally 存在竞态，Cancel 已释放的 CTS 会抛
   ObjectDisposedException，补捕获。
 
+补充（2026-11-14 二次审计）
+--------
+- NotificationWorkerService.PlayingRequests 的遍历与增删不在同一线程：主计时器遍历它刷新
+  进度，处理器的增删可能从后台线程的续体恢复。→ 加锁 + 遍历前取快照，
+  避免「集合已修改」打掉整个定时器回调。
+- 票据取消兜底：取消时请求仍是 Playing 说明还有 processor 在跑，正常情况下它的 finally
+  会给宿主完成信号；但「遮罩正常结束、正文因时长为 0 被跳过」没有任何 processor 收尾，
+  宿主会一直等下去。→ 注册取消回调时挂一个 1.5 秒延迟兜底，到点强制放行。
+
 ================================================
-[长期] 液态玻璃主题（默认主题）
+[长期] 液态玻璃主题（现为可选项）
 ================================================
 
 需求（2026-11-12）：
@@ -512,6 +565,23 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
   要确认本主题的 StyleInclude / clip-host / 材质层三处引用还在。
 - 主题是本地新增文件，上游没有，不会冲突；冲突只可能来自 App.Services / XamlThemeService / Settings。
 
+变更（2026-11-14）：液态玻璃不再作为默认主题，仅作为主题页面可选项
+- 需求变更：不要把液态玻璃作为开箱默认外观，用户可在主题页自行启用。
+- XamlThemeService.DefaultThemeId 恢复 classisland.fluent，首次运行启用 Fluent。
+- 删除原来的「fluent → liquidglass」一次性迁移（MigrateLegacyDefaultTheme /
+  DefaultThemeMigrationPath），改为一次性回滚 RollbackLiquidGlassDefault：
+  启用列表恰好只有 classisland.liquidglass 的配置还原为 Fluent，写
+  LiquidGlassDefaultRollback 标记后不再干预用户选择。
+- 回滚标记必须先写成功再改配置：否则写标记失败时每次启动都会把用户后来
+  主动选的液态玻璃又改回去；旧的 DefaultThemeMigration 标记顺手清理。
+- App.Services.xaml.cs 里 classisland.liquidglass 注册移到内置主题列表末尾，
+  保持 classic / fluent / rectangles 的上游顺序，主题页仍可选择。
+- Settings 默认 MainWindowBackgroundMaterialType 恢复 Acrylic、
+  IsMainWindowBackgroundMaterialEnabled 恢复默认关闭（回到上游行为）；
+  「类液态玻璃」仍是窗口设置页画刷类型的可选项（枚举值 1）。
+- 取舍：只回滚「启用列表恰好只有液态玻璃」的配置，用户自己搭配的多主题
+  组合不动；回滚只做一次，之后主动选回液态玻璃不会再被改掉。
+
 ================================================
 [长期] 界面精简（去水印 / 移除更新页与关于页 / 去反诈提示）
 ================================================
@@ -553,6 +623,14 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
 - 上游新增「推广 / 提示」类页面或对话框时按同一口径处理：先问，不擅自扩大范围。
 - DevelopmentBuildAdorner.cs 与 MyWindow.ShowOssWatermark 已降级为兼容垫片（Obsolete），
   上游若删了引用的插件会少一类崩溃；这边不要删。
+
+补充（2026-11-14 二次审计）
+--------
+- 关于页删除后仍有三处硬编码 "about"：SettingsWindowNew.LaunchSettingsPage（集控禁止编辑
+  策略下会把设置窗口打开成空白页）、MainWindow.MenuItemAbout_OnClick、App 的原生菜单项
+  （FindPageInfo 返回 null → CoreNavigate 静默 return，点了没反应）。
+  → LaunchSettingsPage 回落 StartupSettingsPage，两个菜单入口改为 Open()（打开默认页）。
+  菜单项本身保留：macOS 的应用菜单需要那一项，直接删会缺应用名。
 
 ================================================
 [长期] 上游 Issues 修复
@@ -663,6 +741,26 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
     补检查 task.Exception，避免拿不存在的文件去安装。
   * MainWindow.UpdateTheme：提示 Toast 失败会中断 async void 后续的窗口位置 / 图层更新，
     补 try/catch。
+
+补充（2026-11-14 二次审计：设置落盘与插件下载）
+--------
+- SettingsService 的 400ms 防抖把序列化挪到了线程池 Timer 回调，而 Settings 上有大量
+  ObservableDictionary / ObservableCollection。UI 线程在这 400ms 窗口里增删排序这些集合时，
+  后台枚举会抛「集合已修改」，这一次保存被吞掉；_pendingSaveNote 已清空，后面没有新的属性
+  变更就不会再保存，用户改动静默丢失。→ 序列化回到 UI 线程（Dispatcher.Post），
+  与集合修改天然串行，异常仍然整体兜住。
+- ConfigureFileHelper：生成 .bak 的 File.Copy 与「读取 + 解析」共用一个 try。
+  磁盘满 / .bak 被占用时配置其实已经读成功，却被当成损坏：写 .corrupt、再退回旧备份、
+  用旧备份覆盖用户当前配置。→ 只把读取与解析放进 try，备份失败只记日志。
+- PluginMarketService.RequestDownloadPlugin 是 async void，try 从方法中段才开始：
+  解析市场项、启动 Sentry 事务、构造下载器（downloadUrl 为空时 DownloadBuilder 直接抛
+  ArgumentNullException）都可能让异常直接杀进程。→ 方法体拆成 async Task，外层统一兜底。
+- 下载完成回调前段（停表、Sentry 记速、错误分支）在 try 之外，而 Downloader 会把回调里的
+  异常静默吞掉：异常一发生 downloadError 就不会被写入，随后把「下载失败 / 安装包根本没落盘」
+  宣告成成功，提示用户重启，重启后插件并不存在。→ 整个回调包进 try；await 之后额外校验
+  .cipx 确实存在。
+- 暂停/推送提醒的公开入口不在 UI 线程时统一 marshal：ShowNotification / ShowChainedNotifications /
+  CancelAllNotifications / Register(Unregister)NotificationConsumer 都可能被插件从后台线程调用。
 
 ================================================
 [长期] 本地定制总表（fork 特有，同步时一律保留）

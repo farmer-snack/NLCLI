@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using ClassIsland.Core.Models.Weather;
 using ClassIsland.Helpers;
@@ -261,6 +262,13 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     private readonly ILogger<WeatherDetailSettingsPage> _logger;
 
     /// <summary>
+    /// 单飞护栏：页面的 OnLoaded 与刷新按钮都是 async void，双击刷新、或切页回来
+    /// 时两路请求会同时跑，既重复扣额度，又会交错覆盖页面数据。
+    /// 后来的调用直接跳过，不排队（旧结果本来也该被丢弃）。
+    /// </summary>
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+
+    /// <summary>
     /// Open-Meteo 专用 HttpClient：
     /// 开启 gzip、限制连接/整体超时，避免走全局 HttpClient 时既没有压缩也没有明确超时。
     /// </summary>
@@ -322,7 +330,10 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     /// 2. 缓存不到 30 分钟就直接用，不联网；
     /// 3. 超过 30 分钟才在后台刷新，刷新回来之前屏幕上仍然是本地数据。
     /// </summary>
-    public async Task LoadOpenMeteoAsync(bool forceRefresh = false)
+    public Task LoadOpenMeteoAsync(bool forceRefresh = false) =>
+        RunExclusiveAsync(() => LoadOpenMeteoCoreAsync(forceRefresh));
+
+    private async Task LoadOpenMeteoCoreAsync(bool forceRefresh)
     {
         OnPropertyChanged(nameof(CityName));
         UpdateQuotaText();
@@ -342,29 +353,73 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         var hasCache = cache?.Forecast != null;
         if (hasCache)
         {
-            ApplyOpenMeteo(cache!.Forecast!, cache.CachedAt);
-            if (cache.AirQuality != null)
+            try
             {
-                ApplyAirQuality(cache.AirQuality);
-            }
+                ApplyOpenMeteo(cache!.Forecast!, cache.CachedAt);
+                if (cache.AirQuality != null)
+                {
+                    ApplyAirQuality(cache.AirQuality);
+                }
 
-            OmCacheStatus = DescribeAge(cache.Age);
-            _logger.LogInformation("天气详情使用本地缓存，缓存时间：{}", cache.CachedAt);
+                OmCacheStatus = DescribeAge(cache.Age);
+                _logger.LogInformation("天气详情使用本地缓存，缓存时间：{}", cache.CachedAt);
+            }
+            catch (Exception ex)
+            {
+                // 旧缓存里某个数据块为 null 时整段渲染会抛；页面的 OnLoaded 是 async void，
+                // 异常会直接穿透出去。丢掉这份缓存并回退到联网，别让应用崩在这里。
+                _logger.LogWarning(ex, "渲染 Open-Meteo 缓存失败，丢弃缓存并重新拉取");
+                _cacheService.Clear();
+                hasCache = false;
+            }
         }
 
-        if (!forceRefresh && hasCache && cache!.Age < TimeSpan.FromMinutes(CacheTtlMinutes))
+        // 未来时间戳的缓存必须强制刷新：Age 钳成 0 后仍然小于 30 分钟，
+        // 不加这个判断就会一直把它当「刚刚更新」，页面永远不再联网。
+        if (!forceRefresh && hasCache && !cache!.IsFromFuture &&
+            cache.Age < TimeSpan.FromMinutes(CacheTtlMinutes))
         {
             // 半小时以内：直接用本地结果，不消耗任何请求次数。
             return;
         }
 
-        await RefreshAsync(latitude, longitude, hasCache);
+        await RefreshCoreAsync(latitude, longitude, hasCache);
     }
 
     /// <summary>
     /// 强制联网刷新（跳过 30 分钟判断），失败时保留屏幕上已有的数据。
     /// </summary>
-    public async Task RefreshAsync()
+    public Task RefreshAsync() => RunExclusiveAsync(RefreshCoreAsync);
+
+    /// <summary>
+    /// 单飞护栏 + 异常兜底。OnLoaded 和刷新按钮都是 async void：双击或切页回来
+    /// 会同时起两路请求，既重复扣额度，又会交错覆盖页面数据；任何未捕获异常
+    /// 还会直接终止进程。这里统一收口，后来的调用直接跳过。
+    /// </summary>
+    private async Task RunExclusiveAsync(Func<Task> action)
+    {
+        if (!await _refreshLock.WaitAsync(0))
+        {
+            _logger.LogDebug("已有一次天气详情刷新在进行中，跳过本次重复请求");
+            return;
+        }
+
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "天气详情加载/刷新失败");
+            OpenMeteoError = $"详细预报加载失败：{ex.Message}";
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    private async Task RefreshCoreAsync()
     {
         var latitude = _settingsService.Settings.WeatherLatitude;
         var longitude = _settingsService.Settings.WeatherLongitude;
@@ -374,7 +429,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             return;
         }
 
-        await RefreshAsync(latitude, longitude, OmDays.Count > 0);
+        await RefreshCoreAsync(latitude, longitude, OmDays.Count > 0);
     }
 
     /// <summary>
@@ -385,7 +440,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         !(Math.Abs(latitude) < 0.0001 && Math.Abs(longitude) < 0.0001) &&
         Math.Abs(latitude) <= 90 && Math.Abs(longitude) <= 180;
 
-    private async Task RefreshAsync(double latitude, double longitude, bool keepOldDataOnFailure)
+    private async Task RefreshCoreAsync(double latitude, double longitude, bool keepOldDataOnFailure)
     {
         IsOpenMeteoLoading = true;
         OpenMeteoError = null;
@@ -395,10 +450,25 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             var airQuality = await FetchAirQualityAsync(latitude, longitude);
             var now = DateTime.Now;
 
+            // 接口偶发返回 HTTP 200 的空壳（current/hourly/daily 全空）。写进缓存会让
+            // 页面空白整整 30 分钟，所以一律当成失败，保留屏幕上的旧数据。
+            if (!IsForecastUsable(forecast))
+            {
+                throw new InvalidOperationException("Open-Meteo 返回了不完整的预报数据");
+            }
+
             ApplyOpenMeteo(forecast, now);
             if (airQuality != null)
             {
                 ApplyAirQuality(airQuality);
+            }
+
+            // 空气质量接口失败时 FetchAirQualityAsync 返回 null。不能拿这个 null
+            // 覆盖缓存里上一次有效的 AQ，否则接下来 30 分钟 AQ 区块都是空的。
+            var cachedAirQuality = airQuality;
+            if (cachedAirQuality == null)
+            {
+                cachedAirQuality = _cacheService.Load(latitude, longitude)?.AirQuality;
             }
 
             OmCacheStatus = "刚刚更新";
@@ -409,7 +479,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                 Latitude = latitude,
                 Longitude = longitude,
                 Forecast = forecast,
-                AirQuality = airQuality
+                AirQuality = cachedAirQuality
             });
         }
         catch (Exception ex)
@@ -426,9 +496,13 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         }
     }
 
+    private static bool IsForecastUsable(OpenMeteoForecast? forecast) =>
+        forecast?.Current?.Values.Count > 0 &&
+        forecast.Hourly?.Time.Count > 0 &&
+        forecast.Daily?.Time.Count > 0;
+
     private async Task<OpenMeteoForecast> FetchForecastAsync(double latitude, double longitude)
     {
-        EnsureQuotaAvailable();
         var lat = latitude.ToString(CultureInfo.InvariantCulture);
         var lon = longitude.ToString(CultureInfo.InvariantCulture);
         var url = "https://api.open-meteo.com/v1/forecast"
@@ -439,8 +513,6 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                   + $"&minutely_15={Minutely15Variables}"
                   + "&timezone=auto&forecast_days=16&forecast_minutely_15=96";
 
-        _quotaService.Record();
-        UpdateQuotaText();
         return await GetJsonAsync<OpenMeteoForecast>(url);
     }
 
@@ -448,7 +520,6 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     {
         try
         {
-            EnsureQuotaAvailable();
             var lat = latitude.ToString(CultureInfo.InvariantCulture);
             var lon = longitude.ToString(CultureInfo.InvariantCulture);
             var url = "https://air-quality-api.open-meteo.com/v1/air-quality"
@@ -456,8 +527,6 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                       + $"&current={AirQualityVariables}"
                       + "&timezone=auto";
 
-            _quotaService.Record();
-            UpdateQuotaText();
             return await GetJsonAsync<OpenMeteoAirQuality>(url);
         }
         catch (Exception ex)
@@ -475,6 +544,13 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         Exception? last = null;
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            // 每次真正发请求前都要过一次额度：本方法内部会重试一次，只在 Fetch
+            // 入口检查/计数的话，重试会绕过拦截、也不计入已用额度。放在 try 外面，
+            // 额度耗尽时直接把原因冒泡出去，不再做无谓的重试。
+            EnsureQuotaAvailable();
+            _quotaService.Record();
+            UpdateQuotaText();
+
             var sw = Stopwatch.StartNew();
             try
             {
@@ -540,7 +616,10 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
 
     private void ApplyAirQuality(OpenMeteoAirQuality data)
     {
-        var current = data.Current;
+        // 接口把可选块显式返回成 null 时，属性上的 = new() 初始化器不会兜住
+        // （System.Text.Json 会直接把属性写成 null），后面解引用就是 NRE。
+        var current = data.Current ?? new OmBlock();
+        var units = data.CurrentUnits ?? new Dictionary<string, string>();
         OmAqiLevel = AqiLevel(current.Number("european_aqi"));
         OmAqi = new List<OmAqiItem>
         {
@@ -555,18 +634,35 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         };
 
         // 空气质量接口能给的字段全部列出来（花粉、沙尘、气溶胶等按地区可能为空）。
-        OmAqiAll = BuildFieldList(current, -1, data.CurrentUnits);
+        OmAqiAll = BuildFieldList(current, -1, units);
     }
 
     private void ApplyOpenMeteo(OpenMeteoForecast data, DateTime timestamp)
     {
-        var current = data.Current;
-        var daily = data.Daily;
-        var hourly = data.Hourly;
+        // 接口把可选块显式返回成 null 时属性初始化器不生效，逐个兜住，
+        // 否则缓存渲染路径上的一个空引用会在 async void 里穿透出去。
+        var current = data.Current ?? new OmBlock();
+        var daily = data.Daily ?? new OmBlock();
+        var hourly = data.Hourly ?? new OmBlock();
+        var minutely15 = data.Minutely15 ?? new OmBlock();
+        var currentUnits = data.CurrentUnits ?? new Dictionary<string, string>();
+        var hourlyUnits = data.HourlyUnits ?? new Dictionary<string, string>();
+        var dailyUnits = data.DailyUnits ?? new Dictionary<string, string>();
+        var minutely15Units = data.Minutely15Units ?? new Dictionary<string, string>();
+
+        // 请求用的是 timezone=auto，接口返回的时间是「目标城市」本地墙上时间，
+        // 而 DateTime.Now 是「系统」时区。查外地城市时两者会差好几个小时：
+        // 顶部指标退回到凌晨、未来小时被误剪掉、「今天」被标成昨天。
+        // 统一以 current.time（城市当前时刻）为基准；缺失时退回取数时刻。
+        // current.time 由 OmBlockJsonConverter 收进 Time，不进 Values，
+        // 所以不能用 current.Text("time")——那个恒为 null。
+        var cityNowText = current.Time.FirstOrDefault();
+        var cityNow = ParseTime(cityNowText ?? "") ?? timestamp;
+        var cityToday = cityNow.Date;
 
         // Open-Meteo 的 hourly 数组从当天 00:00 开始，索引 0 永远是凌晨。
         // 顶部「能见度/紫外线/日照」如果固定取索引 0，会一直显示凌晨的值。
-        var nowHour = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, DateTime.Now.Hour, 0, 0);
+        var nowHour = new DateTime(cityNow.Year, cityNow.Month, cityNow.Day, cityNow.Hour, 0, 0);
         var currentHourIndex = 0;
         for (var i = 0; i < hourly.Time.Count; i++)
         {
@@ -583,7 +679,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         OmCurrentTemp = F(current.Number("temperature_2m"), "0");
         OmCurrentText = currentCode is null ? "未知" : WeatherCodeHelper.GetText(currentCode.Value);
         OmCurrentEmoji = currentCode is null ? "" : WeatherCodeHelper.GetEmoji(currentCode.Value);
-        var currentTime = current.Text("time");
+        var currentTime = cityNowText;
         OmUpdatedAt = string.IsNullOrWhiteSpace(currentTime)
             ? $"数据时间 {timestamp:HH:mm}"
             : $"数据时间 {currentTime.Replace('T', ' ')}";
@@ -617,13 +713,13 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         };
 
         // 当前时刻的全部字段
-        OmCurrentAll = BuildFieldList(current, -1, data.CurrentUnits);
+        OmCurrentAll = BuildFieldList(current, -1, currentUnits);
 
         // ---- 每 15 分钟：未来 24 小时（96 条），每条都带完整字段 ----
         var minutes = new List<OmMinutelyItem>();
-        for (var i = 0; i < data.Minutely15.Time.Count; i++)
+        for (var i = 0; i < minutely15.Time.Count; i++)
         {
-            var time = ParseTime(data.Minutely15.Time[i]);
+            var time = ParseTime(minutely15.Time[i]);
             if (time is null)
             {
                 continue;
@@ -631,9 +727,9 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
 
             minutes.Add(new OmMinutelyItem(
                 time.Value.ToString("HH:mm"),
-                F(data.Minutely15.Number("temperature_2m", i), "0", "°"),
-                F(data.Minutely15.Number("precipitation", i), "0.0", "mm"),
-                BuildFieldList(data.Minutely15, i, data.Minutely15Units)));
+                F(minutely15.Number("temperature_2m", i), "0", "°"),
+                F(minutely15.Number("precipitation", i), "0.0", "mm"),
+                BuildFieldList(minutely15, i, minutely15Units)));
         }
 
         OmMinutes = minutes;
@@ -662,7 +758,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                 code is null ? "" : WeatherCodeHelper.GetEmoji(code.Value),
                 F(hourly.Number("temperature_2m", i), "0", "°"),
                 hourly.Int("precipitation_probability", i) is { } pop ? pop + "%" : "",
-                BuildFieldList(hourly, i, data.HourlyUnits));
+                BuildFieldList(hourly, i, hourlyUnits));
 
             var date = time.Value.Date;
             if (!hoursByDate.TryGetValue(date, out var list))
@@ -698,7 +794,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             hoursByDate.TryGetValue(date.Value.Date, out var dayHours);
 
             days.Add(new OmDayItem(
-                DayLabel(date.Value.Date),
+                DayLabel(date.Value.Date, cityToday),
                 date.Value.ToString("MM-dd"),
                 code is null ? "" : WeatherCodeHelper.GetEmoji(code.Value),
                 $"{F(min, "0", "°")} ~ {F(max, "0", "°")}",
@@ -707,13 +803,13 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                 F(uvMax, "0.0"),
                 code is null ? "未知" : WeatherCodeHelper.GetText(code.Value),
                 dayHours ?? [],
-                BuildFieldList(daily, i, data.DailyUnits),
-                date.Value.Date == DateTime.Today));
+                BuildFieldList(daily, i, dailyUnits),
+                date.Value.Date == cityToday));
         }
 
         OmDays = days;
-        OmFieldCountText = $"当前 {data.Current.Values.Count} 项 · 每小时 {data.Hourly.Values.Count} 项 · "
-                           + $"每天 {data.Daily.Values.Count} 项 · 15 分钟 {data.Minutely15.Values.Count} 项";
+        OmFieldCountText = $"当前 {current.Values.Count} 项 · 每小时 {hourly.Values.Count} 项 · "
+                           + $"每天 {daily.Values.Count} 项 · 15 分钟 {minutely15.Values.Count} 项";
     }
 
     /// <summary>
@@ -850,9 +946,9 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     private static DateTime? ParseTime(string value) =>
         DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var time) ? time : null;
 
-    private static string DayLabel(DateTime date)
+    private static string DayLabel(DateTime date, DateTime today)
     {
-        var offset = (date - DateTime.Today).Days;
+        var offset = (date - today).Days;
         return offset switch
         {
             0 => "今天",

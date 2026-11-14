@@ -382,6 +382,21 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
 
     public async void RequestDownloadPlugin(string id)
     {
+        try
+        {
+            await RequestDownloadPluginCore(id);
+        }
+        catch (Exception ex)
+        {
+            // 这是 async void：任何漏出来的异常都会变成进程级的未处理异常。
+            // 方法体内已经有一层 catch，这里兜住的是 try 之前的同步段
+            // （解析市场项、启动 Sentry 事务、构造下载器等都可能抛）。
+            Logger.LogError(ex, "下载插件 {} 时发生未处理的错误", id);
+        }
+    }
+
+    private async Task RequestDownloadPluginCore(string id)
+    {
         var item = ResolveMarketPlugin(id);
         var transaction = SentrySdk.StartTransaction("Download Plugin", "plugin.download");
         transaction.SetTag("plugin.id", id);
@@ -423,25 +438,29 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
         }
 
         var stopwatch = new Stopwatch();
+        var packagePath = Path.Combine(Services.PluginService.PluginsPkgRootPath, id + ".cipx");
         var downloadError = new Exception?[1];
         download.DownloadFileCompleted += (sender, args) =>
         {
-            stopwatch.Stop();
-            transaction.SetExtra("download.size", download.TotalFileSize);
-            var speed = stopwatch.Elapsed.TotalSeconds == 0
-                ? 0.0
-                : download.TotalFileSize / stopwatch.Elapsed.TotalSeconds;
-            transaction.SetExtra("download.bytesPerSecond", speed);
-            if (args.Error != null)
-            {
-                spanDownload.Finish(args.Error, SpanStatus.InternalError);
-                // 事件回调里抛异常 → 线程池未处理异常 → 进程直接退出。
-                downloadError[0] = args.Error;
-                return;
-            }
-
+            // Downloader 会静默吞掉这个回调里的异常（实测：回调抛异常时 StartAsync 仍正常返回）。
+            // 异常一旦发生而没人写 downloadError，后面就会把「下载失败 / 安装包根本没落盘」
+            // 当成成功：提示用户重启，重启后插件并不存在，全程没有任何错误提示。
+            // 所以整个回调体必须共用同一个 try，任何一步出错都要落到 downloadError。
             try
             {
+                stopwatch.Stop();
+                transaction.SetExtra("download.size", download.TotalFileSize);
+                var speed = stopwatch.Elapsed.TotalSeconds == 0
+                    ? 0.0
+                    : download.TotalFileSize / stopwatch.Elapsed.TotalSeconds;
+                transaction.SetExtra("download.bytesPerSecond", speed);
+                if (args.Error != null)
+                {
+                    downloadError[0] = args.Error;
+                    spanDownload.Finish(args.Error, SpanStatus.InternalError);
+                    return;
+                }
+
                 spanDownload.Finish(SpanStatus.Ok);
 
                 var spanValidateChecksum = transaction.StartChild("validate");
@@ -449,13 +468,21 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
                 spanValidateChecksum.Finish(SpanStatus.Ok);
 
                 var spanMoveToCache = transaction.StartChild("moveToCache");
-                File.Move(archive, Path.Combine(Services.PluginService.PluginsPkgRootPath, id + ".cipx"), true);
+                File.Move(archive, packagePath, true);
                 spanMoveToCache.Finish(SpanStatus.Ok);
             }
             catch (Exception ex)
             {
                 // 校验失败/磁盘满/文件被占用同样只能记下来。
                 downloadError[0] = ex;
+                try
+                {
+                    spanDownload.Finish(ex, SpanStatus.InternalError);
+                }
+                catch
+                {
+                    // Sentry 的 span 可能已经结束，这里失败不能影响错误记录本身。
+                }
             }
         };
         download.DownloadProgressChanged += (sender, args) =>
@@ -476,6 +503,12 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
             if (downloadError[0] != null)
             {
                 throw new InvalidOperationException($"无法下载插件 {id}：{downloadError[0].Message}", downloadError[0]);
+            }
+            if (!File.Exists(packagePath))
+            {
+                // 回调没报错但安装包不在，说明落盘环节被跳过了。不能当作成功，
+                // 否则用户会收到「重启以应用更改」而重启后什么都没装上。
+                throw new InvalidOperationException($"插件 {id} 下载完成但安装包未落盘：{packagePath}");
             }
             item.RestartRequired = true;
             if (MergedPlugins.TryGetValue(id, out var plugin))

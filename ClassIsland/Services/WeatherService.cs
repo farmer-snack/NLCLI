@@ -53,6 +53,14 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
     public bool IsPosUpdated { get; set; } = false;
 
+    /// <summary>
+    /// 串行化整条天气查询链路。构造期 fire-and-forget、定时器、设置页的
+    /// 选城市 / 取当前位置 / 连点刷新都会进入同一个方法，不串行化时两路
+    /// 请求会各自写同一批 Settings 属性与状态位，末次写入者获胜，
+    /// CityName 可能和 LastWeatherInfo 来自不同城市。
+    /// </summary>
+    private readonly SemaphoreSlim _queryLock = new(1, 1);
+
     public WeatherService(SettingsService settingsService, ILogger<WeatherService> logger, IRulesetService rulesetService, ILocationService locationService)
     {
         Logger = logger;
@@ -283,15 +291,31 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
     public async Task<WeatherQueryResult> QueryWeatherWithResultAsync()
     {
+        await _queryLock.WaitAsync();
+        try
+        {
+            return await QueryWeatherWithResultCoreAsync();
+        }
+        finally
+        {
+            _queryLock.Release();
+        }
+    }
+
+    private async Task<WeatherQueryResult> QueryWeatherWithResultCoreAsync()
+    {
         var result = new WeatherQueryResult();
         if (!IsPosUpdated && Settings.AutoRefreshWeatherLocation)
         {
-            IsPosUpdated = true;
             try
             {
                 var pos = await LocationService.GetLocationAsync();
                 Settings.WeatherLongitude = Math.Round(pos.Longitude, 4);
                 Settings.WeatherLatitude = Math.Round(pos.Latitude, 4);
+                // 只在定位成功后才锁存。以前在 await 之前就置位，开机时定位服务
+                // 未就绪、或权限被临时拒绝一次，就会永久停在默认 (0,0)，
+                // 本次会话再也不会重新自动定位。
+                IsPosUpdated = true;
             }
             catch (Exception exception)
             {

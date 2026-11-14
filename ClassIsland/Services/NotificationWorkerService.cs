@@ -45,6 +45,21 @@ public class NotificationWorkerService : INotificationWorkerService
     public ITopmostEffectPlayer TopmostEffectPlayer { get; }
 
     private List<(NotificationRequest request, bool overlay)> PlayingRequests { get; } = [];
+
+    /// <summary>
+    /// <see cref="PlayingRequests"/> 的同步锁。
+    /// </summary>
+    /// <remarks>
+    /// 这个列表在 UI 线程的主计时器里被遍历（刷新进度），而增删发生在提醒处理器里。
+    /// 处理器虽然多数时候由 UI 线程的消费者驱动，但票据取消、链式取消都可能从后台线程
+    /// 恢复续体，裸 <see cref="List{T}"/> 被并发修改会让遍历抛「集合已修改」。
+    /// </remarks>
+    private readonly object _playingRequestsLock = new();
+
+    /// <summary>
+    /// 票据取消后等待 processor 收尾的兜底时间。
+    /// </summary>
+    private static readonly TimeSpan CancellationSettledFallbackDelay = TimeSpan.FromSeconds(1.5);
     
     public NotificationWorkerService(ISpeechService speechService,
         IAudioService audioService, 
@@ -68,7 +83,12 @@ public class NotificationWorkerService : INotificationWorkerService
     private void LessonsServiceOnPostMainTimerTicked(object? sender, EventArgs e)
     {
         var now = ExactTimeService.GetCurrentLocalDateTime();
-        foreach (var (request, overlay) in PlayingRequests)
+        (NotificationRequest request, bool overlay)[] snapshot;
+        lock (_playingRequestsLock)
+        {
+            snapshot = PlayingRequests.ToArray();
+        }
+        foreach (var (request, overlay) in snapshot)
         {
             if (!overlay || request.OverlayContent is not {} content)
             {
@@ -128,13 +148,35 @@ public class NotificationWorkerService : INotificationWorkerService
             ? settings.NotificationEffectId
             : request.EffectId ?? SettingsService.Settings.NotificationEffectId;
 
-        var cancellationCompletedSource = new TaskCompletionSource();
+        var cancellationCompletedSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         cancellationTokenSource.Token.Register(() =>
         {
             if (request.State != NotificationState.Playing)
             {
                 cancellationCompletedSource.TrySetResult();
+                return;
             }
+
+            // 票据取消时请求仍是 Playing，说明还有 processor 在跑，正常情况下它的 finally 会完成这个信号。
+            // 但存在「遮罩正常结束、正文因为时长为 0 被直接跳过」这种没有任何 processor 收尾的路径，
+            // 一旦没人完成信号，宿主侧的等待就会一直挂着，之后这条提醒再也派发不出去。
+            // 这里挂一个延迟兜底：宁可让重排早一点，也不要让整条链路停摆。
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(CancellationSettledFallbackDelay).ConfigureAwait(false);
+                    if (cancellationCompletedSource.TrySetResult())
+                    {
+                        Logger.LogDebug("票据取消后迟迟没有收尾，已强制放行：{}", request.GetHashCode());
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 纯粹是兜底，失败也不该影响任何调用方。
+                    Logger.LogDebug(ex, "提醒票据取消兜底等待失败");
+                }
+            }, CancellationToken.None);
         });
         // 提醒音效的取消令牌，与整个提醒请求的取消令牌关联，
         // 使音效在整个提醒（遮罩+正文）播放完毕或被打断时才取消，而非在遮罩阶段结束时就取消。
@@ -228,7 +270,10 @@ public class NotificationWorkerService : INotificationWorkerService
         var duration = SetupNotificationSessionTiming(id, content, session);
         request.State = NotificationState.Playing;
         var tuple = (request, !isMask);
-        PlayingRequests.Add(tuple);
+        lock (_playingRequestsLock)
+        {
+            PlayingRequests.Add(tuple);
+        }
         Logger.LogTrace("[{id}] Start session, isMask={isMask}, duration={duration}", id, isMask, duration);
         try
         {
@@ -271,15 +316,42 @@ public class NotificationWorkerService : INotificationWorkerService
         }
         finally
         {
-            var playedTime = session.TimingStopwatch.Elapsed;
-            session.TimingStopwatch.Reset();
-            session.SessionPlayedTime += playedTime;
-            Logger.LogTrace("[{id}] END session, isMask={isMask}, playedTime={playedTime}", id, isMask, playedTime);
-            PlayingRequests.Remove(tuple);
-            if (cancellationToken.IsCancellationRequested)
+            try
             {
-                await soundsCts.CancelAsync();
-                cancellationCompletedSource.TrySetResult();
+                var playedTime = session.TimingStopwatch.Elapsed;
+                session.TimingStopwatch.Reset();
+                session.SessionPlayedTime += playedTime;
+                Logger.LogTrace("[{id}] END session, isMask={isMask}, playedTime={playedTime}", id, isMask, playedTime);
+                lock (_playingRequestsLock)
+                {
+                    PlayingRequests.Remove(tuple);
+                }
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await soundsCts.CancelAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        // 音效播放的取消回调由音频服务提供，抛异常不能连累下面的完成信号。
+                        Logger.LogWarning(ex, "取消提醒音效时发生错误");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "提醒会话收尾时发生错误");
+            }
+            finally
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    // 宿主靠这个信号把被打断的提醒重新入队。它必须在所有路径上完成：
+                    // 上面任何一步抛异常都会跳过它，结果就是这条提醒在没有报错的情况下
+                    // 既不再播放、也不通知等待方，等于凭空消失。
+                    cancellationCompletedSource.TrySetResult();
+                }
             }
         }
     }

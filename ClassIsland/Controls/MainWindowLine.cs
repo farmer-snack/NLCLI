@@ -538,17 +538,10 @@ public class MainWindowLine : ContentControl, INotificationConsumer
         UpdateSettingsSubscriptions(null);
         foreach (var ticket in _notificationPlayingTickets.ToArray())
         {
-            // 单条取消失败不能打断卸载清理：Cancel() 会同步跑宿主的退回回调，
-            // 插件注册的回调一旦抛异常，这里会把后续的队列清理、事件解绑全部跳过。
-            try
-            {
-                ticket.Cancel();
-                Logger.LogTrace("Cancelled ticket id={}, {}", ticket.GetHashCode(), ticket.Request);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "取消提醒票据 {ticketId} 时发生错误", ticket.GetHashCode());
-            }
+            // 这一行被卸载后不会再注册回提醒主机，被退回队列的请求没有消费者接手，
+            // 会一直躺在队列里；等待它的调用方（自动化行动、插件）也永远等不到完成。
+            // DiscardNotificationTicket 会先终结请求、再取消票据，宿主就不会重排。
+            DiscardNotificationTicket(ticket);
         }
         _notificationQueue.Clear();
         _notificationPlayingTickets.Clear();
@@ -913,7 +906,9 @@ public class MainWindowLine : ContentControl, INotificationConsumer
         {
             foreach (var ticket in notificationRequests)
             {
-                ticket.Cancel();
+                // 这里已经在卸载，票据不可能再播；必须终结请求而不是单纯取消，
+                // 否则宿主会把它们退回队列，等不到消费者的提醒会一直挂着。
+                DiscardNotificationTicket(ticket);
             }
             return;
         }
@@ -961,6 +956,9 @@ public class MainWindowLine : ContentControl, INotificationConsumer
 
         var notificationsShowed = false;
         CancellationTokenSource? stopNotificationSoundCts = null;
+        // 当前正在处理的票据。它一旦从 _notificationQueue 出队，就不在队列里了，
+        // 外层 catch 靠这个变量才能把它一起收尾。
+        NotificationPlayingTicket? currentTicket = null;
         try
         {
             if (_firstProcessNotificationsTime == DateTime.MinValue)
@@ -986,6 +984,7 @@ public class MainWindowLine : ContentControl, INotificationConsumer
                 // 首批提醒到这里才确定要播放，此时还没换过任何提醒内容，量到的行宽是干净的。
                 LockRowWidth();
                 var ticket = _notificationQueue.Dequeue();
+                currentTicket = ticket;
                 _notificationPlayingTickets.Add(ticket);
                 var request = CurrentNotificationRequest = ticket.Request;
                 var settings = ticket.Settings;
@@ -996,10 +995,11 @@ public class MainWindowLine : ContentControl, INotificationConsumer
                 Logger.LogInformation("处理通知请求：{} {}", request.MaskContent, request.OverlayContent);
                 var cancellationToken = request.CancellationTokenSource.Token;
 
-                PreProcessNotificationContent(mask);
-
                 try
                 {
+                    // 预处理也要放在单条兜底里：第三方提供方给出 null 或损坏的模板资源时，
+                    // 这一步会抛异常。放在 try 外面会击穿整个播放循环、把后面排队的正常提醒一起丢掉。
+                    PreProcessNotificationContent(mask);
                     if (request.MaskContent.Duration > TimeSpan.Zero && !cancellationToken.IsCancellationRequested)
                     {
                         PseudoClasses.Set(":mask-anim", false);
@@ -1041,6 +1041,14 @@ public class MainWindowLine : ContentControl, INotificationConsumer
                         await ticket.ProcessMask();
                         if (overlay is null || cancellationToken.IsCancellationRequested || overlay.Duration <= TimeSpan.Zero)
                         {
+                            // 有正文、但算出来的时长是 0（例如 provider 给了已经过去的 EndTime）时，
+                            // 正文阶段会被整个跳过，没有任何 processor 会把请求推进到 Completed。
+                            // 结果是通过 ShowNotificationAsync、自动化行动等待的调用方永远等不到完成信号。
+                            if (overlay != null && !cancellationToken.IsCancellationRequested)
+                            {
+                                request.State = NotificationState.Completed;
+                                request.CompletedTokenSource.Cancel();
+                            }
                             PseudoClasses.Set(":overlay-anim", true);
                             PseudoClasses.Set(":mask-in", false);
                             PseudoClasses.Set(":mask-out", true);
@@ -1070,26 +1078,10 @@ public class MainWindowLine : ContentControl, INotificationConsumer
                     // 主界面行宽会被永久锁死。
                     Logger.LogError(ex, "处理提醒 {notificationId} 时发生错误，跳过该条提醒", request.GetHashCode());
 
-                    // 但「跳过」不等于「不管」：宿主在票据取消回调里要等
-                    // CancellationCompletedCompletionSource 完成，才会把 _pendingRescheduleCount 降回去；
-                    // 而这个 TCS 只在请求状态不再是 Playing 时才会被 Set。
-                    // 状态停在 Playing 就往下走，会让 _pendingRescheduleCount 永久 > 0，
-                    // CanDispatchRequests 恒为 false —— 此后所有提醒都不再派发，只能重启程序。
-                    // 所以必须先把状态挪出 Playing，再取消票据，最后放行 Completed 等待者。
-                    try
-                    {
-                        if (request.State == NotificationState.Playing)
-                        {
-                            request.State = NotificationState.Cancelled;
-                        }
-
-                        ticket.Cancel();
-                        request.CompletedTokenSource.Cancel();
-                    }
-                    catch (Exception cleanupEx)
-                    {
-                        Logger.LogWarning(cleanupEx, "收尾出错的提醒 {notificationId} 时失败", request.GetHashCode());
-                    }
+                    // 但「跳过」不等于「不管」：必须先把状态挪出 Playing、放行完成信号，
+                    // 再取消票据。否则宿主会把它当成「被移交的提醒」重新入队，
+                    // 同一条坏提醒会立刻再弹一次，形成死循环。
+                    DiscardNotificationTicket(ticket);
                 }
 
                 if (_isUnloading)
@@ -1107,6 +1099,7 @@ public class MainWindowLine : ContentControl, INotificationConsumer
                 }
 
                 _notificationPlayingTickets.Remove(ticket);
+                currentTicket = null;
                 PullPendingNotifications();
 
                 if (_notificationQueue.Count == 0 && notificationsShowed)
@@ -1125,20 +1118,14 @@ public class MainWindowLine : ContentControl, INotificationConsumer
             // 走到这里说明循环本身被打断（取票、预处理、等退出动画等环节出错）。
             // 队列里剩下的提醒必须就地丢弃：否则它们要等下一次新提醒到来才被顺手播出来，
             // 用户会在几十分钟后突然看到一条早已过期的「上课提醒」。
-            Logger.LogError(ex, "提醒播放循环异常终止，已丢弃剩余 {Count} 条待播提醒", _notificationQueue.Count);
-            foreach (var pending in _notificationQueue.ToArray())
-            {
-                try
-                {
-                    pending.Cancel();
-                }
-                catch (Exception cancelEx)
-                {
-                    Logger.LogWarning(cancelEx, "丢弃残留提醒时取消票据失败");
-                }
-                _notificationPlayingTickets.Remove(pending);
-            }
-            _notificationQueue.Clear();
+            Logger.LogError(ex, "提醒播放循环异常终止，已丢弃剩余 {Count} 条待播提醒",
+                _notificationQueue.Count + (currentTicket == null ? 0 : 1));
+
+            // 统一走 DiscardLocalNotifications，并带上已经出队、不在队列里的当前票据：
+            // 任何「丢弃」都必须放行 CompletedToken，否则宿主会把它们当成被移交的提醒
+            // 重新入队，过一会儿又原样弹出来 —— 与这里的目的正好相反。
+            DiscardLocalNotifications(currentTicket);
+            currentTicket = null;
 
             // 伪类停在 mask-in/overlay-in 会让气泡以一个展开的空壳留在屏幕上。
             PseudoClasses.Set(":mask-anim", false);
@@ -1150,12 +1137,28 @@ public class MainWindowLine : ContentControl, INotificationConsumer
         }
         finally
         {
-            OverlayContent = null;
-            MaskContent = null;
-            _isOverlayOpen = false;
-            UnlockRowWidth();
             // 收尾动作本身也不能再抛异常：任何一步漏掉都会留下残余状态
-            // （提示音不停、Topmost 锁不释放导致窗口永久置顶）。
+            // （提示音不停、Topmost 锁不释放导致窗口永久置顶、行宽永久锁死）。
+            // 属性赋值会触发绑定通知，UnlockRowWidth / ReleaseTopmostLock 会操作窗口层级，
+            // 都可能抛异常；所以每一步单独兜底，不能让前一步的异常跳过后面的清理。
+            try
+            {
+                OverlayContent = null;
+                MaskContent = null;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "清空提醒内容时发生错误");
+            }
+            _isOverlayOpen = false;
+            try
+            {
+                UnlockRowWidth();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "解除主界面行宽锁定时发生错误");
+            }
             try
             {
                 if (stopNotificationSoundCts?.IsCancellationRequested == false)
@@ -1168,8 +1171,22 @@ public class MainWindowLine : ContentControl, INotificationConsumer
             {
                 Logger.LogWarning(ex, "停止提醒提示音时发生错误");
             }
-            _mainWindow?.ReleaseTopmostLock(TopmostLock);
-            _notificationVisibilityHost?.ReleaseTopmostLock(TopmostLock);
+            try
+            {
+                _mainWindow?.ReleaseTopmostLock(TopmostLock);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "释放主窗口置顶锁时发生错误");
+            }
+            try
+            {
+                _notificationVisibilityHost?.ReleaseTopmostLock(TopmostLock);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "释放通知窗口置顶锁时发生错误");
+            }
         }
     }
 
@@ -1177,33 +1194,50 @@ public class MainWindowLine : ContentControl, INotificationConsumer
     /// 丢弃本行已收到但还没播放的提醒。
     /// </summary>
     /// <remarks>
-    /// 必须在取消票据之前先把请求状态挪出 <see cref="NotificationState.Playing"/>：
-    /// 宿主是靠这个状态决定要不要完成 <c>CancellationCompletedCompletionSource</c> 的，
-    /// 状态卡在 Playing 会让宿主的待重排计数永远降不回去，之后所有提醒都不再派发。
+    /// 必须在取消票据之前先把请求状态挪出 <see cref="NotificationState.Playing"/>，
+    /// 并放行 <c>CompletedToken</c>：宿主是靠这两者决定要不要把提醒退回队列的，
+    /// 被丢弃的提醒一旦退回队列，会在下一条提醒到来时突然弹出来。
     /// </remarks>
-    private void DiscardLocalNotifications()
+    private void DiscardLocalNotifications(NotificationPlayingTicket? currentTicket = null)
     {
-        foreach (var pending in _notificationQueue.ToArray())
+        var pendingTickets = _notificationQueue.ToArray();
+        _notificationQueue.Clear();
+        foreach (var pending in pendingTickets)
         {
-            try
-            {
-                if (pending.Request.State == NotificationState.Playing)
-                {
-                    pending.Request.State = NotificationState.Cancelled;
-                }
-
-                pending.Cancel();
-                pending.Request.CompletedTokenSource.Cancel();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "丢弃待播提醒时取消失败");
-            }
-
-            _notificationPlayingTickets.Remove(pending);
+            DiscardNotificationTicket(pending);
         }
 
-        _notificationQueue.Clear();
+        if (currentTicket != null)
+        {
+            // 已经出队的那一条不在队列里，需要单独收尾。
+            DiscardNotificationTicket(currentTicket);
+        }
+    }
+
+    /// <summary>
+    /// 丢弃一条尚未播完的提醒票据。
+    /// </summary>
+    private void DiscardNotificationTicket(NotificationPlayingTicket ticket)
+    {
+        try
+        {
+            // 顺序不能反：先让宿主知道这条请求已经被终结（状态 + 完成信号），
+            // 再取消票据。反过来会在取消的瞬间触发一次「退回队列」的重排，
+            // 被丢弃的提醒随后又回到队列里，等到下一条提醒到来时才突然弹出来。
+            if (ticket.Request.State == NotificationState.Playing)
+            {
+                ticket.Request.State = NotificationState.Cancelled;
+            }
+
+            ticket.Request.CompletedTokenSource.Cancel();
+            ticket.Cancel();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "丢弃待播提醒时取消失败");
+        }
+
+        _notificationPlayingTickets.Remove(ticket);
     }
 
     private void PullPendingNotifications()

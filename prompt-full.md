@@ -664,6 +664,10 @@ export UPSTREAM_BRANCH_FB=master
 export PLATFORM="$PLATFORM"
 export WORK_DIR="$WORK_DIR"
 export EOL_NOISE="$EOL_NOISE"
+# 定制阶段标记：第 12 步①会把它改成 1，让 8.2 构建块在 NO_UPDATE / NO_OP_FALLBACK 下
+# 仍然真的编译一遍刚写的定制代码。每轮从 0 开始（本文件是 cat > 截断重写），
+# 避免上一轮遗留的 1 让本轮同步阶段误跑构建。
+export CUSTOM_PHASE=0
 # 这两条必须落盘：它们只在当前 shell 生效的话，下一个 shell 里 git push 照样会弹 GCM 窗口
 export GIT_TERMINAL_PROMPT=0
 export GCM_INTERACTIVE=never
@@ -2223,8 +2227,12 @@ echo "TARGET_PROJ=$TARGET_PROJ"
 
 ```
 source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
-[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
-[ "${FALLBACK_NOOP:-0}" = "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
+# CUSTOM_PHASE=1 表示这是第 12 步「定制阶段」在复用本块。此时即使官方无新提交、
+# 或回退分支与本地无差异，也必须真的编译一遍刚写的定制代码：否则 BUILD_RESULT
+# 永远落不了盘，12③ 的 `: "${BUILD_RESULT:?...}"` 会直接 FAIL，代理只能原地打转；
+# NO_OP_FALLBACK 更糟——会拿同步阶段那句「未执行」冒充定制构建结论。
+[ "${SYNC_VERDICT:-}" = "NO_UPDATE" ] && [ "${CUSTOM_PHASE:-0}" != "1" ] && { echo "SKIP: 官方无新提交（NO_UPDATE），跳过本块"; exit 0; }
+[ "${FALLBACK_NOOP:-0}" = "1" ] && [ "${CUSTOM_PHASE:-0}" != "1" ] && { echo "SKIP: 回退分支与本地无差异（NO_OP_FALLBACK），跳过本块"; exit 0; }
 : "${REPO_ROOT:?FAIL: REPO_ROOT 为空}" "${TARGET_PROJ:?FAIL: TARGET_PROJ 为空}"
 cd "$REPO_ROOT" || exit 1
 [ -f "$TARGET_PROJ" ] || { echo "FAIL: $TARGET_PROJ 不存在"; exit 1; }
@@ -3971,6 +3979,10 @@ if [ -z "${CUSTOM_BASE:-}" ]; then
 fi
 CUSTOM_BASE=${CUSTOM_BASE:-$(git rev-parse HEAD)}
 echo "export CUSTOM_BASE=$CUSTOM_BASE" >> /tmp/upstream-sync.env
+# 标记「已经进入定制阶段」。③要原样复用 8.2 的构建块，而那个块会因为
+# NO_UPDATE / NO_OP_FALLBACK 自我跳过；没有这个标记，BUILD_RESULT 不会落盘，
+# ③紧接着的 :? 断言就会 FAIL，定制流程卡死。
+echo "export CUSTOM_PHASE=1" >> /tmp/upstream-sync.env
 echo "CUSTOM_BASE=$(git rev-parse --short "$CUSTOM_BASE")（定制从这里开始）  UPSTREAM_SHORT=$UPSTREAM_SHORT"
 ```
 
@@ -4006,6 +4018,8 @@ printf '%s\n' '给设置页加自动重启开关' > /tmp/custom-title.txt
   同样禁止"糊过去"的六种手段（注释报错代码 / 空 `catch` / 关 `TreatWarningsAsErrors` /
   `#nullable disable` / 改 `TargetFramework` 绕过 / 删测试）。
 - **构建：把 8.2 的构建块原样再跑一次**（命令不要改，`FAST` 规则也不变），然后另存结果：
+  ① 已落盘 `CUSTOM_PHASE=1`，8.2 块会据此绕过「NO_UPDATE / NO_OP_FALLBACK 就退出」的判断，
+  真的编译一遍刚写的定制代码。不要 unset 它，也不要另起一个 `dotnet build`。
 
   > ⚠️ 8.2 那个块会**覆盖** `BUILD_RESULT`（它内部 `echo "export BUILD_RESULT=..." >> env`），
   > 这是预期的：同步阶段的结论早已写进 `action.txt` 并提交，不会被它改动；

@@ -126,9 +126,12 @@ public partial class SettingsWindowNew : ViewBase, IFANavigationPageFactory
         
         // TitleBar.TitleBarHitTestType = FATitleBarHitTestType.Complex;
 
+        // 关于页已经整页移除。以前在「禁止编辑设置」的集控策略下这里会默认跳到 "about"，
+        // 现在那个页面不存在了，继续指向它会让设置窗口打开后内容区一片空白。
+        // 保留默认启动页（常规），窗口会以只读状态显示。
         if (ManagementService.Policy.DisableSettingsEditing)
         {
-            LaunchSettingsPage = "about";
+            LaunchSettingsPage = StartupSettingsPage;
         }
 
         BuildNavigationMenuItems();

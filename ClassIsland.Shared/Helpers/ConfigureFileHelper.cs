@@ -74,15 +74,14 @@ public class ConfigureFileHelper
         }
 
         var backupPath = path + ".bak";
+        T? result;
         try
         {
+            // 这个 try 只包「读取 + 解析」。生成 .bak 是另一回事：磁盘满、备份文件被占用
+            // 都会让 File.Copy 抛异常，但那恰恰说明配置本身是完好的。
+            // 把两者放在一起会把一份完好的配置误判成损坏，进而用旧备份覆盖用户当前的设置。
             var json = File.ReadAllText(path);
-            var r = JsonSerializer.Deserialize<T>(json, SerializerOptions);
-            if (r == null)
-                return Activator.CreateInstance<T>();
-            if (backupEnabled.Value)
-                File.Copy(path, backupPath, true);
-            return r;
+            result = JsonSerializer.Deserialize<T>(json, SerializerOptions);
         }
         catch (Exception ex)
         {
@@ -95,10 +94,36 @@ public class ConfigureFileHelper
                 throw;
             Logger?.LogWarning(ex, "读取 JSON 文件 {} 失败，尝试加载备份", path);
             Errors.Add(new ConfigError(path, 0, false, ex));
-            var r = LoadConfig<T>(backupPath, false, true);
-            File.Copy(backupPath, path, true);
-            return r;
+            var backup = LoadConfig<T>(backupPath, false, true);
+            try
+            {
+                File.Copy(backupPath, path, true);
+            }
+            catch (Exception restoreEx)
+            {
+                // 恢复失败不该连累「已经成功读出的备份内容」。
+                Logger?.LogWarning(restoreEx, "用备份覆盖损坏的配置文件 {} 失败", path);
+            }
+            return backup;
         }
+
+        if (result == null)
+            return Activator.CreateInstance<T>();
+
+        if (backupEnabled.Value)
+        {
+            try
+            {
+                File.Copy(path, backupPath, true);
+            }
+            catch (Exception ex)
+            {
+                // 备份失败不能影响这次已经成功的读取。
+                Logger?.LogWarning(ex, "备份配置文件 {} 失败", path);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

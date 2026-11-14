@@ -363,86 +363,150 @@ public class RectanglesNotificationPanel : Panel
     private async Task AnimateRevealProgress()
     {
         var target = IsOpened ? 1 : 0;
-        var renderSizeReservation = CanAnimate && IsCentered && Math.Abs(RevealProgress - target) >= 0.01 &&
-                                    TopLevel.GetTopLevel(this) is MainWindow
-                                    {
-                                        ViewModel.IsEditMode: false,
-                                        ViewModel.IsWindowMode: false,
-                                        ViewModel.IsClosing: false
-                                    } window
-            ? ReserveWindowRenderSize(window)
-            : null;
-        var hostReservation = renderSizeReservation == null && CanAnimate && IsCentered &&
-                              Math.Abs(RevealProgress - target) >= 0.01
-            ? this.GetVisualAncestors().OfType<INotificationRenderSizeHost>().FirstOrDefault()
-                ?.ReserveRenderHeight(IsOpened
-                    ? (RectanglesNotificationBubble.BodyHeight + RectanglesNotificationBubble.TipLength) *
-                      (1 - Math.Clamp(RevealProgress, 0, 1)) * MainWindowScale
-                    : 0)
-            : null;
-        var suppressed = CanAnimate && WindowDockingLocation == 1 && Math.Abs(RevealProgress - target) >= 0.01
-            ? SuppressFollowingRowAnimations()
-            : [];
+        Action? renderSizeReservation = null;
+        IDisposable? hostReservation = null;
+        List<ImplicitAnimationCollection> suppressed = [];
+        // 所有资源申请都必须放在 try 里面：这几步会动窗口尺寸、动画优先级和组合动画集合，
+        // 主题切换/窗口关闭期间任何一步抛异常，原本写在 try 外的申请就成了永久租约
+        // （窗口尺寸锁死、后续行的位移动画永久失效）。
         try
         {
+            if (CanAnimate && IsCentered && Math.Abs(RevealProgress - target) >= 0.01 &&
+                TopLevel.GetTopLevel(this) is MainWindow
+                {
+                    ViewModel.IsEditMode: false,
+                    ViewModel.IsWindowMode: false,
+                    ViewModel.IsClosing: false
+                } window)
+            {
+                renderSizeReservation = ReserveWindowRenderSize(window);
+            }
+            if (renderSizeReservation == null && CanAnimate && IsCentered &&
+                Math.Abs(RevealProgress - target) >= 0.01)
+            {
+                hostReservation = this.GetVisualAncestors().OfType<INotificationRenderSizeHost>().FirstOrDefault()
+                    ?.ReserveRenderHeight(IsOpened
+                        ? (RectanglesNotificationBubble.BodyHeight + RectanglesNotificationBubble.TipLength) *
+                          (1 - Math.Clamp(RevealProgress, 0, 1)) * MainWindowScale
+                        : 0);
+            }
+            if (CanAnimate && WindowDockingLocation == 1 && Math.Abs(RevealProgress - target) >= 0.01)
+            {
+                suppressed = SuppressFollowingRowAnimations();
+            }
+
             await AnimateProgress(RevealProgressProperty, target,
                 IsOpened ? EntranceDuration : ExitDuration, IsOpened ? EntranceEasing : ExitEasing,
                 ref _revealCancellation);
         }
-        finally
+        catch
         {
-            if (suppressed.Count > 0 || renderSizeReservation != null || hostReservation != null)
+            // 动画没跑完就出错：同步归还已经申请的资源再抛出，不能等 Background 的 Post。
+            ReleaseRevealReservations(suppressed, renderSizeReservation, hostReservation, false);
+            throw;
+        }
+
+        ReleaseRevealReservations(suppressed, renderSizeReservation, hostReservation, true);
+    }
+
+    /// <summary>
+    /// 归还在 <see cref="AnimateRevealProgress"/> 里申请的窗口尺寸与动画抑制租约。
+    /// </summary>
+    private static void ReleaseRevealReservations(List<ImplicitAnimationCollection> suppressed,
+        Action? renderSizeReservation, IDisposable? hostReservation, bool post)
+    {
+        if (suppressed.Count == 0 && renderSizeReservation == null && hostReservation == null)
+        {
+            return;
+        }
+
+        void Release()
+        {
+            foreach (var animations in suppressed)
             {
-                // Restore after the final layout update; overlapping reminders keep their own suspension.
-                Dispatcher.UIThread.Post(() =>
+                if (OffsetAnimationSuppressions.TryGetValue(animations, out var suppression) &&
+                    --suppression.Count == 0)
                 {
-                    foreach (var animations in suppressed)
-                    {
-                        if (OffsetAnimationSuppressions.TryGetValue(animations, out var suppression) &&
-                            --suppression.Count == 0)
-                        {
-                            OffsetAnimationSuppressions.Remove(animations);
-                            suppression.Restore();
-                        }
-                    }
-                    renderSizeReservation?.Invoke();
-                    hostReservation?.Dispose();
-                }, DispatcherPriority.Background);
+                    OffsetAnimationSuppressions.Remove(animations);
+                    suppression.Restore();
+                }
             }
+            renderSizeReservation?.Invoke();
+            hostReservation?.Dispose();
+        }
+
+        if (post)
+        {
+            // 正常结束：等最后一次布局更新做完再恢复，避免恢复瞬间的尺寸抖动。
+            Dispatcher.UIThread.Post(Release, DispatcherPriority.Background);
+        }
+        else
+        {
+            Release();
         }
     }
 
     private Action ReserveWindowRenderSize(Window window)
     {
         var reservation = WindowRenderSizeReservations.GetValue(window, _ => new WindowRenderSizeReservation());
-        reservation.RenderSizeReservationLease ??= window.SetValue(
-            MainWindowStylesAssist.IsWindowRenderSizeReservedProperty, true, BindingPriority.Animation);
-        reservation.SizeToContentLease ??= window.SetValue(Window.SizeToContentProperty, SizeToContent.Manual,
-            BindingPriority.Animation);
-        reservation.Panels[this] = reservation.Panels.GetValueOrDefault(this) + 1;
-        var baseHeight = window.GetBaseValue(HeightProperty);
-        var contentHeight = baseHeight.HasValue ? baseHeight.Value : double.NaN;
-        if (!double.IsFinite(contentHeight) || contentHeight <= 0)
+        var leaseAdded = false;
+        try
         {
-            contentHeight = window.Content is Control content ? content.DesiredSize.Height : window.Bounds.Height;
-        }
-        var pendingHeight = reservation.Panels.Keys.Where(panel => panel.IsOpened && panel.IsCentered)
-            .Sum(panel => (RectanglesNotificationBubble.BodyHeight + RectanglesNotificationBubble.TipLength) *
-                          (1 - Math.Clamp(panel.RevealProgress, 0, 1)) * panel.MainWindowScale);
-        var height = Math.Min(window.MaxHeight, Math.Max(window.MinHeight, contentHeight + pendingHeight));
-        if (height > reservation.Height)
-        {
-            reservation.Height = height;
-            reservation.HeightLease?.Dispose();
-            // Keep the native surface stable while layout still follows the animated bubble height.
-            reservation.HeightLease = window.SetValue(HeightProperty, height, BindingPriority.Animation);
-        }
-        UpdateReservedWindowLayout(window);
-        return () =>
-        {
-            if (--reservation.Panels[this] == 0)
+            reservation.RenderSizeReservationLease ??= window.SetValue(
+                MainWindowStylesAssist.IsWindowRenderSizeReservedProperty, true, BindingPriority.Animation);
+            reservation.SizeToContentLease ??= window.SetValue(Window.SizeToContentProperty, SizeToContent.Manual,
+                BindingPriority.Animation);
+            reservation.Panels[this] = reservation.Panels.GetValueOrDefault(this) + 1;
+            leaseAdded = true;
+            var baseHeight = window.GetBaseValue(HeightProperty);
+            var contentHeight = baseHeight.HasValue ? baseHeight.Value : double.NaN;
+            if (!double.IsFinite(contentHeight) || contentHeight <= 0)
             {
-                reservation.Panels.Remove(this);
+                contentHeight = window.Content is Control content ? content.DesiredSize.Height : window.Bounds.Height;
+            }
+            var pendingHeight = reservation.Panels.Keys.Where(panel => panel.IsOpened && panel.IsCentered)
+                .Sum(panel => (RectanglesNotificationBubble.BodyHeight + RectanglesNotificationBubble.TipLength) *
+                              (1 - Math.Clamp(panel.RevealProgress, 0, 1)) * panel.MainWindowScale);
+            var height = Math.Min(window.MaxHeight, Math.Max(window.MinHeight, contentHeight + pendingHeight));
+            if (height > reservation.Height)
+            {
+                reservation.Height = height;
+                reservation.HeightLease?.Dispose();
+                // Keep the native surface stable while layout still follows the animated bubble height.
+                reservation.HeightLease = window.SetValue(HeightProperty, height, BindingPriority.Animation);
+            }
+            UpdateReservedWindowLayout(window);
+            return () =>
+            {
+                if (--reservation.Panels[this] == 0)
+                {
+                    reservation.Panels.Remove(this);
+                }
+                if (reservation.Panels.Count == 0)
+                {
+                    WindowRenderSizeReservations.Remove(window);
+                    reservation.HeightLease?.Dispose();
+                    reservation.SizeToContentLease?.Dispose();
+                    reservation.RenderSizeReservationLease?.Dispose();
+                    UpdateReservedWindowLayout(window);
+                }
+            };
+        }
+        catch
+        {
+            // 申请过程中失败（主题切换/窗口关闭时 UpdateReservedWindowLayout 可能抛）：
+            // 此时返回的释放闭包还不存在，已经写进窗口的尺寸租约必须就地归还，
+            // 否则窗口会一直保持 SizeToContent=Manual + 预留高度，尺寸彻底锁死。
+            if (leaseAdded && reservation.Panels.TryGetValue(this, out var count))
+            {
+                if (count <= 1)
+                {
+                    reservation.Panels.Remove(this);
+                }
+                else
+                {
+                    reservation.Panels[this] = count - 1;
+                }
             }
             if (reservation.Panels.Count == 0)
             {
@@ -450,9 +514,9 @@ public class RectanglesNotificationPanel : Panel
                 reservation.HeightLease?.Dispose();
                 reservation.SizeToContentLease?.Dispose();
                 reservation.RenderSizeReservationLease?.Dispose();
-                UpdateReservedWindowLayout(window);
             }
-        };
+            throw;
+        }
     }
 
     private static void UpdateReservedWindowLayout(Window window)

@@ -90,11 +90,16 @@ public static class LegacyDataMigrationHelper
                     continue;
                 }
 
-                // 当前目录自身、以及和当前目录有包含关系的路径都必须跳过：
-                // 否则会把当前数据目录再复制进它自己，或者把整棵父目录当成旧数据。
-                if (IsSameOrNested(normalized, currentRoot))
+                // 只跳过「相同」和「旧目录位于当前目录内部」两种情况：
+                // 前者是把数据复制给自己，后者会把当前数据目录的子目录当成旧版数据、
+                // 在复制时又把数据搬回自己身上。
+                // 反过来「当前目录位于旧目录内部」是真实存在的升级布局：
+                // 旧版把数据放在 %AppData%\ClassIsland，新版放在 %AppData%\ClassIsland\Data，
+                // 这种旧目录必须允许迁移，否则旧版本里的插件永远不会被带过来。
+                if (string.Equals(normalized, currentRoot, StringComparison.OrdinalIgnoreCase) ||
+                    IsAncestorOf(normalized, currentRoot))
                 {
-                    Log(log, $"跳过 {normalized}：与当前数据目录相同或存在包含关系");
+                    Log(log, $"跳过 {normalized}：与当前数据目录相同，或位于当前数据目录内部");
                     continue;
                 }
 
