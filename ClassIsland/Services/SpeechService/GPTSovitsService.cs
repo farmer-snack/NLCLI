@@ -106,11 +106,27 @@ public class GptSoVitsService : ISpeechService
 
     public void ClearSpeechQueue()
     {
-        _currentPlayInfo?.CancellationTokenSource.Cancel();
+        try
+        {
+            _currentPlayInfo?.CancellationTokenSource.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 当前条目正好在 ProcessPlayerList 的 finally 里被释放，属于正常竞态。
+        }
+
         while (PlayingQueue.Count > 0)
         {
             var playInfo = PlayingQueue.Dequeue();
-            playInfo.CancellationTokenSource.Cancel();
+            try
+            {
+                playInfo.CancellationTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // 同上。
+            }
+
             playInfo.CancellationTokenSource.Dispose();
         }
     }

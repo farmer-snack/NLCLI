@@ -100,23 +100,28 @@ public class AudioService(ILogger<AudioService> logger) : IAudioService
 
     private void RefreshDevicesIfNeeded()
     {
-        var now = DateTime.UtcNow;
-        if (now - _lastDeviceRefreshTime < DeviceRefreshInterval)
+        // 同步初始化路径与 Task.Run 初始化路径可能并发进来，
+        // SoundFlow 的设备枚举不是线程安全的，必须串行化。
+        lock (_audioPlaybackDeviceInitializeLock)
         {
-            return;
-        }
+            var now = DateTime.UtcNow;
+            if (now - _lastDeviceRefreshTime < DeviceRefreshInterval)
+            {
+                return;
+            }
 
-        _lastDeviceRefreshTime = now;
-        try
-        {
-            // 设备列表在引擎初始化时固化，不刷新的话，之后插入的耳机/显示器音响
-            // 根本不会出现在 PlaybackDevices 里，切换默认设备也读不到新设备。
-            AudioEngine.UpdateDevicesInfo();
-        }
-        catch (Exception ex)
-        {
-            // 刷新失败不能影响播放：继续用上一次的设备列表。
-            Logger.LogDebug(ex, "刷新音频设备列表失败");
+            _lastDeviceRefreshTime = now;
+            try
+            {
+                // 设备列表在引擎初始化时固化，不刷新的话，之后插入的耳机/显示器音响
+                // 根本不会出现在 PlaybackDevices 里，切换默认设备也读不到新设备。
+                AudioEngine.UpdateDevicesInfo();
+            }
+            catch (Exception ex)
+            {
+                // 刷新失败不能影响播放：继续用上一次的设备列表。
+                Logger.LogDebug(ex, "刷新音频设备列表失败");
+            }
         }
     }
 

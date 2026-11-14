@@ -458,6 +458,10 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   → 静态复用 HttpClient + 每请求 HttpRequestMessage 设置头；缓存 .tmp 原子替换；
   取消不再记错误日志。
 
+- 音频设备枚举与语音队列清理的并发保护：设备刷新串行化（SoundFlow 枚举非线程安全）；
+  ClearSpeechQueue 与播放循环的 finally 存在竞态，Cancel 已释放的 CTS 会抛
+  ObjectDisposedException，补捕获。
+
 ================================================
 [长期] 液态玻璃主题（默认主题）
 ================================================
