@@ -172,22 +172,39 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
                 download.DownloadProgressChanged +=
                     (sender, args) =>
                         PluginSourceDownloadProgress = (args.ProgressPercentage / total) + (i1 / total * 100.0);
+                var downloadError = new Exception?[1];
                 download.DownloadFileCompleted += (sender, args) =>
                 {
                     if (args.Error != null)
                     {
-                        throw new Exception($"无法加载插件源：{args.Error.Message}", args.Error);
-                    }
-                    var indexFolderPath = Path.Combine(Services.PluginService.PluginsIndexPath, indexInfo.Id);
-                    if (Directory.Exists(indexFolderPath))
-                    {
-                        Directory.Delete(indexFolderPath, true);
+                        // 事件回调里抛异常会一路逃到线程池，直接终止进程。
+                        // 记下来，交给 await 之后的统一出口处理。
+                        downloadError[0] = args.Error;
+                        return;
                     }
 
-                    Directory.CreateDirectory(indexFolderPath);
-                    ZipFile.ExtractToDirectory(archive, indexFolderPath);
+                    try
+                    {
+                        var indexFolderPath = Path.Combine(Services.PluginService.PluginsIndexPath, indexInfo.Id);
+                        if (Directory.Exists(indexFolderPath))
+                        {
+                            Directory.Delete(indexFolderPath, true);
+                        }
+
+                        Directory.CreateDirectory(indexFolderPath);
+                        ZipFile.ExtractToDirectory(archive, indexFolderPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        downloadError[0] = ex;
+                    }
                 };
                 await download.StartAsync();
+                if (downloadError[0] != null)
+                {
+                    throw new InvalidOperationException($"无法加载插件源 {indexInfo.Id}：{downloadError[0].Message}",
+                        downloadError[0]);
+                }
 
                 i++;
             }
@@ -406,6 +423,7 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
         }
 
         var stopwatch = new Stopwatch();
+        var downloadError = new Exception?[1];
         download.DownloadFileCompleted += (sender, args) =>
         {
             stopwatch.Stop();
@@ -417,17 +435,28 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
             if (args.Error != null)
             {
                 spanDownload.Finish(args.Error, SpanStatus.InternalError);
-                throw new Exception($"无法下载插件 {id}：{args.Error.Message}", args.Error);
+                // 事件回调里抛异常 → 线程池未处理异常 → 进程直接退出。
+                downloadError[0] = args.Error;
+                return;
             }
-            spanDownload.Finish(SpanStatus.Ok);
 
-            var spanValidateChecksum = transaction.StartChild("validate");
-            ChecksumHelper.VerifyChecksum(archive, md5);
-            spanValidateChecksum.Finish(SpanStatus.Ok);
+            try
+            {
+                spanDownload.Finish(SpanStatus.Ok);
 
-            var spanMoveToCache = transaction.StartChild("moveToCache");
-            File.Move(archive, Path.Combine(Services.PluginService.PluginsPkgRootPath, id + ".cipx"), true);
-            spanMoveToCache.Finish(SpanStatus.Ok);
+                var spanValidateChecksum = transaction.StartChild("validate");
+                ChecksumHelper.VerifyChecksum(archive, md5);
+                spanValidateChecksum.Finish(SpanStatus.Ok);
+
+                var spanMoveToCache = transaction.StartChild("moveToCache");
+                File.Move(archive, Path.Combine(Services.PluginService.PluginsPkgRootPath, id + ".cipx"), true);
+                spanMoveToCache.Finish(SpanStatus.Ok);
+            }
+            catch (Exception ex)
+            {
+                // 校验失败/磁盘满/文件被占用同样只能记下来。
+                downloadError[0] = ex;
+            }
         };
         download.DownloadProgressChanged += (sender, args) =>
         {
@@ -444,6 +473,10 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
             BindDownloadTasks();
             stopwatch.Start();
             await download.StartAsync(task.CancellationToken);
+            if (downloadError[0] != null)
+            {
+                throw new InvalidOperationException($"无法下载插件 {id}：{downloadError[0].Message}", downloadError[0]);
+            }
             item.RestartRequired = true;
             if (MergedPlugins.TryGetValue(id, out var plugin))
             {

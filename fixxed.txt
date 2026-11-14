@@ -66,6 +66,20 @@
 - SlideComponent.axaml 的写法不能退回 IsVisible：不可见元素不参与测量，这是根因。
 - 三处改动互相兜底，不要因为「某一层看起来没用到」就删掉。
 
+追加（2026-11-14）
+--------
+- 提醒队列的泄漏与上限（审计补充）
+  * PoppedRequests 只在「票据被取消」时移除；正常播完走的是 CompletedToken 回调，
+    只清 PlayingTickets，PoppedRequests 里的记录永久残留。同一条请求再次入队会被
+    PopRequests 当成「已弹出」直接丢弃，长时间运行还会持续占内存。
+    → CompletedToken 回调里一并 Remove。
+  * CancelAllNotifications 只从队列 Dequeue，不清理 EnqueuedRequests，这些请求之后
+    Add 永远返回 false、再也无法重新入队。→ 出队时同步 Remove。
+  * RequestQueue 没有上限，上游高频推送（cron 被反复重建）时无限积压。
+    → 上限 256，超限丢弃新请求并 Cancel 其 CompletedToken，避免调用方 await 永久挂起。
+  * NotificationPriority 的插队比较违反反对称性（两个插队项互相返回 1），且最小堆下
+    普通项反而排在插队项前面。→ 只在插队状态不同时返回 -1/1。
+
 ================================================
 [长期] 插件兼容层（旧版 Avalonia 插件在新宿主加载）
 ================================================
@@ -148,6 +162,13 @@ PluginService 与可观测性
   不要因为「看起来没用到」删掉。
 - PluginLoadContext 的宿主白名单（HostAssemblyNames）、框架前缀（SharedFrameworkPrefixes）、
   目录兜底、宿主复用兜底、原生库兜底，上游改加载逻辑时务必全部保留。
+
+追加（2026-11-14）
+--------
+- 缓存键补宿主完整版本：原来只用 Avalonia 主版本，12.0→12.1 升级后仍命中旧缓存，
+  里面可能引用新宿主中已经不存在或签名已变化的成员。→ 目录名加入 Avalonia 程序集版本号。
+- 泛型约束未规范化：插件 `where T : 被改名类型` 的约束仍指向旧名字，类型加载即失败。
+  → 遍历类型与方法的 GenericParameters.Constraints 一起改写。
 
 ================================================
 [长期] 旧版本数据迁移（插件与备份）
@@ -312,6 +333,23 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   冲突时直接取上游。
 - App.Services.xaml.cs 里天气详情相关注册行不能丢，丢了新页面直接消失。
 
+追加（2026-11-14）
+--------
+- 坐标与额度（审计补充）
+  * 按城市选择天气时 Settings.WeatherLatitude/Longitude 一直停留在 (0,0)：主界面走城市接口
+    看不出问题，详情页却拿 0,0 查几内亚湾。→ WeatherService 在 CityId 分支把城市坐标回填
+    Settings；详情页对 (0,0)/越界坐标直接提示并停止请求。
+  * 额度只展示不拦截：用完后照发请求，429 被当成普通失败，重试还会再打一次。
+    → 发请求前检查 Remaining，按分钟/小时/天给出明确原因。
+- 缓存 Age 为负：系统时间回拨时 DateTime.Now - CachedAt < 0，TTL 判断被绕过，缓存永远
+  「新鲜」，界面显示负数分钟。→ 负值钳到 0。
+- weather_code 缺失被当成 0（WMO 0 = 晴），页面显示晴天。→ 保留 null，显示「未知」。
+- 顶部能见度/紫外线/日照固定取 hourly 索引 0（当天 00:00），不是当前小时。
+  → 按时间找到当前小时索引。
+- 天气空引用补全：ForecastDaily / ForecastHourly / Aqi / Minutely / Alerts 在接口返回 null 时
+  会让提醒构造函数、规则处理器、WeatherComponent 抛 NRE；逐小时提醒的 Value 也补判空。
+- WeatherService.LoadData 是 async void，资源读取失败会直接终止进程，补 try/catch。
+
 ================================================
 [长期] 变量调试页
 ================================================
@@ -401,6 +439,24 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - Settings.cs / SettingsService.cs 的 HasMigratedNotificationAudioSettings 迁移逻辑，
   上游改这两个文件时必须保留。
 - EdgeTtsService 的系统 TTS 回退与中文语音选择，上游重写语音链路时别丢。
+
+追加（2026-11-14）
+--------
+- 音频设备生命周期（审计补充）
+  * TryInitializeDefaultPlaybackDeviceSafeAsync 初始化后立刻 Dispose 掉 RefCounted 的基础引用，
+    租约一归还计数就归零，设备每次播放结束都被销毁，连续播报每句都要重新初始化。
+    → 共享设备常驻，AudioService.Dispose 统一释放。
+  * AudioEngine.PlaybackDevices 是初始化快照，插拔耳机后永远读不到新设备。
+    → 每次取设备前按 2 秒节流调用 UpdateDevicesInfo()。
+  * PlayAudioAsync 的 CancellationToken.Register 未注销，每播一段就在请求的 CTS 上多挂
+    一个回调（连同 tcs/player 无法回收）。→ using 注销。
+- EdgeTTS 取消被当成合成失败：取消同样返回 false，会累加失败计数、触发熔断，还会用系统 TTS
+  把已取消的内容再念一遍。→ 先判 IsCancellationRequested 再报告失败。
+- EdgeTTS 缓存非原子写：中断会留下半截 mp3，File.Exists 命中后永远播放损坏文件。
+  → 写 .tmp 再 Move；回调只处理第一次。
+- GPT-SoVITS 每次朗读 new HttpClient（端口耗尽 / TIME_WAIT），缓存也不是原子写。
+  → 静态复用 HttpClient + 每请求 HttpRequestMessage 设置头；缓存 .tmp 原子替换；
+  取消不再记错误日志。
 
 ================================================
 [长期] 液态玻璃主题（默认主题）
@@ -584,6 +640,25 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
 - App.axaml.cs 的 ShutdownRequested 是关机保存的唯一入口，删了 #671 会复发。
 - ProfileSettingsWindow.axaml 的删除确认 Flyout 已移除，同步这个文件时注意冲突。
 - Settings 新增 IsClassPlanEnabled，旧 Settings.json 缺这个字段时默认 true，与以前行为一致。
+
+追加（2026-11-14）
+--------
+- 审计补充（cron / 集控 / 配置保存 / 下载回调）
+  * CronTrigger：取消与 InvokeAsync 之间有窗口，卸载后仍会补触发一次；Loaded 重复订阅
+    会让一次设置变更重建多个 worker。→ lambda 内再判 token；Loaded 先解绑再订阅。
+  * ComponentsService：集控拉取后只改内存里的 Versions.ComponentsVersion，不落盘，
+    每次启动都重新下载并覆盖；集控模式 SaveConfig 静默丢弃。→ 拉取后 SaveSettings()；
+    首次忽略时记一条日志说明原因。
+  * SettingsService：每次属性变更都整份序列化 + fsync 写盘，滑块/文本框会连续触发几十次。
+    → 400ms 防抖合并；定时器回调兜异常；PropertyChanged 的 PropertyName 可能为 null，
+    原来直接 Remove / GetProperty 会抛 ArgumentNullException。→ 空值直接返回。
+  * ConfigureFileHelper：解析失败时 .bak 只在解析成功后生成，损坏的原文件没有任何备份，
+    调用方回退默认值后立刻覆盖。→ 失败时先复制一份 .corrupt。
+  * 主题 / 插件市场 / 更新下载：DownloadFileCompleted 事件里 throw / 校验 / Move / 解压，
+    异常无人接住会终止进程。→ 记录到局部错误变量，await 后统一抛出；主题下载 await 后
+    补检查 task.Exception，避免拿不存在的文件去安装。
+  * MainWindow.UpdateTheme：提示 Toast 失败会中断 async void 后续的窗口位置 / 图层更新，
+    补 try/catch。
 
 ================================================
 [长期] 本地定制总表（fork 特有，同步时一律保留）

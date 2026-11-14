@@ -747,7 +747,16 @@ public partial class MainWindow : Window, ITopmostEffectPlayer
         if (ViewModel.Settings.IsMouseClickingEnabled)
         {
             ViewModel.Settings.IsMouseClickingEnabled = false;
-            await PlatformServices.DesktopToastService.ShowToastAsync("已禁用不支持的设置", "【启用鼠标点击】设置项目不再受到支持并已自动禁用，感谢您的支持与理解。");
+            // 提示失败（无通知权限、平台服务未注册）不该让 async void 把整个
+            // 主题刷新流程中断在半路，后面的窗口位置/图层更新都不会执行。
+            try
+            {
+                await PlatformServices.DesktopToastService.ShowToastAsync("已禁用不支持的设置", "【启用鼠标点击】设置项目不再受到支持并已自动禁用，感谢您的支持与理解。");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "显示「鼠标点击已禁用」提示失败");
+            }
         }
         
         UpdateWindowPos();

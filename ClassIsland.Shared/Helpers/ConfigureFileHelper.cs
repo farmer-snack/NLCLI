@@ -86,6 +86,11 @@ public class ConfigureFileHelper
         }
         catch (Exception ex)
         {
+            // 解析失败时必须先把原始文件留一份。调用方（尤其是 SettingsService）
+            // 拿到默认对象后会立刻保存，把整份配置覆盖成默认值；
+            // 而这里的 .bak 只在「解析成功」之后才生成，损坏的文件此前根本没有备份，
+            // 一次异常就会让用户的主题、课表、插件配置引用永久消失。
+            PreserveCorruptFile(path);
             if (!backupEnabled.Value || !File.Exists(backupPath))
                 throw;
             Logger?.LogWarning(ex, "读取 JSON 文件 {} 失败，尝试加载备份", path);
@@ -93,6 +98,28 @@ public class ConfigureFileHelper
             var r = LoadConfig<T>(backupPath, false, true);
             File.Copy(backupPath, path, true);
             return r;
+        }
+    }
+
+    /// <summary>
+    /// 把无法解析的配置文件复制一份到 <c>.corrupt</c>，供用户/支持人员手工恢复。
+    /// 复制失败不能影响原有的加载失败处理流程。
+    /// </summary>
+    private static void PreserveCorruptFile(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            File.Copy(path, path + ".corrupt", true);
+            Logger?.LogWarning("已将无法解析的配置文件备份到 {}", path + ".corrupt");
+        }
+        catch
+        {
+            // 备份失败时仍然要按原逻辑继续（抛异常或回退默认值）。
         }
     }
 
@@ -221,9 +248,21 @@ public class ConfigureFileHelper
 
     private static void WriteAllTextSafe(string path, string content)
     {
-        using var stream = new FileStream(path, FileMode.Create);
-        using var writer = new StreamWriter(stream);
-        writer.Write(content);
-        stream.Flush(true);
+        // 不能直接 FileMode.Create：它会先把目标文件截成 0 字节再逐块写入，
+        // 写盘途中崩溃、断电或进程被杀，磁盘上就只剩半截 JSON。
+        // 下次启动解析失败，而设置加载失败会静默回退到全默认值并立刻写回覆盖 ——
+        // 用户的主题、课表、插件配置引用会在一次意外断电后全部丢失。
+        // 先写同目录临时文件、落盘后再原子改名，目标文件在任何时刻都是
+        // 「完整的旧版本」或「完整的新版本」，不存在中间态。
+        var temp = path + ".tmp";
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(content);
+            writer.Flush();
+            stream.Flush(true);
+        }
+
+        File.Move(temp, path, true);
     }
 }

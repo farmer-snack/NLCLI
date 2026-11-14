@@ -411,17 +411,33 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
             if (args.Error != null)
             {
                 spanDownload.Finish(args.Error, SpanStatus.InternalError);
-                throw new Exception($"无法下载主题 {id}：{args.Error.Message}", args.Error);
+                // 这里是 Downloader 的事件回调，抛出去的异常没有任何 await 能接住，
+                // 会直接终止进程（表现为「下载主题时应用突然消失」）。
+                // 把错误挂到任务上，由下面的 await StartAsync / catch 统一处理。
+                Logger.LogError(args.Error, "无法下载主题 {ThemeId}", id);
+                task.Exception = args.Error;
+                return;
             }
-            spanDownload.Finish(SpanStatus.Ok);
 
-            var spanValidateChecksum = transaction.StartChild("validate");
-            ChecksumHelper.VerifyChecksum(archive, md5);
-            spanValidateChecksum.Finish(SpanStatus.Ok);
+            // 校验、改名同样可能失败（磁盘满、文件被占用、校验不匹配），
+            // 事件回调里一律不能抛。
+            try
+            {
+                spanDownload.Finish(SpanStatus.Ok);
 
-            var spanMoveToCache = transaction.StartChild("moveToCache");
-            File.Move(archive, destFileName, true);
-            spanMoveToCache.Finish(SpanStatus.Ok);
+                var spanValidateChecksum = transaction.StartChild("validate");
+                ChecksumHelper.VerifyChecksum(archive, md5);
+                spanValidateChecksum.Finish(SpanStatus.Ok);
+
+                var spanMoveToCache = transaction.StartChild("moveToCache");
+                File.Move(archive, destFileName, true);
+                spanMoveToCache.Finish(SpanStatus.Ok);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "主题 {ThemeId} 下载完成后的校验/落盘失败", id);
+                task.Exception = ex;
+            }
         };
         download.DownloadProgressChanged += (sender, args) =>
         {
@@ -432,6 +448,12 @@ public class XamlThemeService : ObservableRecipient, IXamlThemeService
             BindDownloadTasks();
             stopwatch.Start();
             await download.StartAsync(task.CancellationToken);
+            // 事件回调里的错误只写到了 task.Exception，StartAsync 本身可能正常返回。
+            // 不在这里补一次检查，就会拿着一个不存在的文件去 InstallTheme。
+            if (task.Exception != null)
+            {
+                throw new InvalidOperationException($"主题 {id} 下载失败：{task.Exception.Message}", task.Exception);
+            }
             if (!Themes.Any(x => x.Manifest.Id == id && EnabledThemes.Contains(id)))
             {
                 InstallTheme(destFileName);

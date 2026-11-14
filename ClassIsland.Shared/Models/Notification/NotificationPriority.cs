@@ -43,10 +43,14 @@ public class NotificationPriority : IComparable
         {
             return -1;
         }
-        
-        if (IsPriorityOverride)
+
+        // PriorityQueue 是最小堆，Dequeue 先出「比较结果更小」的那个，
+        // 所以插队项必须返回 -1 才能排到最前面。原来无条件 return 1 等于把紧急提醒
+        // 排到了所有普通提醒之后 —— 队列里积压 N 条普通提醒时，紧急通知要等它们全播完。
+        // 同时两个插队项互相比较也必须给出确定结果，否则违反反对称性，堆序不可靠。
+        if (IsPriorityOverride != priority.IsPriorityOverride)
         {
-            return 1;
+            return IsPriorityOverride ? -1 : 1;
         }
 
         // if (IsNotificationPlayed && !priority.IsNotificationPlayed)

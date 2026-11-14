@@ -59,12 +59,21 @@ public partial class WeatherForecastNotificationProvider : UserControl, INotifyP
 
     private void BuildDays()
     {
-        var daily = Info.ForecastDaily;
-        var count = Math.Min(DayCount, Math.Min(daily.Weather.Value.Count, daily.Temperature.Value.Count));
+        // 接口在字段缺失时会把这些集合留成 null（StatusValueBase.Value 声明为 default!），
+        // 直接取 .Count 会在构造提醒时抛 NullReferenceException。
+        // 这里是在提醒提供方的构造函数里，崩掉的不只是天气卡片，而是整条提醒链路。
+        var weather = Info.ForecastDaily?.Weather?.Value;
+        var temperature = Info.ForecastDaily?.Temperature?.Value;
+        if (weather == null || temperature == null)
+        {
+            return;
+        }
+
+        var count = Math.Min(DayCount, Math.Min(weather.Count, temperature.Count));
         for (var i = 0; i < count; i++)
         {
-            var temperature = daily.Temperature.Value[i];
-            Days.Add(new DayForecastItem(DayLabel(i), daily.Weather.Value[i], temperature.From, temperature.To));
+            var item = temperature[i];
+            Days.Add(new DayForecastItem(DayLabel(i), weather[i], item.From, item.To));
         }
     }
 

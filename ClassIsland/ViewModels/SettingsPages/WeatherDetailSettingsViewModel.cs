@@ -329,6 +329,14 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
 
         var latitude = _settingsService.Settings.WeatherLatitude;
         var longitude = _settingsService.Settings.WeatherLongitude;
+        if (!IsLocationUsable(latitude, longitude))
+        {
+            // 从未定位、也没选过城市时，设置里就是默认的 (0,0)。
+            // 直接拿它去请求会把「几内亚湾海面」的天气显示成用户所在地的天气，
+            // 而且每次打开页面都白白消耗一次额度。
+            OpenMeteoError = "尚未获取到位置信息，请先在天气设置中定位或选择城市。";
+            return;
+        }
 
         var cache = _cacheService.Load(latitude, longitude);
         var hasCache = cache?.Forecast != null;
@@ -358,9 +366,24 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     /// </summary>
     public async Task RefreshAsync()
     {
-        await RefreshAsync(_settingsService.Settings.WeatherLatitude,
-            _settingsService.Settings.WeatherLongitude, OmDays.Count > 0);
+        var latitude = _settingsService.Settings.WeatherLatitude;
+        var longitude = _settingsService.Settings.WeatherLongitude;
+        if (!IsLocationUsable(latitude, longitude))
+        {
+            OpenMeteoError = "尚未获取到位置信息，请先在天气设置中定位或选择城市。";
+            return;
+        }
+
+        await RefreshAsync(latitude, longitude, OmDays.Count > 0);
     }
+
+    /// <summary>
+    /// 判断坐标是否已经真实获取过。设置里的默认值是 (0,0)，
+    /// 这个坐标附近没有城市，拿它查到的天气与用户无关。
+    /// </summary>
+    private static bool IsLocationUsable(double latitude, double longitude) =>
+        !(Math.Abs(latitude) < 0.0001 && Math.Abs(longitude) < 0.0001) &&
+        Math.Abs(latitude) <= 90 && Math.Abs(longitude) <= 180;
 
     private async Task RefreshAsync(double latitude, double longitude, bool keepOldDataOnFailure)
     {
@@ -405,6 +428,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
 
     private async Task<OpenMeteoForecast> FetchForecastAsync(double latitude, double longitude)
     {
+        EnsureQuotaAvailable();
         var lat = latitude.ToString(CultureInfo.InvariantCulture);
         var lon = longitude.ToString(CultureInfo.InvariantCulture);
         var url = "https://api.open-meteo.com/v1/forecast"
@@ -424,6 +448,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
     {
         try
         {
+            EnsureQuotaAvailable();
             var lat = latitude.ToString(CultureInfo.InvariantCulture);
             var lon = longitude.ToString(CultureInfo.InvariantCulture);
             var url = "https://air-quality-api.open-meteo.com/v1/air-quality"
@@ -480,6 +505,28 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         throw new InvalidOperationException($"请求 Open-Meteo 失败：{last?.Message}", last);
     }
 
+    /// <summary>
+    /// 发请求前确认免费额度还没用完。以前这里只把剩余次数显示在页面上，
+    /// 用完之后仍然照发，接口返回 429，页面只显示一句「请求失败」，用户完全不知道
+    /// 是额度耗尽。更糟的是每次失败还会按重试逻辑再打一次，把情况弄得更糟。
+    /// </summary>
+    private void EnsureQuotaAvailable()
+    {
+        var quota = _quotaService.Current;
+        if (quota.Remaining > 0)
+        {
+            return;
+        }
+
+        var reason = quota.MinuteRemaining <= 0
+            ? "本分钟"
+            : quota.HourRemaining <= 0
+                ? "本小时"
+                : "今天";
+        throw new InvalidOperationException(
+            $"{reason}的 Open-Meteo 免费请求额度已用尽，请稍后再试（额度会在滚动窗口内自动恢复）。");
+    }
+
     private void UpdateQuotaText()
     {
         var quota = _quotaService.Current;
@@ -517,10 +564,25 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         var daily = data.Daily;
         var hourly = data.Hourly;
 
-        var currentCode = current.Int("weather_code") ?? 0;
+        // Open-Meteo 的 hourly 数组从当天 00:00 开始，索引 0 永远是凌晨。
+        // 顶部「能见度/紫外线/日照」如果固定取索引 0，会一直显示凌晨的值。
+        var nowHour = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, DateTime.Now.Hour, 0, 0);
+        var currentHourIndex = 0;
+        for (var i = 0; i < hourly.Time.Count; i++)
+        {
+            if (ParseTime(hourly.Time[i]) == nowHour)
+            {
+                currentHourIndex = i;
+                break;
+            }
+        }
+
+        // 不能用 weather_code ?? 0：0 在 WMO 编码里是「晴」，
+        // 接口没返回这个字段时页面会显示成晴天，比显示「未知」错得更离谱。
+        var currentCode = current.Int("weather_code");
         OmCurrentTemp = F(current.Number("temperature_2m"), "0");
-        OmCurrentText = WeatherCodeHelper.GetText(currentCode);
-        OmCurrentEmoji = WeatherCodeHelper.GetEmoji(currentCode);
+        OmCurrentText = currentCode is null ? "未知" : WeatherCodeHelper.GetText(currentCode.Value);
+        OmCurrentEmoji = currentCode is null ? "" : WeatherCodeHelper.GetEmoji(currentCode.Value);
         var currentTime = current.Text("time");
         OmUpdatedAt = string.IsNullOrWhiteSpace(currentTime)
             ? $"数据时间 {timestamp:HH:mm}"
@@ -535,9 +597,9 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                           + $"今日 {F(low, "0", "°")} ~ {F(high, "0", "°")} · {OmSunTimes}";
 
         // 顶部常用指标（其余字段在「当前全部数据」里）
-        var visibility = hourly.Number("visibility", 0);
-        var uv = hourly.Number("uv_index", 0);
-        var sunshine = hourly.Number("sunshine_duration", 0);
+        var visibility = hourly.Number("visibility", currentHourIndex);
+        var uv = hourly.Number("uv_index", currentHourIndex);
+        var sunshine = hourly.Number("sunshine_duration", currentHourIndex);
         OmMetrics = new List<OmMetricItem>
         {
             new("湿度", F(current.Number("relative_humidity_2m"), "0", "%")),
@@ -578,7 +640,6 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         SelectedMinute = minutes.FirstOrDefault();
 
         // ---- 逐小时：先剪掉已经过去的小时，再按自然日分组 ----
-        var nowHour = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, DateTime.Now.Hour, 0, 0);
         var hoursByDate = new Dictionary<DateTime, List<OmHourItem>>();
         for (var i = 0; i < hourly.Time.Count; i++)
         {
@@ -594,11 +655,11 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                 continue;
             }
 
-            var code = hourly.Int("weather_code", i) ?? 0;
+            var code = hourly.Int("weather_code", i);
             var isNow = time.Value == nowHour;
             var item = new OmHourItem(
                 isNow ? "现在" : time.Value.ToString("HH时"),
-                WeatherCodeHelper.GetEmoji(code),
+                code is null ? "" : WeatherCodeHelper.GetEmoji(code.Value),
                 F(hourly.Number("temperature_2m", i), "0", "°"),
                 hourly.Int("precipitation_probability", i) is { } pop ? pop + "%" : "",
                 BuildFieldList(hourly, i, data.HourlyUnits));
@@ -623,7 +684,7 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                 continue;
             }
 
-            var code = daily.Int("weather_code", i) ?? 0;
+            var code = daily.Int("weather_code", i);
             var max = daily.Number("temperature_2m_max", i);
             var min = daily.Number("temperature_2m_min", i);
             var pop = daily.Int("precipitation_probability_max", i);
@@ -639,12 +700,12 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
             days.Add(new OmDayItem(
                 DayLabel(date.Value.Date),
                 date.Value.ToString("MM-dd"),
-                WeatherCodeHelper.GetEmoji(code),
+                code is null ? "" : WeatherCodeHelper.GetEmoji(code.Value),
                 $"{F(min, "0", "°")} ~ {F(max, "0", "°")}",
                 precipText,
                 windText,
                 F(uvMax, "0.0"),
-                WeatherCodeHelper.GetText(code),
+                code is null ? "未知" : WeatherCodeHelper.GetText(code.Value),
                 dayHours ?? [],
                 BuildFieldList(daily, i, data.DailyUnits),
                 date.Value.Date == DateTime.Today));

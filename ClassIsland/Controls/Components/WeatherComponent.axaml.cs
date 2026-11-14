@@ -42,7 +42,9 @@ public partial class WeatherComponent : ComponentBase<WeatherComponentSettings>
 
     private void UpdateAqiInfo()
     {
-        AqiLevel = SettingsService.Settings.LastWeatherInfo.Aqi.AqiLevel;
+        // LastWeatherInfo 来自 Settings.json 反序列化，接口/旧配置里 aqi 可能是 null。
+        // 组件在每次天气更新时都会走这里，NRE 会直接把 UI 线程打断。
+        AqiLevel = SettingsService.Settings.LastWeatherInfo.Aqi?.AqiLevel ?? 0;
     }
 
 

@@ -98,7 +98,10 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
             return false;
         }
 
-        var baseTime = (settings.IsRemainingTime ? -1.0 : 1.0) * Settings.LastWeatherInfo.Minutely.Precipitation.RainRemainingMinutes;
+        // 上一次天气数据来自 Settings.json 的反序列化结果，接口返回 "minutely": null
+        // 时这个属性真的会是 null（初始化器只在「字段缺失」时保留默认值）。
+        var remaining = Settings.LastWeatherInfo.Minutely?.Precipitation?.RainRemainingMinutes ?? 0;
+        var baseTime = (settings.IsRemainingTime ? -1.0 : 1.0) * remaining;
         return baseTime > 0 && baseTime <= settings.RainTimeMinutes;
         
     }
@@ -123,7 +126,12 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
     {
         sunrise = default;
         sunset = default;
-        var list = Settings.LastWeatherInfo.ForecastDaily.SunRiseSet.Value;
+        var list = Settings.LastWeatherInfo.ForecastDaily?.SunRiseSet?.Value;
+        if (list == null)
+        {
+            return false;
+        }
+
         foreach (var item in list)
         {
             if (!DateTimeOffset.TryParse(item.From, CultureInfo.InvariantCulture, DateTimeStyles.None, out var sr))
@@ -148,7 +156,7 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
         }
 
         return IsWeatherRefreshed &&
-               Settings.LastWeatherInfo.Alerts.Exists(x => settings.IsMatching(x.Title));
+               Settings.LastWeatherInfo.Alerts?.Exists(x => settings.IsMatching(x.Title)) == true;
     }
 
     private bool CurrentWeatherRuleHandler(object? o)
@@ -160,8 +168,8 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
         return IsWeatherRefreshed &&
                (settings.IsFuzzyMatch 
-                   ? IsWeatherCodeMatched(Settings.LastWeatherInfo.Current.Weather, settings.WeatherId.ToString())
-                   : settings.WeatherId.ToString() == Settings.LastWeatherInfo.Current.Weather);
+                   ? IsWeatherCodeMatched(Settings.LastWeatherInfo.Current?.Weather ?? "", settings.WeatherId.ToString())
+                   : settings.WeatherId.ToString() == Settings.LastWeatherInfo.Current?.Weather);
     }
 
     private bool TomorrowWeatherRuleHandler(object? o)
@@ -171,7 +179,7 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
             return false;
         }
 
-        if (!IsWeatherRefreshed || Settings.LastWeatherInfo.ForecastDaily.Weather.Value == null || Settings.LastWeatherInfo.ForecastDaily.Weather.Value.Count <= 1)
+        if (!IsWeatherRefreshed || Settings.LastWeatherInfo.ForecastDaily?.Weather?.Value == null || Settings.LastWeatherInfo.ForecastDaily.Weather.Value.Count <= 1)
         {
             return false;
         }
@@ -252,10 +260,20 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
     private async void LoadData()
     {
-        var json = await AssetLoader.ReadAllTextAsync(new Uri(
-            "avares://ClassIsland/Assets/XiaomiWeather/xiaomi_weather_status.json", UriKind.Absolute));
-        var codes = JsonSerializer.Deserialize<XiaomiWeatherStatusCodes>(json);
-        WeatherStatusList = codes!.WeatherInfo;
+        try
+        {
+            var json = await AssetLoader.ReadAllTextAsync(new Uri(
+                "avares://ClassIsland/Assets/XiaomiWeather/xiaomi_weather_status.json", UriKind.Absolute));
+            var codes = JsonSerializer.Deserialize<XiaomiWeatherStatusCodes>(json);
+            WeatherStatusList = codes?.WeatherInfo ?? [];
+        }
+        catch (Exception ex)
+        {
+            // async void 里逃逸的异常没有任何人接得住，会直接终止进程。
+            // 天气状态码表只影响文案映射，读不到时留空即可，不能让应用启动即崩。
+            Logger.LogError(ex, "无法加载天气状态码表");
+            WeatherStatusList = [];
+        }
     }
 
     public async Task QueryWeatherAsync()
@@ -359,6 +377,27 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 {
                     cityLatitude = cityInfo.Latitude;
                     cityLongitude = cityInfo.Longitude;
+
+                    // 按城市选择（而不是自动定位）时，Settings 里的经纬度一直停留在默认的 (0,0)。
+                    // 主界面天气用城市接口拿到的坐标请求，所以看起来一切正常；但「天气详情」页
+                    // 直接读 Settings.WeatherLatitude/Longitude，就会拿着 0,0 去查几内亚湾的天气。
+                    // 这里把城市坐标回填一次，让两条链路用同一份位置。
+                    if (double.TryParse(cityLatitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var cityLat) &&
+                        double.TryParse(cityLongitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var cityLon) &&
+                        !(Math.Abs(cityLat) < 1e-4 && Math.Abs(cityLon) < 1e-4))
+                    {
+                        var roundedLat = Math.Round(cityLat, 4);
+                        var roundedLon = Math.Round(cityLon, 4);
+                        if (Math.Abs(Settings.WeatherLatitude - roundedLat) > 1e-6)
+                        {
+                            Settings.WeatherLatitude = roundedLat;
+                        }
+
+                        if (Math.Abs(Settings.WeatherLongitude - roundedLon) > 1e-6)
+                        {
+                            Settings.WeatherLongitude = roundedLon;
+                        }
+                    }
                 }
                 else
                 {
@@ -386,6 +425,13 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
             var info = await WebRequestHelper.Default.GetJson<WeatherInfo>(new Uri(uri));
 
             // 排除天气预警
+            // 接口偶尔会把 alerts / forecastDaily 直接返回成 null（不是省略字段），
+            // 反序列化后属性就是 null，后面的 RemoveAll、规则处理、组件绑定全会 NRE。
+            info.Alerts ??= [];
+            info.ForecastDaily ??= new ForecastDaily();
+            info.ForecastHourly ??= new ForecastHourly();
+            info.Minutely ??= new Minutely();
+            info.Aqi ??= new AqiInfo();
             var validExclusions = Settings.ExcludedWeatherAlerts
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .ToArray();

@@ -2933,7 +2933,7 @@ echo "OUT_OK: 总行数 $(wc -l < out.txt)，新段 $(echo "$NEW_N") 行在最�
 | 本轮情况 | 账本怎么处理 |
 |---|---|
 | 纯同步（只吸收上游，没有定制、没有修 bug） | **一个字都不写**。`$FIXLOG` 必须与 `PRE_MERGE_HEAD` 里的版本逐字节相同 |
-| 有定制需求 / 我点名要修 bug | 由 **12 ④** 生成段落，再用本节的「插入」和「结构断言」两段脚本落盘 |
+| 有定制需求 / 我点名要修 bug | 由 **12 ④** 生成段落：新建大类用本节的「插入」+「结构断言」；已有大类走 12 ④ 的追加模式（新内容在段中间，不能套用「新段在最顶部」的断言） |
 | 同步过程中顺手修的编译错误 | **不算**。同步适配引起的问题属于同步本身，不记账 |
 
 **为什么纯同步不写**：账本是「我的定制清单」，不是「同步流水账」。
@@ -2971,6 +2971,14 @@ if [ -n "$(tail -c 1 /tmp/new-fixlog.txt)" ]; then printf '\n' >> /tmp/new-fixlo
 
 NEW_N=$(wc -l < /tmp/new-fixlog.txt | tr -d ' ')
 
+# ★ 幂等：上一次插入已经成功、但后续步骤失败重跑时，同一段会被再插一遍。
+#   先比对文件顶部是否已经是这段内容，是就直接结束，不产生重复段落。
+if [ -f "$FIXLOG" ] && head -n "$NEW_N" "$FIXLOG" | cmp -s - /tmp/new-fixlog.txt; then
+  echo "SKIP: 该段落已经在 $FIXLOG 顶部，无需重复插入"
+  rm -f /tmp/custom-category.txt
+  exit 0
+fi
+
 if [ -f "$FIXLOG" ]; then
   # 先留一份原件，用于逐字节比对（行数相等不代表内容没被换掉）
   cp "$FIXLOG" /tmp/fixlog.old || { echo "FAIL: 备份 FIXLOG 失败"; exit 1; }
@@ -2997,6 +3005,10 @@ mv "$FIXLOG.tmp" "$FIXLOG" || { echo "FAIL: 覆盖 $FIXLOG 失败（文件被占
 
 head -5 "$FIXLOG"
 echo "旧 $OLD_N 行 → 新 $(wc -l < "$FIXLOG") 行"
+
+# 大类名文件只服务于本次新建段落。留着的话，下一轮新建模式会直接
+# 读到上一轮的大类名，把新改动记进完全不相干的大类里。
+rm -f /tmp/custom-category.txt
 ```
 
 - **为什么不在旧文件末尾补换行**：新段落在前、旧内容在后，新旧之间会不会粘连只取决于**新段落**
@@ -3133,8 +3145,8 @@ git "${AUTHOR_OPTS[@]}" commit -F - <<MSGEOF
 chore(sync): 同步 $UPSTREAM_BRANCH 至 $UPSTREAM_SHORT
 
 - 基线 $(git rev-parse --short "$BASE") -> 目标 $UPSTREAM_SHORT，上游 $CN_ALL 个提交
-- 上游改动 $(wc -l < /tmp/up-files.txt | tr -d ' ') 个文件，双方都改 $(wc -l < /tmp/both-files.txt | tr -d ' ') 个，发生过冲突 $(cat /tmp/conflict-files.before.txt 2>/dev/null | wc -l | tr -d ' ') 个（已全部修正）
-- 冲突处理：$(cat /tmp/conflict-files.before.txt 2>/dev/null | wc -l | tr -d ' ') 个文件，已全部修正
+- 上游改动 $(wc -l < /tmp/up-files.txt | tr -d ' ') 个文件，双方都改 $(wc -l < /tmp/both-files.txt | tr -d ' ') 个，发生过冲突 $(wc -l < /tmp/conflict-files.before.txt 2>/dev/null || echo 0) 个（已全部修正）
+- 冲突处理：$(wc -l < /tmp/conflict-files.before.txt 2>/dev/null || echo 0) 个文件，已全部修正
 - 本地定制全部保留，未在同步中被回退
 - 构建验证：$TARGET_PROJ → $BUILD_RESULT
 MSGEOF
@@ -3229,8 +3241,15 @@ echo "官方 push URL: $UP_U"
 
 # 注意是 exit 1，不是 echo。只 echo 的话脚本继续往下跑，
 # 下一块是独立 shell，根本看不到这行 STOP，照样真推。
-echo "$MY_U" | grep -qi 'farmer-snack/nlcli' \
+# 判据与硬性约束 1 保持一致：URL 含 NLCLI（大小写不敏感）就是我的仓库。
+# 这里不再要求必须是 farmer-snack/nlcli —— 换个用户名、走 SSH、用镜像地址
+# 都会让硬编码的用户名匹配失败，把合法推送挡在门外。
+echo "$MY_U" | grep -qi 'nlcli' \
   || { echo "STOP: 我的 push URL 不含 NLCLI，绝不推送"; exit 1; }
+# 反过来还要排除「自己的 remote 被误配成官方地址」这种更危险的情况。
+if echo "$MY_U" | grep -qi 'classisland/classisland'; then
+  echo "STOP: 我的 push URL 指向官方仓库，绝不推送"; exit 1
+fi
 echo "$UP_U" | grep -qi 'classisland/classisland' \
   || { echo "STOP: 官方 remote 的 URL 异常，停下问我"; exit 1; }
 
@@ -4150,6 +4169,11 @@ $(cat /tmp/custom-log.md)
 BLOCK
 
 # 定位该段在整份文件里的结束行，把追加内容插在它前面（段间空行之前）
+# Python 参与改写是因为要保留原始行尾（LF/CRLF）。Git Bash 环境经常没有 python3，
+# 直接调用会以 127 退出；如果不显式拦住，脚本会继续往下跑，
+# 后面的复核只会报「没有 + 行」，看起来像追加失败，实际根本没执行。
+command -v python3 >/dev/null 2>&1 \
+  || { echo "FAIL: 环境里没有 python3，无法安全地保留行尾追加。请安装 python3 后重跑本块"; exit 1; }
 python3 - "$FIXLOG" "$CAT" /tmp/append-entry.txt <<'PYEOF'
 import sys
 p, cat, entryf = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -4189,6 +4213,7 @@ if crlf:
 open(p, 'w', encoding='utf-8', newline='').write(out)
 print('APPENDED: 段落 %s 末尾 +%d 行' % (cat, len(entry.strip().split('\n'))))
 PYEOF
+[ $? -eq 0 ] || { echo "FAIL: 追加脚本执行失败（见上面的报错），账本未改动"; exit 1; }
 ```
 
 追加模式没有 `cmp` 那样的逐字节保护，所以**写完必须复核**：
@@ -4242,7 +4267,13 @@ fi
 MISS=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  grep -qF -- "$f" "$FIXLOG" || { echo "MISS: $f 没写进 $FIXLOG 的任何 [长期] 段"; MISS=1; }
+  # 必须锚定成「列表项 + 完整路径 + 分隔符」再匹配。
+  # 只做 grep -F 子串匹配时，账本里写 `AudioService.cs` 也能“覆盖”
+  # `ClassIsland/Services/AudioService.cs`，甚至 `Foo.cs` 会命中 `BarFoo.cs`，
+  # 结果是有文件漏记账却照样过闸。
+  escaped=$(printf '%s' "$f" | sed 's/\./\\./g')
+  grep -qE "^[[:space:]]*(-[[:space:]]+)?${escaped}([[:space:]]|—|$)" "$FIXLOG" \
+    || { echo "MISS: $f 没写进 $FIXLOG 的任何 [长期] 段"; MISS=1; }
 done < /tmp/custom-code.txt
 [ "$MISS" -eq 0 ] || { echo "FAIL: 有文件改了没记账，补完再提交（同类追加到已有段，新类建 [长期] 段）"; exit 1; }
 echo "FIXLOG_COVERED（$(wc -l < /tmp/custom-code.txt) 个文件都能在账本里找到）"
@@ -4444,7 +4475,7 @@ echo "CUSTOM_COMMIT_OK（工作区已确认干净）"
     跳过就说"未执行（原因）"，不确定就说"未确认"。
 16. **定制阶段 AI 亲自动过的文件，必须在 `$FIXLOG` 对应的 `[长期]` 段里逐行列出**，
     每行只写「路径 — 做了什么」。**不写冲突细节、不贴代码、不写行号。**
-    口径是「AI 动过的文件 ⊆ 账本列出的文件」，不是数量相等——用 12 ⑤ 的 `/tmp/ai-touched.txt` 逐个 grep。
+    口径是「AI 动过的文件 ⊆ 账本列出的文件」，不是数量相等——用 12 ⑤ 的 `/tmp/custom-code.txt` 逐个锚定 grep。
     **同步阶段动过的文件不进账本**：取上游、三方合并、冲突修正、同步引起的编译修复都属于同步本身，
     只记在 `out.txt` 和 `action.txt` 里。
     **三个记录文件本身、提示词文件（`prompt*.md`）、以及 `patches/` 下的产物，不计入这个要求。**

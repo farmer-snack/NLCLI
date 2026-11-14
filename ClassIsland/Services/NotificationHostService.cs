@@ -59,6 +59,14 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
     private bool CanDispatchRequests => _pendingRescheduleCount <= 0;
 
+    /// <summary>
+    /// 提醒队列的硬上限。正常情况下队列长度只有个位数；只有消费者卡死、
+    /// 或者上游以极高频率推送（例如 cron 触发器被反复重建）时才会无限增长。
+    /// 不设上限的话，每一条积压的提醒都会连同它的 CancellationTokenSource、
+    /// 链式请求和播放票据一起留在内存里，最终表现为内存持续上涨直至 OOM。
+    /// </summary>
+    private const int MaxQueuedRequests = 256;
+
     public NotificationRequest? CurrentRequest { get; set; }
 
     public NotificationRequest GetRequest()
@@ -181,7 +189,17 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         {
             return;
         }
-        
+
+        if (RequestQueue.Count >= MaxQueuedRequests)
+        {
+            // 丢弃新来的提醒而不是最旧的：最旧的那条往往正在被消费者处理或
+            // 属于一条链的头，从中间抽走它会让链断掉。
+            Logger.LogWarning("提醒队列已满（{Count}），丢弃提醒 {Request}", MaxQueuedRequests, request);
+            EnqueuedRequests.Remove(request);
+            request.CompletedTokenSource.Cancel();
+            return;
+        }
+
         RequestQueue.Enqueue(request,
             new NotificationPriority(
                 Settings.NotificationProvidersPriority.IndexOf(request.NotificationSourceGuid.ToString()),
@@ -324,6 +342,9 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         while (RequestQueue.Count > 0)
         {
             var r = RequestQueue.Dequeue();
+            // 只出队不清理登记表，EnqueuedRequests 会永久保留这些已经不在队列里的请求，
+            // 既泄漏引用，也会让这些请求之后再也无法重新入队（Add 返回 false）。
+            EnqueuedRequests.Remove(r);
             r.CompletedTokenSource.Cancel();
         }
         foreach (var request in PlayingNotifications.ToList())
@@ -517,7 +538,15 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             EnqueueNotification(request, true);
             PopRequestsToConsumers();
         });
-        request.CompletedToken.Register(() => PlayingTickets.Remove(ticket));
+        request.CompletedToken.Register(() =>
+        {
+            PlayingTickets.Remove(ticket);
+            // 播放正常结束（而不是被取消）时不会走 CancellationToken 的回调，
+            // PoppedRequests 里的这条记录就永远留着。下一次同一条请求重新入队时，
+            // PopRequests 会把它当成「已经弹出过」直接丢掉；即使不会重入队，
+            // 每条播过的提醒也都会一直被集合引用，长时间运行后持续上涨。
+            PoppedRequests.Remove(request);
+        });
         return ticket;
     }
     

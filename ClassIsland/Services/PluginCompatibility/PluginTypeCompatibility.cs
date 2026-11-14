@@ -65,7 +65,7 @@ internal static class PluginTypeCompatibility
     /// <summary>
     /// 兼容规则的版本号。重写逻辑发生变化时必须递增，否则旧缓存会被继续复用。
     /// </summary>
-    private const int CompatibilityVersion = 6;
+    private const int CompatibilityVersion = 7;
 
     /// <summary>
     /// 宿主是否已经把 <c>Window.SystemDecorations</c> 正式改名为 <c>Window.WindowDecorations</c>（Avalonia 12 起）。
@@ -86,6 +86,24 @@ internal static class PluginTypeCompatibility
         catch
         {
             return 0;
+        }
+    }, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>
+    /// 宿主当前 Avalonia 的完整版本号。兼容映射是从宿主的类型表实时推导出来的，
+    /// 宿主小版本升级也可能改变映射结果（例如某个类型在新版本里才补回来）。
+    /// 缓存键只用主版本号的话，升级 12.0 → 12.1 之后仍会命中旧缓存，
+    /// 里面可能还引用着新宿主里已经不存在（或签名已经变化）的成员。
+    /// </summary>
+    private static readonly Lazy<string> HostAvaloniaVersion = new(() =>
+    {
+        try
+        {
+            return typeof(Avalonia.Controls.Control).Assembly.GetName().Version?.ToString() ?? "0";
+        }
+        catch
+        {
+            return "0";
         }
     }, LazyThreadSafetyMode.ExecutionAndPublication);
 
@@ -277,7 +295,8 @@ internal static class PluginTypeCompatibility
             hash = Convert.ToHexString(SHA256.HashData(stream))[..16];
         }
 
-        var directory = Path.Combine(CacheRoot, $"{hash}-v{hostMajor}-c{CompatibilityVersion}");
+        var directory = Path.Combine(CacheRoot,
+            $"{hash}-v{hostMajor}-{HostAvaloniaVersion.Value}-c{CompatibilityVersion}");
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, Path.GetFileName(assemblyPath));
     }
@@ -751,10 +770,13 @@ internal static class PluginTypeCompatibility
                 return;
             }
 
-            var window = MakeTypeReference(module, "Avalonia.Controls", "Window", "Avalonia.Controls");
             var decorations = MakeValueTypeReference(module, "Avalonia.Controls", "WindowDecorations", "Avalonia.Controls");
             field.Name = "WindowDecorationsProperty";
-            field.FieldType = MakeGenericType(module, "Avalonia", "StyledProperty`2", "Avalonia.Base", window, decorations);
+            // 这个字段的类型是 StyledProperty<WindowDecorations>，只有一个泛型参数。
+            // 上面 WindowStateProperty 用的 DirectProperty<Window, WindowState> 才是两个参数，
+            // 这里照抄 `2 会让 MemberRef 签名和宿主实际字段对不上，
+            // 插件一读这个字段就在 JIT 时抛 MissingFieldException。
+            field.FieldType = MakeGenericType(module, "Avalonia", "StyledProperty`1", "Avalonia.Base", decorations);
             changes.Add("Window.SystemDecorationsProperty → Window.WindowDecorationsProperty");
         }
     }
@@ -858,6 +880,14 @@ internal static class PluginTypeCompatibility
                     NormalizeType(module, type.Interfaces[i].InterfaceType, changes));
             }
 
+            // 泛型约束也是类型引用的一部分。插件里常见 where T : Control 之类的写法，
+            // 如果约束指向的是被改名/搬家的类型，不一起改写的话，
+            // 类型加载时仍会去解析旧名字，抛 TypeLoadException。
+            foreach (var genericParameter in type.GenericParameters)
+            {
+                NormalizeGenericConstraints(module, genericParameter, changes);
+            }
+
             foreach (var field in type.Fields)
             {
                 field.FieldType = NormalizeType(module, field.FieldType, changes);
@@ -865,6 +895,11 @@ internal static class PluginTypeCompatibility
 
             foreach (var method in type.Methods)
             {
+                foreach (var genericParameter in method.GenericParameters)
+                {
+                    NormalizeGenericConstraints(module, genericParameter, changes);
+                }
+
                 method.ReturnType = NormalizeType(module, method.ReturnType, changes);
                 foreach (var parameter in method.Parameters)
                 {
@@ -917,6 +952,25 @@ internal static class PluginTypeCompatibility
         foreach (var parameter in method.Parameters)
         {
             parameter.ParameterType = NormalizeType(module, parameter.ParameterType, changes);
+        }
+    }
+
+    /// <summary>
+    /// 规范化一个泛型参数上的全部约束类型。
+    /// </summary>
+    private static void NormalizeGenericConstraints(
+        Cecil.ModuleDefinition module,
+        Cecil.GenericParameter genericParameter,
+        List<string> changes)
+    {
+        for (var i = 0; i < genericParameter.Constraints.Count; i++)
+        {
+            var constraint = genericParameter.Constraints[i];
+            var normalized = NormalizeType(module, constraint.ConstraintType, changes);
+            if (!ReferenceEquals(normalized, constraint.ConstraintType))
+            {
+                genericParameter.Constraints[i] = new Cecil.GenericParameterConstraint(normalized);
+            }
         }
     }
 

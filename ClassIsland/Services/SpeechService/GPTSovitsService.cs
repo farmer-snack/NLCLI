@@ -42,6 +42,16 @@ public class GptSoVitsService : ISpeechService
 
     private GptSoVitsPlayInfo? _currentPlayInfo;
 
+    /// <summary>
+    /// 复用的 HttpClient。每朗读一句就 new 一个 HttpClient 会不断创建新的连接池，
+    /// 被丢弃的实例要等 GC 才释放，短时间内连续播报就能把本机端口耗光（TIME_WAIT），
+    /// 之后所有请求都会以「无法连接」失败。
+    /// </summary>
+    private static readonly HttpClient SharedHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(30)
+    };
+
     public GptSoVitsService(IAudioService audioService, ILogger<GptSoVitsService> logger, SettingsService settingsService)
     {
         AudioService = audioService;
@@ -107,8 +117,8 @@ public class GptSoVitsService : ISpeechService
 
     private async Task<bool> GenerateSpeechAsync(string text, string filePath, CancellationToken cancellationToken)
     {
-        var httpClient = new HttpClient();
         var settings = SettingsService.Settings.GptSoVitsSpeechSettings;
+        string? apiSignature = null;
 
         if (settings.IsInternal && GptSovitsSecrets.IsSecretsFilled)
         {
@@ -121,9 +131,8 @@ public class GptSoVitsService : ISpeechService
                 Timestamp = Convert.ToInt64(ts.TotalMilliseconds)
             };
             var sign = await pgp.SignAsync(JsonSerializer.Serialize(signData));
-            httpClient.DefaultRequestHeaders.Add("X-ClassIsland-ApiSignature", Convert.ToBase64String(Encoding.UTF8.GetBytes(sign)));
+            apiSignature = Convert.ToBase64String(Encoding.UTF8.GetBytes(sign));
         }
-        httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ClassIsland", AppBase.AppVersion));
         var serverIp = settings.GptSoVitsServerIp;
         var port = settings.GptSoVitsPort;
 
@@ -146,11 +155,27 @@ public class GptSoVitsService : ISpeechService
         try
         {
             Logger.LogDebug("发送 TTS 请求到：{RequestUri}", requestUri);
-            using var response = await httpClient.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+            if (apiSignature != null)
+            {
+                request.Headers.TryAddWithoutValidation("X-ClassIsland-ApiSignature", apiSignature);
+            }
+
+            request.Headers.UserAgent.Add(new ProductInfoHeaderValue("ClassIsland", AppBase.AppVersion));
+            using var response = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                await using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await response.Content.CopyToAsync(fs, cancellationToken);
+                // 先写临时文件再改名：直接写目标路径时，下载到一半被取消/断网，
+                // 目标位置会留下一个能被 File.Exists 命中的半截 wav，
+                // 之后每次朗读都播放这段损坏音频，而且永远不会重新合成。
+                var tempPath = filePath + ".tmp";
+                await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    await response.Content.CopyToAsync(fs, cancellationToken);
+                }
+
+                File.Move(tempPath, filePath, true);
                 Logger.LogDebug("语音生成并保存到：{FilePath}", filePath);
                 return true;
             }
@@ -160,6 +185,12 @@ public class GptSoVitsService : ISpeechService
                 Logger.LogError("TTS 请求失败，状态码：{StatusCode}, 内容：{ErrorContent}", response.StatusCode, errorContent);
                 return false;
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 队列被清空/提醒被切走导致的取消不是失败，不该刷错误日志。
+            Logger.LogInformation("已取消 GPT-SoVITS 语音合成：{FilePath}", filePath);
+            return false;
         }
         catch (Exception ex)
         {

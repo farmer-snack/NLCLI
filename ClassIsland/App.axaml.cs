@@ -1228,16 +1228,24 @@ public partial class App : AppBase, IAppHost
     /// </remarks>
     private void SaveAllConfigs(string note)
     {
+        // 每个配置各自兜底。原来四个保存共用一个 try：最先执行的 Settings 一旦失败
+        // （关机瞬间文件被占用、目录只读、磁盘满），后面的课表档案、自动化规则、
+        // 组件方案就全部不执行了 —— 恰恰把最宝贵的那份丢掉。
+        SaveSafely(() => IAppHost.Host?.Services.GetService<SettingsService>()?.SaveSettings(note), "设置");
+        SaveSafely(() => IAppHost.Host?.Services.GetService<IAutomationService>()?.SaveConfig(note), "自动化配置");
+        SaveSafely(() => IAppHost.Host?.Services.GetService<IProfileService>()?.SaveProfile(), "档案");
+        SaveSafely(() => IAppHost.Host?.Services.GetService<IComponentsService>()?.SaveConfig(), "组件配置");
+    }
+
+    private void SaveSafely(Action save, string name)
+    {
         try
         {
-            IAppHost.Host?.Services.GetService<SettingsService>()?.SaveSettings(note);
-            IAppHost.Host?.Services.GetService<IAutomationService>()?.SaveConfig(note);
-            IAppHost.Host?.Services.GetService<IProfileService>()?.SaveProfile();
-            IAppHost.Host?.Services.GetService<IComponentsService>()?.SaveConfig();
+            save();
         }
         catch (Exception exception)
         {
-            Logger?.LogError(exception, "保存配置失败");
+            Logger?.LogError(exception, "保存{ConfigName}失败", name);
         }
     }
 

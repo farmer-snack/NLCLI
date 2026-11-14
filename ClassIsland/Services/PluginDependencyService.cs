@@ -101,7 +101,32 @@ public static class PluginDependencyService
         }
 
         var path = Path.Combine(CacheDirectory, assemblyName + ".dll");
-        return File.Exists(path) ? path : null;
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        // 同一条目里的其它文件也必须齐全。只判托管库存在的话，
+        // 首次下载时磁盘满 / 文件被占用留下的「托管库在、原生库缺」的半套缓存
+        // 会被当成有效缓存永远命中：插件能加载，一调用就 DllNotFoundException，
+        // 而且失败冷却也不会再触发重下一次，用户永远修不回来。
+        if (Catalog.TryGetValue(assemblyName, out var packages))
+        {
+            foreach (var package in packages)
+            {
+                foreach (var entry in package.Entries)
+                {
+                    var fileName = Path.GetFileName(entry);
+                    if (!string.IsNullOrEmpty(fileName) &&
+                        !File.Exists(Path.Combine(CacheDirectory, fileName)))
+                    {
+                        return null;
+                    }
+                }
+            }
+        }
+
+        return path;
     }
 
     /// <summary>
@@ -260,7 +285,14 @@ public static class PluginDependencyService
                     continue;
                 }
 
-                File.Copy(file, Path.Combine(CacheDirectory, Path.GetFileName(file)), true);
+                var target = Path.Combine(CacheDirectory, Path.GetFileName(file));
+                // 不能直接覆盖写。File.Copy 到目标路径的过程中，目标是「已存在但只有半截」，
+                // 而程序集解析回调另一头就因为 File.Exists 为真把它拿去 LoadFromAssemblyPath，
+                // 抛 BadImageFormatException 让整个插件加载失败。
+                // 先落到同目录的临时名再原子改名，目标路径要么不存在、要么就是完整文件。
+                var tempTarget = target + ".tmp";
+                File.Copy(file, tempTarget, true);
+                File.Move(tempTarget, target, true);
             }
 
             error = null;

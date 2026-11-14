@@ -6,6 +6,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using ClassIsland.Core;
 using ClassIsland.Core.Abstractions.Services.Management;
@@ -64,7 +65,7 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
         var url = ManagementService.Manifest.DefaultSettingsSource.Value!;
         var settings = await ManagementService.Connection.GetJsonAsync<Settings>(url);
         Settings = settings;
-        Settings.PropertyChanged += (sender, args) => SettingsChanged(args.PropertyName!);
+        Settings.PropertyChanged += (sender, args) => SettingsChanged(args.PropertyName);
         Logger.LogTrace("拉取集控默认设置成功！");
     }
 
@@ -88,7 +89,7 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
                 Logger.LogInformation("加载配置文件。");
                 var r = ConfigureFileHelper.LoadConfig<Settings>(Path.Combine(CommonDirectories.AppRootFolderPath, "Settings.json"));
                 Settings = r;
-                Settings.PropertyChanged += (sender, args) => SettingsChanged(args.PropertyName!);
+                Settings.PropertyChanged += (sender, args) => SettingsChanged(args.PropertyName);
             }
 
             // 当还没有初始化应用且启用集控时，从集控拉取设置。
@@ -122,13 +123,19 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
         // 这里在升级后把这两个总开关打开一次，之后用户的修改会被正常保留。
         if (!Settings.HasMigratedNotificationAudioSettings)
         {
-            Settings.HasMigratedNotificationAudioSettings = true;
             if (!Settings.AllowNotificationSpeech || !Settings.AllowNotificationSound)
             {
                 Settings.AllowNotificationSpeech = true;
                 Settings.AllowNotificationSound = true;
                 Logger.LogInformation("已将「提醒语音」「提醒音效」总开关迁移为开启状态。");
             }
+
+            // 标记必须最后写。这个属性的 setter 会走 SettingsChanged → ScheduleSave，
+            // 立刻把整个配置文件落盘一次；先写标记就等于先把「已完成」写进磁盘。
+            // 万一在随后保存开关时崩溃/被杀，磁盘上会永久停在
+            // 「已迁移，但两个开关仍然关着」，之后每次启动都跳过迁移 ——
+            // 正是这个迁移想修的「开了语音却没声音」被固化下来。
+            Settings.HasMigratedNotificationAudioSettings = true;
         }
 
         Settings.LastAppVersion = Assembly.GetExecutingAssembly().GetName().Version!;
@@ -196,8 +203,14 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
         {
             return;
         }
-        Logger.LogInformation(note == "" ? "写入配置文件。" : "写入配置文件：{}", note);
-        ConfigureFileHelper.SaveConfig(Path.Combine(CommonDirectories.AppRootFolderPath, "Settings.json"), Settings);
+
+        // 延迟保存的定时器回调与退出时的立即保存可能并发，
+        // 两边的临时文件路径相同，不串行化会互相覆盖/抛出文件占用异常。
+        lock (_saveFileLock)
+        {
+            Logger.LogInformation(note == "" ? "写入配置文件。" : "写入配置文件：{}", note);
+            ConfigureFileHelper.SaveConfig(Path.Combine(CommonDirectories.AppRootFolderPath, "Settings.json"), Settings);
+        }
     }
 
     internal void SaveExtractedAccent(Avalonia.Media.Color color)
@@ -215,6 +228,60 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
 
 
     public const BindingFlags SettingsPropertiesFlags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+    /// <summary>
+    /// 设置保存的防抖间隔。拖动一次音量滑块、在字体输入框里敲一个词，
+    /// 都会连续触发几十次 PropertyChanged；每次都把整份 Settings.json 序列化
+    /// 并原子写盘（写临时文件 + fsync + 改名），会造成明显的 UI 卡顿和大量无谓写盘。
+    /// </summary>
+    private static readonly TimeSpan SaveDebounceInterval = TimeSpan.FromMilliseconds(400);
+
+    private readonly object _saveTimerLock = new();
+    private readonly object _saveFileLock = new();
+    private Timer? _saveTimer;
+    private string _pendingSaveNote = "";
+
+    /// <summary>
+    /// 合并短时间内的多次设置变更，只落盘一次。
+    /// </summary>
+    private void ScheduleSave(string note)
+    {
+        lock (_saveTimerLock)
+        {
+            _pendingSaveNote = note;
+            _saveTimer ??= new Timer(_ => FlushPendingSave(), null, Timeout.Infinite, Timeout.Infinite);
+            _saveTimer.Change(SaveDebounceInterval, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    /// <summary>
+    /// 执行挂起的延迟保存。定时器回调发生在后台线程，
+    /// 这里必须吞掉所有异常：Timer 回调里逃逸的异常会直接终止进程。
+    /// </summary>
+    private void FlushPendingSave()
+    {
+        string note;
+        lock (_saveTimerLock)
+        {
+            note = _pendingSaveNote;
+            _pendingSaveNote = "";
+        }
+
+        // 定时器被重排过，本次回调已经没有待写内容：直接返回，避免白序列化一次。
+        if (note.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            SaveSettings(note);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "延迟保存设置失败");
+        }
+    }
 
     /// <summary>
     /// 添加应用设置叠层。
@@ -293,8 +360,17 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
         return true;
     }
 
-    void SettingsChanged(string propertyName)
+    void SettingsChanged(string? propertyName)
     {
+        // PropertyChanged 允许把 PropertyName 留空（表示「所有属性都变了」），
+        // 不少 MVVM 框架的批量通知就是这么发的。直接拿 null 去
+        // Dictionary.Remove / Type.GetProperty 会抛 ArgumentNullException，
+        // 而这里是在事件回调里，异常会一路冒到触发属性变更的调用方。
+        if (string.IsNullOrEmpty(propertyName))
+        {
+            return;
+        }
+
         if (_publishingExtractedAccent && propertyName is nameof(Settings.WallpaperColorPlatte) or nameof(Settings.SelectedPlatteIndex))
             return;
 
@@ -307,7 +383,8 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
                             .GetCustomAttribute<JsonIgnoreAttribute>() != null)
             return;
 
-        SaveSettings(propertyName);
+        // 高频属性变更（滑块、文本框）交给防抖器合并，避免每敲一个字符写一次盘。
+        ScheduleSave(propertyName);
         if (ManagementService is { IsManagementEnabled: true, Connection: ManagementServerConnection connection })
         {
             connection.LogAuditEvent(AuditEvents.AppSettingsUpdated, new AppSettingsUpdated()

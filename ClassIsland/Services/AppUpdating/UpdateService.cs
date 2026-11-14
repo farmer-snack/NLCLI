@@ -556,7 +556,10 @@ public class UpdateService : IHostedService, INotifyPropertyChanged
                         info.TimeToComplete = eta;
                     });
                 };
-                token.Register(() => { taskCompletionSource.SetCanceled(token); });
+                // 注册要随下载结束一起注销。更新动辄几十个文件，
+                // 全部挂在同一个取消令牌上，令牌在手，注册表就一直增长。
+                using var cancellationRegistration =
+                    token.Register(() => { taskCompletionSource.TrySetCanceled(token); });
                 await downloader.StartAsync(token);
                 await taskCompletionSource.Task;
                 info.State = DownloadState.Completed;

@@ -122,6 +122,9 @@ public class ComponentsService : ObservableRecipient, IComponentsService
                 .SaveJsonAsync<ComponentProfile>(ManagementService.Manifest.ComponentsSource.Value!,
                     Management.ManagementService.ManagementComponentsPath);
             ManagementService.Versions.ComponentsVersion = ManagementService.Manifest.ComponentsSource.Version;
+            // 版本号只改内存不落盘，下次启动 Versions.json 里还是旧值（甚至 null），
+            // IsNewerAndNotNull 会再次成立，于是每次启动都重新下载并覆盖一遍组件配置。
+            ManagementService.SaveSettings();
         }
         catch (Exception e)
         {
@@ -201,11 +204,21 @@ public class ComponentsService : ObservableRecipient, IComponentsService
         // 集控模式下的组件配置由集控下发，写回本地方案会把集控内容污染到本地配置里。
         if (IsManagementMode)
         {
+            // 以前这里完全不吭声：用户在设置页拖了半天组件，一个字节都没落盘，
+            // 排查时也看不到任何线索。至少留一条日志说明修改被忽略的原因。
+            if (!_managementModeSaveIgnoredLogged)
+            {
+                _managementModeSaveIgnoredLogged = true;
+                Logger.LogDebug("当前处于集控模式，组件配置由集控下发，本地修改不会写回配置文件。");
+            }
+
             return;
         }
 
         ConfigureFileHelper.SaveConfig(_currentConfigPath ?? CurrentConfigFullPath, CurrentComponents);
     }
+
+    private bool _managementModeSaveIgnoredLogged;
 
     public IReadOnlyList<string> ComponentConfigs
     {

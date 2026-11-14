@@ -219,6 +219,15 @@ public class EdgeTtsService : ISpeechService
                         var result = await playInfo.DownloadTask;
                         if (!result)
                         {
+                            // 取消（切走提醒、清空语音队列）同样会让合成任务返回 false。
+                            // 把它当成合成失败会累加失败计数、触发熔断，还会用系统 TTS
+                            // 把用户已经取消的内容再念一遍。
+                            if (playInfo.CancellationTokenSource.IsCancellationRequested)
+                            {
+                                Logger.LogDebug("语音合成已取消：{}", playInfo.FilePath);
+                                continue;
+                            }
+
                             Logger.LogWarning("语音缓存生成未完成：{}", playInfo.FilePath);
                             ReportEdgeTtsFailure(playInfo, "在线语音合成失败");
                             continue;
@@ -286,9 +295,20 @@ public class EdgeTtsService : ISpeechService
                     return;
                 }
 
+                // 库可能分多次回调。第一次已经写完文件后就直接忽略，
+                // 否则后面的回调会重新截断并覆盖缓存。
+                if (completedSource.Task.IsCompleted)
+                {
+                    return;
+                }
+
                 try
                 {
-                    File.WriteAllBytes(cache, binary.ToArray());
+                    // 不能直接写目标文件：写入过程中崩溃/断电会留下半截 mp3，
+                    // 下次启动 File.Exists 命中，就会一直播放这段损坏的缓存。
+                    var tempPath = cache + ".tmp";
+                    File.WriteAllBytes(tempPath, binary.ToArray());
+                    File.Move(tempPath, cache, true);
                     completedSource.TrySetResult(true);
                 }
                 catch (Exception ex)

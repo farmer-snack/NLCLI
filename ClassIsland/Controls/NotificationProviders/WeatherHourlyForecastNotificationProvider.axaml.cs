@@ -35,8 +35,10 @@ public partial class WeatherHourlyForecastNotificationProvider : UserControl
         Info = info;
         BaseTime = baseTime;
 
-        var weather = info.ForecastHourly.Weather.Value;
-        var temperature = info.ForecastHourly.Temperature.Value;
+        // 与 7 天预报卡片同一个坑：字段缺失时 Value 会是 null，
+        // 直接取 .Count 在提醒构造函数里抛 NRE，整条提醒链都会被它带崩。
+        var weather = info.ForecastHourly?.Weather?.Value ?? [];
+        var temperature = info.ForecastHourly?.Temperature?.Value ?? [];
 
         for (var i = 0; i < HourCount; i++)
         {

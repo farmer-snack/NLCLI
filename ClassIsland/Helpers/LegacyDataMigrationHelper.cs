@@ -392,15 +392,23 @@ public static class LegacyDataMigrationHelper
             yield break;
         }
 
+        // 当前目录自身必须无条件试一次。不能放进下面的循环：循环条件要求 Parent 非空，
+        // exe 直接放在盘符根（U 盘/绿色版常见）时 Parent 为 null，循环一次都不跑，
+        // 这条兜底就等于没写。
+        yield return current.FullName;
+        yield return Path.Combine(current.FullName, "data");
+
         for (var i = 0; i < 2 && current?.Parent is not null; i++)
         {
-            // 当前目录自身也要试：Debug 构建的数据目录就是 exe 所在目录本身，
-            // 而自启项被清理后只能靠这里兜底，漏了它就会漏掉整个 Debug/绿色版旧目录。
-            yield return current.FullName;
-            yield return Path.Combine(current.Parent.FullName, "data");
-            yield return current.Parent.FullName;
-            yield return Path.Combine(current.FullName, "data");
-            current = current.Parent;
+            var parent = current.Parent;
+            yield return Path.Combine(parent.FullName, "data");
+            // 盘符根 / 网络共享根不能整体当候选：装在 D:\Tools\ClassIsland 时上一级是 D:\Tools，
+            // 而再上一级就是 D:\，把整盘当数据目录会把无关内容扫进来。
+            if (parent.Parent is not null)
+            {
+                yield return parent.FullName;
+            }
+            current = parent;
         }
     }
 
@@ -680,11 +688,29 @@ public static class LegacyDataMigrationHelper
         return spaceIndex > 0 ? commandLine[..spaceIndex] : commandLine;
     }
 
-    private static void CopyDirectory(string source, string target)
+    /// <summary>复制目录的最大递归深度。正常情况下插件目录远达不到，这里只用于兜底。</summary>
+    private const int MaxCopyDepth = 64;
+
+    private static void CopyDirectory(string source, string target, int depth = 0)
     {
+        // 目录联接/符号链接可以指回上级，递归复制会无限展开直到栈溢出。
+        // StackOverflowException 无法捕获，表现为「应用启动即闪退」且每次启动都复现，
+        // 用户只能手工去旧目录里删掉那个链接。所以必须在进入前就拦住。
+        if (depth > MaxCopyDepth)
+        {
+            Console.WriteLine($"[旧版本迁移] 目录层级超过 {MaxCopyDepth} 层，已跳过：{source}");
+            return;
+        }
+
         Directory.CreateDirectory(target);
         foreach (var file in Directory.EnumerateFiles(source))
         {
+            // 指向别处的符号链接跳过：复制它会把链接目标的内容整份搬进数据目录。
+            if (IsReparsePoint(file))
+            {
+                continue;
+            }
+
             var destination = Path.Combine(target, Path.GetFileName(file));
             if (!File.Exists(destination))
             {
@@ -694,7 +720,25 @@ public static class LegacyDataMigrationHelper
 
         foreach (var directory in Directory.EnumerateDirectories(source))
         {
-            CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
+            if (IsReparsePoint(directory))
+            {
+                continue;
+            }
+
+            CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)), depth + 1);
+        }
+    }
+
+    /// <summary>判断路径是否为符号链接/目录联接等重解析点。取不到属性时按「不是」处理。</summary>
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 

@@ -30,7 +30,21 @@ public class OpenMeteoCacheEntry
 
     [JsonPropertyName("airQuality")] public OpenMeteoAirQuality? AirQuality { get; set; }
 
-    [JsonIgnore] public TimeSpan Age => DateTime.Now - CachedAt;
+    /// <summary>
+    /// 缓存年龄。系统时间被回拨（或缓存来自另一台时区设置不同的机器）时
+    /// <see cref="DateTime.Now"/> 可能早于 <see cref="CachedAt"/>，差值为负。
+    /// 负年龄会绕过下面的 TTL 判断，让缓存永远被视为「新鲜」，页面再也不会联网刷新；
+    /// 界面上还会显示「-xx 分钟前」。这里统一钳到 0。
+    /// </summary>
+    [JsonIgnore]
+    public TimeSpan Age
+    {
+        get
+        {
+            var age = DateTime.Now - CachedAt;
+            return age < TimeSpan.Zero ? TimeSpan.Zero : age;
+        }
+    }
 }
 
 /// <summary>

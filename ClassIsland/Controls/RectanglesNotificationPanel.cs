@@ -157,6 +157,14 @@ public class RectanglesNotificationPanel : Panel
     internal void ResetWidthLock()
     {
         _lockedWidth = 0;
+        // 只清 _lockedWidth 是不够的：NotificationWidth 和 _targetWidth 还停在上一条的宽度上，
+        // 下一条提醒测量时差值必然超过容差，于是会走一次 333ms 的宽度动画 ——
+        // 短提醒弹出的头 1/3 秒仍维持上一条宽提醒的宽度，右侧文字被 ClipToBounds 裁掉，
+        // 然后才逐帧缩回来，看起来就是「闪一下宽」。这里把目标宽度一并归零并中断动画，
+        // 下一次测量就会以「不做动画」的方式直接吸附到新内容自己的宽度。
+        _targetWidth = 0;
+        CancelAnimation(ref _widthCancellation);
+        SetValue(NotificationWidthProperty, 0.0);
     }
 
     private bool CanAnimate => this.IsAttachedToVisualTree() && IThemeService.AnimationLevel != 0 &&
