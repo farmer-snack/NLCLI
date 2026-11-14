@@ -194,9 +194,14 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         // 必须先确认有消费者接单，再创建票据。CreateTicket 会把票据登记进 PlayingTickets、
         // 注册取消回调并创建 CTS；没有消费者时这张票永远不会被播放，
         // 之后 PopRequests 又会为同一条请求再造一张票，形成「一请求两票据」的泄漏。
-        if (pushNotifications && HasAvailableConsumer() && PushNotificationRequests([CreateTicket(request)]))
+        if (pushNotifications && HasAvailableConsumer())
         {
-            return;
+            var ticket = CreateTicket(request);
+            if (PushNotificationRequests([ticket]))
+            {
+                return;
+            }
+            CancelOrphanTicket(ticket);
         }
         // 如果没有消费者接收推送的提醒，则会加入提醒队列。
         EnqueueNotification(request, isPlayed);
@@ -306,9 +311,19 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             prevRequest = request;
         }
 
-        if (HasAvailableConsumer() && PushNotificationRequests(requests.Select(CreateTicket).ToList()))
+        if (HasAvailableConsumer())
         {
-            return;
+            var tickets = requests.Select(CreateTicket).ToList();
+            if (PushNotificationRequests(tickets))
+            {
+                return;
+            }
+            // 消费者在接单瞬间失效：票据已经建好但不会被任何人播放，必须取消掉，
+            // 否则它们会一直留在 PlayingTickets 里，其 CTS 与取消回调也永不释放。
+            foreach (var ticket in tickets)
+            {
+                CancelOrphanTicket(ticket);
+            }
         }
         // 如果没有消费者接收推送的提醒，则会加入提醒队列。
         foreach (var request in requests)
@@ -409,6 +424,27 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
     /// </summary>
     private bool HasAvailableConsumer() =>
         RegisteredConsumers.Any(x => x.Consumer.AcceptsNotificationRequests && x.Consumer.QueuedNotificationCount <= 0);
+
+    /// <summary>
+    /// 取消一张「建好了但没能推送出去」的票据。
+    /// </summary>
+    /// <remarks>
+    /// 这种票据不会被任何消费者播放，不取消就会一直留在 <c>PlayingTickets</c> 里，
+    /// 它的 CTS、取消回调和链式令牌也永远不会释放。
+    /// 取消回调里会看到请求还没被终结，从而把它重新入队 —— 这正是想要的：
+    /// 请求退回队列，等下一次有消费者时再派发。
+    /// </remarks>
+    private void CancelOrphanTicket(NotificationPlayingTicket ticket)
+    {
+        try
+        {
+            ticket.Cancel();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "清理未能推送的提醒票据时发生错误");
+        }
+    }
 
     private bool PushNotificationRequests(List<NotificationPlayingTicket> requests)
     {
