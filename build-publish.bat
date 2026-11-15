@@ -1,1 +1,2 @@
+git submodule update --init vendors/EdgeTtsSharp
 dotnet publish ClassIsland.Desktop\ClassIsland.Desktop.csproj -c Release -r win-x64 --self-contained true -p:ClassIsland_SelfContained=true -p:ClassIsland_PlatformTarget=x64 -o out
