@@ -371,8 +371,20 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
                 cancellationToken);
             if (pull.ExitCode != 0)
             {
-                throw new InvalidOperationException(
-                    "git pull 失败（可能本地分支与远端分叉）。请手动处理后重试。\n" + Tail(pull.Error + pull.Output));
+                // 本地与远端分叉时 --ff-only 必然失败。先尝试变基；变基失败就中止，
+                // 不能让仓库停在一半的变基状态里，否则用户下次打开仓库会一脸问号。
+                Report(progress, DevelopmentUpdateStage.Pulling, "快进拉取失败，尝试变基到远端…",
+                    Tail(pull.Error + pull.Output, 10));
+                var rebase = await RunProcessAsync(git, ["pull", "--rebase"], repositoryRoot, progress, null,
+                    cancellationToken);
+                if (rebase.ExitCode != 0)
+                {
+                    await RunProcessAsync(git, ["rebase", "--abort"], repositoryRoot, null, null,
+                        cancellationToken, false);
+                    throw new InvalidOperationException(
+                        "git pull 失败：本地分支与远端存在冲突，已中止变基。请手动处理后重试。\n" +
+                        Tail(rebase.Error + rebase.Output));
+                }
             }
         }
 
