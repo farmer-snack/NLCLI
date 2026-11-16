@@ -25,7 +25,7 @@
 [2026-11-16] 合并 / 补丁里的 `Subproject commit` 来自 gitlink 变化
 现象：format-patch 产出中出现 `-Subproject commit ...` 一行。
 根因：子模块目录在 git 里只是一个 gitlink（mode 160000），转成实体文件或反之都表现为这一行。
-结论：`grep -c "Subproject commit" update.txt` = 0 是「补丁不含子模块改动」的判据；反过来只要该行存在，就说明历史里有子模块增删。
+结论：判据必须用行首精确匹配 `grep -cE "^[-+]Subproject commit" update.txt`；直接 `grep -c "Subproject commit"` 会被 memory.txt、注释里的说明文字自身命中，得出假阳性。`git diff --stat <base>..HEAD -- vendors/EdgeTtsSharp` 为空可交叉验证。
 
 [2026-11-16] 流程 / 审计结论必须落盘，压缩后只剩文件
 现象：14 路审计代理的报告在上下文压缩后全部丢失，无法复核。
