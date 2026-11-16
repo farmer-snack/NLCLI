@@ -3,6 +3,11 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Avalonia.Threading;
 
 using ClassIsland.Models;
 using ClassIsland.Models.Debugging;
@@ -23,18 +28,33 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
 {
     public const string AllTypesFilter = "全部类型";
 
+    /// <summary>
+    /// 开发构建日志最多保留的字符数。编译输出可能非常长，
+    /// 不设上限会让文本控件持续变慢，最终拖住整个设置窗口。
+    /// </summary>
+    private const int MaxDevelopmentUpdateLogLength = 60000;
+
     private readonly SettingsService _settingsService;
     private readonly ILogger<ConfigDebugSettingsViewModel> _logger;
     private readonly List<ConfigVariableItem> _allVariables = [];
     private readonly Dictionary<string, ConfigVariableItem> _variablesByName = new(StringComparer.Ordinal);
     private readonly Settings _defaultSettings = new();
+    private readonly StringBuilder _developmentUpdateLogBuilder = new();
+    private CancellationTokenSource? _developmentUpdateCancellation;
+    private int _developmentUpdateLogFlushScheduled;
     private bool _subscribed;
 
     public ConfigDebugSettingsViewModel(SettingsService settingsService,
-        ILogger<ConfigDebugSettingsViewModel> logger)
+        ILogger<ConfigDebugSettingsViewModel> logger,
+        DevelopmentUpdateService developmentUpdateService)
     {
         _settingsService = settingsService;
         _logger = logger;
+        DevelopmentUpdateService = developmentUpdateService;
+
+        // 页面切换后 ViewModel 会重建，从服务里恢复当前状态。
+        DevelopmentUpdateStatus = developmentUpdateService.LastMessage;
+        IsDevelopmentUpdateRunning = developmentUpdateService.IsRunning;
 
         BuildVariables();
         EnsureSubscribed();
@@ -42,6 +62,8 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     }
 
     public SettingsService SettingsService => _settingsService;
+
+    public DevelopmentUpdateService DevelopmentUpdateService { get; }
 
     public string[] TypeFilters { get; } =
         [AllTypesFilter, "布尔", "数字", "文本", "日期时间", "颜色", "枚举", "其他"];
@@ -61,7 +83,113 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     [ObservableProperty]
     private string _statusText = "";
 
+    [ObservableProperty]
+    private bool _isDevelopmentUpdateRunning;
+
+    [ObservableProperty]
+    private string _developmentUpdateStatus = "尚未开始。";
+
+    [ObservableProperty]
+    private string _developmentUpdateLog = "";
+
+    [ObservableProperty]
+    private bool _hasDevelopmentUpdateLog;
+
     public Settings DefaultSettings => _defaultSettings;
+
+    public async Task StartDevelopmentUpdateAsync()
+    {
+        if (IsDevelopmentUpdateRunning)
+        {
+            return;
+        }
+
+        IsDevelopmentUpdateRunning = true;
+        _developmentUpdateLogBuilder.Clear();
+        DevelopmentUpdateLog = "";
+        HasDevelopmentUpdateLog = false;
+        DevelopmentUpdateStatus = "正在准备…";
+        _developmentUpdateCancellation = new CancellationTokenSource();
+        var progress = new Progress<DevelopmentUpdateProgress>(OnDevelopmentUpdateProgress);
+
+        try
+        {
+            await DevelopmentUpdateService.RunAsync(progress, _developmentUpdateCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            DevelopmentUpdateStatus = "已取消。";
+        }
+        catch (Exception ex)
+        {
+            DevelopmentUpdateStatus = $"更新失败：{ex.Message}";
+            AppendDevelopmentUpdateLog(ex.ToString());
+        }
+        finally
+        {
+            IsDevelopmentUpdateRunning = false;
+            _developmentUpdateCancellation?.Dispose();
+            _developmentUpdateCancellation = null;
+            FlushDevelopmentUpdateLog();
+        }
+    }
+
+    public void CancelDevelopmentUpdate()
+    {
+        _developmentUpdateCancellation?.Cancel();
+    }
+
+    private void OnDevelopmentUpdateProgress(DevelopmentUpdateProgress progress)
+    {
+        if (!string.IsNullOrEmpty(progress.Message))
+        {
+            DevelopmentUpdateStatus = progress.Message;
+        }
+
+        if (!string.IsNullOrEmpty(progress.Detail))
+        {
+            AppendDevelopmentUpdateLog(progress.Detail);
+        }
+    }
+
+    private void AppendDevelopmentUpdateLog(string line)
+    {
+        _developmentUpdateLogBuilder.AppendLine(line);
+        if (_developmentUpdateLogBuilder.Length > MaxDevelopmentUpdateLogLength)
+        {
+            var text = _developmentUpdateLogBuilder.ToString();
+            var cut = text.Length - MaxDevelopmentUpdateLogLength / 2;
+            var lineBreak = text.IndexOf('\n', cut);
+            _developmentUpdateLogBuilder.Clear()
+                .Append(lineBreak >= 0 ? text[(lineBreak + 1)..] : text[cut..]);
+        }
+
+        ScheduleDevelopmentUpdateLogFlush();
+    }
+
+    /// <summary>
+    /// 编译输出是逐行推送的，每一行都刷新一次文本控件会让界面明显卡顿。
+    /// 这里合并成约 8 帧一次的刷新频率。
+    /// </summary>
+    private void ScheduleDevelopmentUpdateLogFlush()
+    {
+        if (Interlocked.Exchange(ref _developmentUpdateLogFlushScheduled, 1) == 1)
+        {
+            return;
+        }
+
+        DispatcherTimer.RunOnce(() =>
+        {
+            Interlocked.Exchange(ref _developmentUpdateLogFlushScheduled, 0);
+            FlushDevelopmentUpdateLog();
+        }, TimeSpan.FromMilliseconds(120));
+    }
+
+    private void FlushDevelopmentUpdateLog()
+    {
+        DevelopmentUpdateLog = _developmentUpdateLogBuilder.ToString();
+        HasDevelopmentUpdateLog = DevelopmentUpdateLog.Length > 0;
+    }
 
     private void BuildVariables()
     {

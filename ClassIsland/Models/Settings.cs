@@ -107,6 +107,7 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private string _cityName = "北京 (北京, 中国)";
     private int _mainWindowFontWeight2 = (int)FontWeight.Medium;
     private int _taskBarIconClickBehavior = OperatingSystem.IsWindows() ? 0 : 4;
+    private bool _isTaskBarIconVisible = true;
     private bool _showExtraInfoOnTimePoint = true;
     private int _extraInfoType = 0;
     private bool _isCountdownEnabled = true;
@@ -583,6 +584,21 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
         {
             if (value == _taskBarIconClickBehavior) return;
             _taskBarIconClickBehavior = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 是否显示任务栏（托盘）图标。关闭后可通过在屏幕上画爱心恢复。
+    /// </summary>
+    [SettingsInfo("显示托盘图标", "\uE5C1", order: 3)]
+    public bool IsTaskBarIconVisible
+    {
+        get => _isTaskBarIconVisible;
+        set
+        {
+            if (value == _isTaskBarIconVisible) return;
+            _isTaskBarIconVisible = value;
             OnPropertyChanged();
         }
     }

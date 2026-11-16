@@ -61,6 +61,38 @@
                     <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsDebugOptionsEnabled, Mode=TwoWay}" />
                 </controls3:FASettingsExpander.Footer>
             </controls3:FASettingsExpander>
+
+            <!-- 拉取更新并编译运行 -->
+            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE895;}"
+                                          Header="拉取更新并编译运行"
+                                          Description="从当前 Git 仓库拉取最新提交，自动补齐子模块、安装缺失的 Git 与 .NET SDK，编译完成后打开输出目录并重启到新版本。仅在从源码目录运行时可用。">
+                <controls3:FASettingsExpanderItem>
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="开始更新并编译"
+                                    Classes="accent"
+                                    Click="ButtonDevelopmentUpdate_OnClick"
+                                    IsEnabled="{Binding !ViewModel.IsDevelopmentUpdateRunning}" />
+                            <Button Content="取消"
+                                    Click="ButtonCancelDevelopmentUpdate_OnClick"
+                                    IsEnabled="{Binding ViewModel.IsDevelopmentUpdateRunning}" />
+                        </StackPanel>
+                        <ProgressBar IsIndeterminate="True"
+                                     IsVisible="{Binding ViewModel.IsDevelopmentUpdateRunning}" />
+                        <TextBlock Text="{Binding ViewModel.DevelopmentUpdateStatus}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap" />
+                        <TextBox x:Name="DevelopmentUpdateLogBox"
+                                 Text="{Binding ViewModel.DevelopmentUpdateLog}"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 Height="180"
+                                 FontFamily="Cascadia Mono,Consolas,DejaVu Sans Mono,monospace"
+                                 IsVisible="{Binding ViewModel.HasDevelopmentUpdateLog}" />
+                    </StackPanel>
+                </controls3:FASettingsExpanderItem>
+            </controls3:FASettingsExpander>
         </StackPanel>
 
         <Grid Grid.Row="1" ColumnDefinitions="*,170,Auto,Auto" Margin="0 0 0 8" ColumnSpacing="8">

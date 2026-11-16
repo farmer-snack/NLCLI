@@ -110,6 +110,20 @@
                 </controls3:FASettingsExpanderItem>
             </controls3:FASettingsExpander>
             
+            <!-- 显示托盘图标 -->
+            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE7B3;}"
+                                        Header="显示托盘图标">
+                <controls3:FASettingsExpander.Description>
+                    <OnPlatform Default="关闭后托盘图标会从任务栏通知区域隐藏。隐藏时在屏幕上画一个大大的爱心，即可重新显示托盘图标。">
+                        <On Options="Linux" Content="关闭后托盘图标会从任务栏通知区域隐藏。"/>
+                        <On Options="macOS" Content="关闭后托盘图标会从菜单栏隐藏。"/>
+                    </OnPlatform>
+                </controls3:FASettingsExpander.Description>
+                <controls3:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsTaskBarIconVisible}"/>
+                </controls3:FASettingsExpander.Footer>
+            </controls3:FASettingsExpander>
+
             <!-- 点击托盘图标行为 -->
             <!-- 平台行为差异：在macOS平台上此选项不显示（无效），在Linux平台上一些DE会正确响应左键（如Deepin），也有其他的DE将左键响应为右键点击（如Ubuntu）-->
             <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE5C1;}" 

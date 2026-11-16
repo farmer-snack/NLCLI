@@ -282,7 +282,7 @@ public partial class MainWindow : Window, ITopmostEffectPlayer
         IAppHost.GetService<ISplashService>().SetDetailedStatus("正在初始化托盘菜单");
         var menu = this.FindResource("AppMenu") as NativeMenu;
         TaskBarIconService.MainTaskBarIcon.Menu = menu;
-        TaskBarIconService.MainTaskBarIcon.IsVisible = true;
+        TaskBarIconService.MainTaskBarIcon.IsVisible = SettingsService.Settings.IsTaskBarIconVisible;
         TaskBarIconService.MainTaskBarIcon.Clicked += MainTaskBarIconOnClicked;
         if (OperatingSystem.IsMacOS())
         {

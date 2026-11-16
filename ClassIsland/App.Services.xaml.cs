@@ -67,6 +67,9 @@ public partial class App
         services.AddSingleton<SettingsService>();
         services.AddSingleton<UpdateService>();
         services.AddSingleton<ITaskBarIconService, TaskBarIconService>();
+        services.AddSingleton<HeartGestureService>();
+        services.AddHostedService(provider => provider.GetRequiredService<HeartGestureService>());
+        services.AddSingleton<DevelopmentUpdateService>();
         services.AddSingleton<INotificationHostService, NotificationHostService>();
         services.AddSingleton<INotificationWorkerService, NotificationWorkerService>();
         services.AddSingleton<ThemeService>();

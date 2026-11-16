@@ -449,6 +449,52 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 管理策略 DisableDebugMenu 仍然优先：集控禁用调试菜单时本页同样隐藏，这是有意为之。
 - 上游若重新注册 TestSettingsPage，会把这个「点了必错」的入口带回来，同步后要复查。
 
+开发构建更新按钮（2026-11-16）
+- 页内新增「拉取更新并编译运行」：定位当前 Git 仓库 → git fetch / pull → 子模块初始化 → 编译桌面项目。
+  pull 用 --ff-only，失败退回 --rebase（rebase 失败会中止并报错，不留半截状态）。
+- 子模块最多重试 5 次，指数退避；从第 2 次起用 url.https://github.com/.insteadOf 把
+  SSH 地址临时改写成 HTTPS，照顾没配 SSH key 的机器。
+- 缺 Git / .NET 10 SDK 时自动安装：Windows 依次试 winget、choco；macOS 用 brew；
+  Linux 按 apt-get / dnf / pacman / zypper 顺序，非 root 走 pkexec 或 sudo -n。
+  没有包管理器时 .NET 退回官方 dotnet-install 脚本。
+- 编译输出走 --artifacts-path（默认 %TEMP%/ClassIsland-dev-build），不写回 bin。应用通常正从
+  bin 目录运行，直接编译回默认输出会撞上被占用的 exe/dll（Windows 是硬性文件锁）。
+- 编译完成后打开输出目录，退出当前进程并以相同工作目录启动新版本。工作目录必须和当前一致：
+  默认打包类型下配置、档案、日志都相对工作目录解析，换成输出目录会让新版本用空配置启动。
+- 网络类失败（NU1301、Unable to load the service index、Could not resolve host、SSL、超时）
+  自动重试 3 次，指数退避。
+- 页面显示阶段状态与逐行日志（日志截断到 60000 字符，刷新合并到 120ms 一次），运行中可取消；
+  切走再切回页面时从服务恢复当前状态，不会看起来像没在跑。
+- 涉及：ConfigDebugSettingsPage.axaml(.cs)、ConfigDebugSettingsViewModel.cs、
+  Services/DevelopmentUpdateService.cs、App.Services.xaml.cs。
+
+================================================
+[长期] 托盘图标开关与爱心手势
+================================================
+
+需求（2026-11-16）：
+基本页面要能控制托盘图标显示/隐藏；图标隐藏后，在屏幕上画一个大大的爱心让它重新出现。
+
+托盘可见性
+- Settings 新增 IsTaskBarIconVisible（默认 true，带 SettingsInfo，可在自动化「应用设置」里改）。
+- TaskBarIconService 注入 SettingsService，同时订阅 SettingsService 的 Settings 属性与
+  Settings 对象自身的 PropertyChanged：Settings 对象会被整体替换，不重新挂接的话换配置后开关失效。
+- 可见性统一走 ApplyVisibility()，非 UI 线程用 Dispatcher.UIThread.Post 切回 UI 线程。
+- MainWindow 初始化托盘菜单时按该设置决定初始可见性，不再无条件 IsVisible = true。
+
+爱心手势
+- 新增 Services/HeartGestureService.cs（IHostedService）：仅在 Windows 且托盘图标隐藏时
+  安装 WH_MOUSE_LL 全局鼠标钩子，记录左键按下到抬起的轨迹。
+- 识别流程：重采样到 128 点 → 尺寸 / 长宽比 / 路径长度 / 闭合度检查 → 顶部双凸起与底部尖角
+  → 与参数方程心形模板做双向 Chamfer 距离比对（阈值 0.22）。
+- 命中后在 UI 线程把 IsTaskBarIconVisible 置回 true，托盘图标随之恢复。
+- 钩子线程用 MsgWaitForMultipleObjects 带 100ms 超时轮询，不能裸阻塞在 GetMessage：
+  线程 ID 在线程启动后才写入，停止请求可能早于线程就绪，一旦错过就永远退不出来，
+  会造成钩子泄漏、下次隐藏时重复安装。
+- 只在 Windows 生效（Linux/macOS 没有等价的全局鼠标钩子）；设置页描述按平台区分。
+- 涉及：Models/Settings.cs、Services/TaskBarIconService.cs、Services/HeartGestureService.cs、
+  MainWindow.axaml.cs、Views/SettingPages/GeneralSettingsPage.axaml、App.Services.xaml.cs。
+
 ================================================
 [长期] 提醒语音与音效
 ================================================
@@ -794,6 +840,10 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
     PluginLoadStatus.cs、WindowPlatformService.cs
 11. 记录文件 —— action.txt（同步进度锚点）、out.txt（同步记录）、fixxed.txt（本文件）。
     三者都是仓库内容，随提交走，不写进补丁说明之外的任何地方。
+12. 托盘图标开关与爱心手势 —— 见同名段；文件：Settings.cs、TaskBarIconService.cs、
+    HeartGestureService.cs、MainWindow.axaml.cs、GeneralSettingsPage.axaml、App.Services.xaml.cs
+    变量调试页的「拉取更新并编译运行」见变量调试页段；文件：DevelopmentUpdateService.cs、
+    ConfigDebugSettingsPage.axaml(.cs)、ConfigDebugSettingsViewModel.cs
 
 判定口径
 --------

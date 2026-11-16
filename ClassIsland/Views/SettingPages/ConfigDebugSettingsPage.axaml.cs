@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 
 using Avalonia.Controls;
@@ -30,6 +31,28 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
     {
         InitializeComponent();
         DataContext = this;
+        ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
+    }
+
+    private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ConfigDebugSettingsViewModel.DevelopmentUpdateLog))
+        {
+            return;
+        }
+
+        // 日志是持续追加的，把光标放到末尾让视图自动跟随最新一行。
+        DevelopmentUpdateLogBox.CaretIndex = DevelopmentUpdateLogBox.Text?.Length ?? 0;
+    }
+
+    private async void ButtonDevelopmentUpdate_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ViewModel.StartDevelopmentUpdateAsync();
+    }
+
+    private void ButtonCancelDevelopmentUpdate_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel.CancelDevelopmentUpdate();
     }
 
     private void ButtonResetVariable_OnClick(object? sender, RoutedEventArgs e)
