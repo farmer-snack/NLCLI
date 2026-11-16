@@ -61,26 +61,12 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
     private List<NotificationPlayingTicket> PlayingTickets { get; } = [];
 
-    /// <summary>
-    /// 提醒队列的硬上限。正常情况下队列长度只有个位数；只有消费者卡死、
-    /// 或者上游以极高频率推送（例如 cron 触发器被反复重建）时才会无限增长。
-    /// 不设上限的话，每一条积压的提醒都会连同它的 CancellationTokenSource、
-    /// 链式请求和播放票据一起留在内存里，最终表现为内存持续上涨直至 OOM。
-    /// </summary>
-    private const int MaxQueuedRequests = 256;
-
     public NotificationRequest? CurrentRequest { get; set; }
 
     public NotificationRequest GetRequest()
     {
-        if (!RequestQueue.TryDequeue(out var request, out _) || request == null)
-        {
-            // 队列空时直接 Dequeue 会抛 InvalidOperationException，而接口签名不允许返回 null。
-            // 返回一个空请求，调用方通过 State 能看出它并没有真正被调度。
-            return new NotificationRequest();
-        }
-        CurrentRequest = request;
-        return request;
+        CurrentRequest = RequestQueue.Dequeue();
+        return CurrentRequest;
     }
 
     /// <summary>
@@ -211,16 +197,6 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
     {
         if (!EnqueuedRequests.Add(request))
         {
-            return;
-        }
-
-        if (RequestQueue.Count >= MaxQueuedRequests)
-        {
-            // 丢弃新来的提醒而不是最旧的：最旧的那条往往正在被消费者处理或
-            // 属于一条链的头，从中间抽走它会让链断掉。
-            Logger.LogWarning("提醒队列已满（{Count}），丢弃提醒 {Request}", MaxQueuedRequests, request);
-            EnqueuedRequests.Remove(request);
-            request.CompletedTokenSource.Cancel();
             return;
         }
 
@@ -759,14 +735,12 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
             if (!settled)
             {
-                // 收尾没有确认：worker 可能还在播这条提醒，重排会让同一条提醒播两遍。
-                // 但也不能把请求丢掉 —— 通过 ShowNotificationAsync / 自动化行动等待的调用方
-                // 会永远收不到完成信号。这里把请求标记为结束并放行完成信号。
-                Logger.LogWarning("票据 {} 未能在 {Timeout} 内收尾，放弃重排", ticket.GetHashCode(),
-                    CancellationSettledTimeout);
-                request.State = NotificationState.Cancelled;
-                request.CompletedTokenSource.Cancel();
-                return;
+                // 收尾信号超时：worker 可能卡在不可中断的等待里（音频设备异常、语音服务无响应）。
+                // 这里仍然按上游语义把请求退回队列 —— 最坏情况是旧 processor 恢复后与新
+                // processor 各播一次（重复），但直接丢弃会让这条提醒彻底消失，代价更大。
+                // EnqueuedRequests 的判重会挡住「请求本来就在队列里」的情况。
+                Logger.LogWarning("票据 {} 未能在 {Timeout} 内收尾，仍按移交处理重新入队",
+                    ticket.GetHashCode(), CancellationSettledTimeout);
             }
 
             Logger.LogTrace("重新加入提醒队列, {}", request);

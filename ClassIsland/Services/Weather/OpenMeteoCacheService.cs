@@ -94,11 +94,12 @@ public class OpenMeteoCacheService(ILogger<OpenMeteoCacheService> logger)
                 return null;
             }
 
-            // 只丢低版本会放过「来自更新版本、结构已经不同」的缓存，
-            // 按当前模型反序列化后字段对不上，页面会拿到一片空白却以为命中了缓存。
-            if (entry.Version != OpenMeteoCacheEntry.CurrentVersion)
+            // 只丢弃「结构过旧」的缓存。比当前版本新的缓存保持可用：JSON 反序列化会忽略
+            // 未知字段、缺失字段取默认值，降级运行时仍能拿到大部分数据，直接丢弃反而会在
+            // 离线场景下让天气显示为空白。
+            if (entry.Version < OpenMeteoCacheEntry.CurrentVersion)
             {
-                _logger.LogInformation("Open-Meteo 缓存结构版本不一致（{} != {}），忽略缓存",
+                _logger.LogInformation("Open-Meteo 缓存结构版本过旧（{} < {}），忽略缓存",
                     entry.Version, OpenMeteoCacheEntry.CurrentVersion);
                 return null;
             }

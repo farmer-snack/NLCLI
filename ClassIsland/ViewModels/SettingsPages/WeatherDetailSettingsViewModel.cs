@@ -513,6 +513,10 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                   + $"&minutely_15={Minutely15Variables}"
                   + "&timezone=auto&forecast_days=16&forecast_minutely_15=96";
 
+        // 每次真实请求各记一次（forecast 与 air quality 分别计数），与 Open-Meteo
+        // 按请求数计费的口径一致；放在重试循环外，重试不重复计数。
+        _quotaService.Record();
+        UpdateQuotaText();
         return await GetJsonAsync<OpenMeteoForecast>(url);
     }
 
@@ -527,6 +531,8 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
                       + $"&current={AirQualityVariables}"
                       + "&timezone=auto";
 
+            _quotaService.Record();
+            UpdateQuotaText();
             return await GetJsonAsync<OpenMeteoAirQuality>(url);
         }
         catch (Exception ex)
@@ -544,13 +550,6 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         Exception? last = null;
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            // 每次真正发请求前都要过一次额度：本方法内部会重试一次，只在 Fetch
-            // 入口检查/计数的话，重试会绕过拦截、也不计入已用额度。放在 try 外面，
-            // 额度耗尽时直接把原因冒泡出去，不再做无谓的重试。
-            EnsureQuotaAvailable();
-            _quotaService.Record();
-            UpdateQuotaText();
-
             var sw = Stopwatch.StartNew();
             try
             {
@@ -579,28 +578,6 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         }
 
         throw new InvalidOperationException($"请求 Open-Meteo 失败：{last?.Message}", last);
-    }
-
-    /// <summary>
-    /// 发请求前确认免费额度还没用完。以前这里只把剩余次数显示在页面上，
-    /// 用完之后仍然照发，接口返回 429，页面只显示一句「请求失败」，用户完全不知道
-    /// 是额度耗尽。更糟的是每次失败还会按重试逻辑再打一次，把情况弄得更糟。
-    /// </summary>
-    private void EnsureQuotaAvailable()
-    {
-        var quota = _quotaService.Current;
-        if (quota.Remaining > 0)
-        {
-            return;
-        }
-
-        var reason = quota.MinuteRemaining <= 0
-            ? "本分钟"
-            : quota.HourRemaining <= 0
-                ? "本小时"
-                : "今天";
-        throw new InvalidOperationException(
-            $"{reason}的 Open-Meteo 免费请求额度已用尽，请稍后再试（额度会在滚动窗口内自动恢复）。");
     }
 
     private void UpdateQuotaText()

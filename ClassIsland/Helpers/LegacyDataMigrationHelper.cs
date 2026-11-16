@@ -97,7 +97,7 @@ public static class LegacyDataMigrationHelper
                 // 旧版把数据放在 %AppData%\ClassIsland，新版放在 %AppData%\ClassIsland\Data，
                 // 这种旧目录必须允许迁移，否则旧版本里的插件永远不会被带过来。
                 if (string.Equals(normalized, currentRoot, StringComparison.OrdinalIgnoreCase) ||
-                    IsAncestorOf(normalized, currentRoot))
+                    IsAncestorOf(currentRoot, normalized))
                 {
                     Log(log, $"跳过 {normalized}：与当前数据目录相同，或位于当前数据目录内部");
                     continue;

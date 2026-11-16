@@ -49,7 +49,9 @@ public class GptSoVitsService : ISpeechService
     /// </summary>
     private static readonly HttpClient SharedHttpClient = new()
     {
-        Timeout = TimeSpan.FromSeconds(30)
+        // 与 HttpClient 的默认值保持一致：本地 TTS 合成较长的段落可能超过 30 秒，
+        // 缩短超时会让长文本朗读直接失败。需要更短超时的场景由调用方的取消令牌控制。
+        Timeout = TimeSpan.FromSeconds(100)
     };
 
     public GptSoVitsService(IAudioService audioService, ILogger<GptSoVitsService> logger, SettingsService settingsService)
