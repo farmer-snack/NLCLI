@@ -495,6 +495,18 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 涉及：Models/Settings.cs、Services/TaskBarIconService.cs、Services/HeartGestureService.cs、
   MainWindow.axaml.cs、Views/SettingPages/GeneralSettingsPage.axaml、App.Services.xaml.cs。
 
+补充（2026-11-17）：
+- 修正原生 DLL 导入：GetCurrentThreadId、GetModuleHandle 由 kernel32.dll 导出，原先误写成
+  user32.dll。隐藏托盘图标后启动钩子线程会抛 EntryPointNotFoundException，整个应用直接崩溃。
+- 爱心命中后不再把 IsTaskBarIconVisible 置回 true（上面「命中后置回 true」的旧行为已废弃）。
+  改为调用 TaskBarIconService.ShowTemporarily() 临时显示：设置仍保持「不显示」，图标在用户
+  点击一次（或关闭托盘菜单）后自动隐藏；若一直无操作，15 秒后自动隐藏。用户的选择不会被覆盖，
+  下次仍可再画爱心唤出。
+- 临时显示期间菜单打开时不按点击延迟收起，改为等 NativeMenu.Closed 再收起，
+  避免把刚打开的托盘菜单一起关掉；菜单打开超过兜底时限也不会强收。
+- TaskBarIconService 同时注册具体单例与 ITaskBarIconService 转发，HeartGestureService 才能
+  直接调用临时显示接口，无需把方法加到公开接口上影响插件实现。
+
 ================================================
 [长期] 提醒语音与音效
 ================================================

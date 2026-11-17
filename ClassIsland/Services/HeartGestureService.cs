@@ -38,6 +38,7 @@ public sealed class HeartGestureService : IHostedService, IDisposable
 
     private readonly ILogger<HeartGestureService> _logger;
     private readonly SettingsService _settingsService;
+    private readonly TaskBarIconService _taskBarIconService;
     private readonly object _syncRoot = new();
     private readonly List<PointD> _points = new();
 
@@ -52,10 +53,12 @@ public sealed class HeartGestureService : IHostedService, IDisposable
     private PointD _lastPoint;
     private int _recognizing;
 
-    public HeartGestureService(ILogger<HeartGestureService> logger, SettingsService settingsService)
+    public HeartGestureService(ILogger<HeartGestureService> logger, SettingsService settingsService,
+        TaskBarIconService taskBarIconService)
     {
         _logger = logger;
         _settingsService = settingsService;
+        _taskBarIconService = taskBarIconService;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -327,14 +330,10 @@ public sealed class HeartGestureService : IHostedService, IDisposable
             {
                 if (IsHeart(points))
                 {
-                    _logger.LogInformation("检测到爱心手势，正在恢复托盘图标。");
-                    Dispatcher.UIThread.Post(() =>
-                    {
-                        if (!_settingsService.Settings.IsTaskBarIconVisible)
-                        {
-                            _settingsService.Settings.IsTaskBarIconVisible = true;
-                        }
-                    });
+                    _logger.LogInformation("检测到爱心手势，正在临时显示托盘图标。");
+                    // 只临时显示，不把「显示托盘图标」设置改回开启：
+                    // 用户用完后图标会自动收起，下次仍可再画爱心唤出。
+                    Dispatcher.UIThread.Post(_taskBarIconService.ShowTemporarily);
                 }
             }
             catch (Exception ex)

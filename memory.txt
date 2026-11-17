@@ -71,3 +71,19 @@
 现象：本机无 Android workload，`dotnet build` 无法验证 Android 目标。
 根因：未安装 net10.0-android 工作负载。
 结论：新增代码只用跨平台 API；平台相关一律 `OperatingSystem.IsWindows()` 等守卫包裹，并在 WPF/Win32 P/Invoke 处加 `[SupportedOSPlatform]` 或运行时判断，保证其它平台只是不启用而非崩溃。
+
+[2026-11-17] 平台 / Win32 P/Invoke 必须按实际导出 DLL 声明
+现象：爱心手势钩子把 `GetCurrentThreadId`、`GetModuleHandle` 声明成 `user32.dll`，隐藏托盘图标启动钩子线程时抛 `EntryPointNotFoundException`，整个应用崩溃。
+根因：这两个函数由 `kernel32.dll` 导出，`user32.dll` 只有窗口/消息相关函数；DllImport 写错 DLL 时编译期不报错，首次调用才炸。
+结论：每个 P/Invoke 都对照微软文档确认导出模块（`GetModuleHandle`/`GetCurrentThreadId`/`GetTickCount` 等属 kernel32）；拿不准时用 `dumpbin /exports` 或 docs.microsoft.com 核对，不要凭命名猜。
+
+[2026-11-17] 定制点 / 临时唤出的界面不能写回用户设置
+现象：画爱心恢复托盘图标时直接 `IsTaskBarIconVisible = true`，把用户「不显示」的选择永久改掉，图标再也不自动收起。
+根因：把「临时显示」实现成了「修改设置」。
+结论：任何「快捷键/手势临时唤出」都应只改运行期可见状态，不改持久化设置；临时状态要有明确的收起时机（交互完成、菜单关闭、超时兜底），并处理菜单打开时不能收起，否则会把刚打开的菜单一起关掉。
+
+[2026-11-17] 环境 / FileBin 下载要跟随重定向
+现象：`curl -O https://filebin.net/<bin>/<file>` 得到 0 字节文件。
+根因：FileBin 返回 302 到 storage.filebin.net，未加 `-L` 时 curl 不跟随。
+结论：下载统一 `curl -sSL -o <file> ...`；校验大小/哈希后再使用，0 字节往往就是漏了 `-L`。
+

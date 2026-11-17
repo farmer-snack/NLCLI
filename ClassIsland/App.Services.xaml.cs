@@ -66,7 +66,8 @@ public partial class App
         ConfigurePlatformServices?.Invoke(services);
         services.AddSingleton<SettingsService>();
         services.AddSingleton<UpdateService>();
-        services.AddSingleton<ITaskBarIconService, TaskBarIconService>();
+        services.AddSingleton<TaskBarIconService>();
+        services.AddSingleton<ITaskBarIconService>(provider => provider.GetRequiredService<TaskBarIconService>());
         services.AddSingleton<HeartGestureService>();
         services.AddHostedService(provider => provider.GetRequiredService<HeartGestureService>());
         services.AddSingleton<DevelopmentUpdateService>();
