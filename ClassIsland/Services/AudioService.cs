@@ -19,7 +19,8 @@ namespace ClassIsland.Services;
 
 public class AudioService(ILogger<AudioService> logger) : IAudioService
 {
-    private readonly AudioEngine _audioEngine = Task.Run((() => new MiniAudioEngine())).Result;
+    private readonly object _audioEngineLock = new();
+    private AudioEngine? _audioEngine;
     private ILogger<AudioService> Logger { get; } = logger;
 
     private RefCounted<AudioPlaybackDevice>? _sharedAudioPlaybackDevice;
@@ -44,7 +45,26 @@ public class AudioService(ILogger<AudioService> logger) : IAudioService
                 throw new InvalidOperationException(
                     "出于线程安全考虑，禁止在非 MTA 线程上调用 AudioEngine。请在 MTA 线程上调用 AudioEngine。详细请见 https://github.com/ClassIsland/ClassIsland/issues/1333#issuecomment-3505591836");
             }
+            return GetOrCreateAudioEngine();
+        }
+    }
+
+    /// <summary>
+    /// 延迟初始化音频引擎。MiniAudioEngine 会加载 miniaudio.dll，而它依赖 VC++ 运行库：
+    /// 在缺少 VCRUNTIME140.dll 的机器上，构造会直接抛异常。如果放在构造函数里，
+    /// 整个应用会在启动阶段崩溃（0x8007007E），连自动修复的机会都没有。
+    /// 这里把失败结果排除在缓存之外，补装运行库后再次调用仍有机会恢复。
+    /// </summary>
+    private AudioEngine GetOrCreateAudioEngine()
+    {
+        if (_audioEngine != null)
+        {
             return _audioEngine;
+        }
+
+        lock (_audioEngineLock)
+        {
+            return _audioEngine ??= Task.Run(() => new MiniAudioEngine()).Result;
         }
     }
 
@@ -216,7 +236,7 @@ public class AudioService(ILogger<AudioService> logger) : IAudioService
 
         try
         {
-            AudioEngine.Dispose();
+            _audioEngine?.Dispose();
         }
         catch (Exception ex)
         {

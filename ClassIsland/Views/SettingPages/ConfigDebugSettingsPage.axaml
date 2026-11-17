@@ -93,6 +93,51 @@
                     </StackPanel>
                 </controls3:FASettingsExpanderItem>
             </controls3:FASettingsExpander>
+
+            <!-- 原生库依赖检查 -->
+            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE897;}"
+                                          Header="原生库依赖检查"
+                                          Description="扫描 runtimes 目录下的原生库，检查它们依赖的系统运行库是否齐全。缺失的 VC++ 运行库会自动从微软下载安装，缺失的 NuGet 原生库会自动从 nuget.org 还原。">
+                <controls3:FASettingsExpanderItem>
+                    <StackPanel Spacing="8">
+                        <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsNativeDependencyAutoRepairEnabled, Mode=TwoWay}"
+                                      OnContent="启动时自动检查并修复"
+                                      OffContent="启动时自动检查并修复"
+                                      ToolTip.Tip="关闭后启动时不再检查，仍可在这里手动检查和修复" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="立即检查"
+                                    Click="ButtonCheckNativeDependencies_OnClick"
+                                    IsEnabled="{Binding !ViewModel.IsNativeDependencyBusy}" />
+                            <Button Content="自动修复"
+                                    Classes="accent"
+                                    Click="ButtonRepairNativeDependencies_OnClick"
+                                    IsEnabled="{Binding !ViewModel.IsNativeDependencyBusy}" />
+                            <Button Content="打开 runtimes 目录"
+                                    Click="ButtonOpenRuntimesDirectory_OnClick" />
+                        </StackPanel>
+                        <ProgressBar IsIndeterminate="True"
+                                     IsVisible="{Binding ViewModel.IsNativeDependencyBusy}" />
+                        <TextBlock Text="{Binding ViewModel.NativeDependencyStatus}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap" />
+                        <ScrollViewer MaxHeight="200"
+                                      VerticalScrollBarVisibility="Auto"
+                                      IsVisible="{Binding ViewModel.HasNativeDependencyIssues}">
+                            <ItemsControl ItemsSource="{Binding ViewModel.NativeDependencyIssues}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="#14FF6B6B" CornerRadius="4" Padding="8 4" Margin="0 2">
+                                            <TextBlock Text="{Binding Description}"
+                                                       FontSize="12"
+                                                       TextWrapping="Wrap" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+                </controls3:FASettingsExpanderItem>
+            </controls3:FASettingsExpander>
         </StackPanel>
 
         <Grid Grid.Row="1" ColumnDefinitions="*,170,Auto,Auto" Margin="0 0 0 8" ColumnSpacing="8">

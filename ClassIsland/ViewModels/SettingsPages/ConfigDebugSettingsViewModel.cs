@@ -46,15 +46,22 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
 
     public ConfigDebugSettingsViewModel(SettingsService settingsService,
         ILogger<ConfigDebugSettingsViewModel> logger,
-        DevelopmentUpdateService developmentUpdateService)
+        DevelopmentUpdateService developmentUpdateService,
+        NativeDependencyService nativeDependencyService)
     {
         _settingsService = settingsService;
         _logger = logger;
         DevelopmentUpdateService = developmentUpdateService;
+        NativeDependencyService = nativeDependencyService;
 
         // 页面切换后 ViewModel 会重建，从服务里恢复当前状态。
         DevelopmentUpdateStatus = developmentUpdateService.LastMessage;
         IsDevelopmentUpdateRunning = developmentUpdateService.IsRunning;
+        NativeDependencyStatus = nativeDependencyService.LastReport is { } lastReport
+            ? lastReport.IsHealthy
+                ? $"上次检查通过，共检查 {lastReport.ScannedFileCount} 个原生库。"
+                : $"上次检查发现 {lastReport.Issues.Count} 项问题。"
+            : "尚未检查。";
 
         BuildVariables();
         EnsureSubscribed();
@@ -64,6 +71,8 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     public SettingsService SettingsService => _settingsService;
 
     public DevelopmentUpdateService DevelopmentUpdateService { get; }
+
+    public NativeDependencyService NativeDependencyService { get; }
 
     public string[] TypeFilters { get; } =
         [AllTypesFilter, "布尔", "数字", "文本", "日期时间", "颜色", "枚举", "其他"];
@@ -94,6 +103,19 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
 
     [ObservableProperty]
     private bool _hasDevelopmentUpdateLog;
+
+    [ObservableProperty]
+    private bool _isNativeDependencyBusy;
+
+    [ObservableProperty]
+    private string _nativeDependencyStatus = "尚未检查。";
+
+    [ObservableProperty]
+    private IReadOnlyList<NativeDependencyIssue> _nativeDependencyIssues =
+        Array.Empty<NativeDependencyIssue>();
+
+    [ObservableProperty]
+    private bool _hasNativeDependencyIssues;
 
     public Settings DefaultSettings => _defaultSettings;
 
@@ -137,6 +159,115 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     public void CancelDevelopmentUpdate()
     {
         _developmentUpdateCancellation?.Cancel();
+    }
+
+    /// <summary>
+    /// 扫描 runtimes 目录下的原生库，检查它们依赖的运行库是否齐全。
+    /// </summary>
+    public async Task CheckNativeDependenciesAsync()
+    {
+        if (IsNativeDependencyBusy)
+        {
+            return;
+        }
+
+        IsNativeDependencyBusy = true;
+        NativeDependencyStatus = "正在检查原生库依赖…";
+        try
+        {
+            var report = await NativeDependencyService.ProbeAsync();
+            ApplyNativeDependencyReport(report);
+        }
+        catch (Exception ex)
+        {
+            NativeDependencyStatus = $"检查失败：{ex.Message}";
+            _logger.LogError(ex, "检查原生库依赖失败。");
+        }
+        finally
+        {
+            IsNativeDependencyBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// 检查并修复原生库依赖：缺失的 VC++ 运行库从微软下载安装，缺失的 NuGet 原生库从 nuget.org 还原。
+    /// </summary>
+    public async Task RepairNativeDependenciesAsync()
+    {
+        if (IsNativeDependencyBusy)
+        {
+            return;
+        }
+
+        IsNativeDependencyBusy = true;
+        NativeDependencyStatus = "正在检查原生库依赖…";
+        try
+        {
+            var report = await NativeDependencyService.ProbeAsync();
+            if (report.IsHealthy)
+            {
+                ApplyNativeDependencyReport(report);
+                return;
+            }
+
+            var progress = new Progress<string>(message => NativeDependencyStatus = message);
+            var result = await NativeDependencyService.RepairAsync(report, progress);
+            ApplyNativeDependencyReport(new NativeDependencyReport(result.RemainingIssues,
+                report.ScannedFileCount, report.BaseDirectory));
+
+            var summary = new List<string>();
+            if (result.RestoredFileCount > 0)
+            {
+                summary.Add($"已还原 {result.RestoredFileCount} 个原生库");
+            }
+
+            if (result.VisualCppRuntimeInstalled)
+            {
+                summary.Add("已安装 Microsoft Visual C++ 运行库");
+            }
+
+            if (!string.IsNullOrEmpty(result.Failure))
+            {
+                summary.Add(result.Failure);
+            }
+
+            // 系统组件缺失（如 d3dcompiler_47.dll）不属于应用能自动修复的范围，
+            // 只要可自动处理的问题都消失了，就应该告诉用户修复是成功的。
+            var remainingFixable = result.RemainingIssues.Count(x =>
+                x.Kind == NativeDependencyKind.VisualCppRuntime ||
+                (x.Kind == NativeDependencyKind.ApplicationNative &&
+                 !string.IsNullOrEmpty(x.PackageId)));
+            if (remainingFixable == 0 && result.Failure == null)
+            {
+                summary.Add(result.Succeeded ? "全部依赖已就绪" : "可自动修复的依赖已全部处理");
+            }
+            else if (remainingFixable > 0)
+            {
+                summary.Add($"仍有 {remainingFixable} 项可自动修复的问题未解决");
+            }
+
+            NativeDependencyStatus = summary.Count > 0
+                ? string.Join("；", summary) + "。"
+                : "修复完成。";
+        }
+        catch (Exception ex)
+        {
+            NativeDependencyStatus = $"修复失败：{ex.Message}";
+            _logger.LogError(ex, "修复原生库依赖失败。");
+        }
+        finally
+        {
+            IsNativeDependencyBusy = false;
+        }
+    }
+
+    private void ApplyNativeDependencyReport(NativeDependencyReport report)
+    {
+        NativeDependencyIssues = report.Issues;
+        HasNativeDependencyIssues = report.Issues.Count > 0;
+        NativeDependencyStatus = report.IsHealthy
+            ? $"检查通过，共检查 {report.ScannedFileCount} 个原生库。"
+            : $"发现 {report.Issues.Count} 项问题，共检查 {report.ScannedFileCount} 个原生库。";
     }
 
     private void OnDevelopmentUpdateProgress(DevelopmentUpdateProgress progress)

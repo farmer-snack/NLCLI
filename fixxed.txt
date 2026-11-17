@@ -508,6 +508,54 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   直接调用临时显示接口，无需把方法加到公开接口上影响插件实现。
 
 ================================================
+[长期] 原生库依赖自动检查与修复
+================================================
+
+需求（2026-11-17）：
+把输出目录打包给别人后，在缺少 VC++ 运行库的机器上会直接崩溃（0x8007007E，miniaudio.dll
+加载失败）。希望程序自己发现 runtimes 里原生库的依赖缺失，并自动从网上下载补齐。
+
+检测
+- 新增 Services/NativeDependencyService.cs：NativeDependencyProbe 负责扫描，
+  PeImportReader 只读 PE 导入表，不加载目标 DLL，不触发 DllMain。
+- 扫描范围：deps.json 里当前 RID 的 native 资产（runtimeTargets、assetType=native，
+  过滤掉 .pdb 等非库文件）+ 应用根目录的 *.dll。
+- 托管程序集也有导入表（mscoree.dll），按 CLR 运行时头（数据目录第 15 项）排除，
+  否则每个托管 DLL 都会被误判成「缺 mscoree.dll」。同一个文件只打开一次，
+  141 个文件整体约 20ms，启动路径无感。
+- 依赖存在性：先看应用目录 / runtimes/<rid>/native 有没有同名文件，再按
+  LoadLibraryExW(LOAD_LIBRARY_AS_DATAFILE) → LoadLibraryExW(0) 依次尝试。
+- 同一个缺失模块常被多个原生库同时依赖（VCRUNTIME140.dll 等），按「问题类型 + 模块名」
+  去重后只报一条。
+- P/Invoke 显式写 ExactSpelling = true：LoadLibraryExW 名字本身已带 W 后缀，
+  默认的 A/W 改写会先去找 LoadLibraryExWW，不能依赖 CLR 的精确名回退。
+- 分类：VCRUNTIME140 / MSVCP140 / concrt140 / vccorlib140 / vcomp140 / ucrtbase /
+  api-ms-win-crt-* → VisualCppRuntime；api-ms-win-* 与已知系统 DLL → SystemComponent；
+  coreclr / hostfxr / hostpolicy / System.* → DotNetRuntime；其余 → ApplicationNative。
+
+修复
+- VisualCppRuntime：按进程架构下载 https://aka.ms/vs/17/release/vc_redist.{x64,x86,arm64}.exe，
+  用 /install /passive /norestart 提权安装（会弹 UAC）；退出码 1638（已装更新版本）与
+  3010（需重启）算成功。
+- ApplicationNative：从 deps.json 反查所属 NuGet 包，下载
+  https://api.nuget.org/v3-flatcontainer/{id}/{version}/{id}.{version}.nupkg，
+  取出 runtimes/<rid>/native/xxx.dll 写回原位置。
+- 下载先写 .tmp 再改名，避免半截文件被下次当成完整包复用。
+- HttpClient 只在响应头阶段限时 30 秒，大文件下载不受影响；离线时不会让启动画面卡几分钟。
+
+接入
+- App.axaml.cs 在「提前初始化 IAudioService」之前调用 EnsureAsync，启动画面实时显示进度。
+- AudioService 的 MiniAudioEngine 改为延迟创建：原来写在构造函数里（Task.Run(...).Result），
+  缺运行库时整个应用在启动阶段就崩，连自动修复的机会都没有。失败结果不缓存，
+  补装运行库后再次访问仍能恢复；Dispose 改成只释放已创建的引擎。
+- Settings 新增 IsNativeDependencyAutoRepairEnabled（默认 true，可在变量调试页关闭）。
+- 变量调试页新增「原生库依赖检查」卡片：开关、立即检查、自动修复、打开 runtimes 目录、
+  问题列表（限高滚动）。修复失败只记录到日志与状态文本，不阻断启动。
+- 涉及：Services/NativeDependencyService.cs、Services/AudioService.cs、Models/Settings.cs、
+  App.axaml.cs、App.Services.xaml.cs、Views/SettingPages/ConfigDebugSettingsPage.axaml(.cs)、
+  ViewModels/SettingsPages/ConfigDebugSettingsViewModel.cs。
+
+================================================
 [长期] 提醒语音与音效
 ================================================
 
@@ -856,6 +904,9 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
     HeartGestureService.cs、MainWindow.axaml.cs、GeneralSettingsPage.axaml、App.Services.xaml.cs
     变量调试页的「拉取更新并编译运行」见变量调试页段；文件：DevelopmentUpdateService.cs、
     ConfigDebugSettingsPage.axaml(.cs)、ConfigDebugSettingsViewModel.cs
+13. 原生库依赖自动检查与修复 —— 见同名段；文件：NativeDependencyService.cs、AudioService.cs、
+    Settings.cs、App.axaml.cs、App.Services.xaml.cs、ConfigDebugSettingsPage.axaml(.cs)、
+    ConfigDebugSettingsViewModel.cs
 
 判定口径
 --------

@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -53,6 +54,45 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
     private void ButtonCancelDevelopmentUpdate_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel.CancelDevelopmentUpdate();
+    }
+
+    private async void ButtonCheckNativeDependencies_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ViewModel.CheckNativeDependenciesAsync();
+    }
+
+    private async void ButtonRepairNativeDependencies_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ViewModel.RepairNativeDependenciesAsync();
+    }
+
+    private void ButtonOpenRuntimesDirectory_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "runtimes");
+        if (!Directory.Exists(directory))
+        {
+            directory = AppContext.BaseDirectory;
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true });
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                Process.Start("open", directory);
+            }
+            else
+            {
+                Process.Start("xdg-open", directory);
+            }
+        }
+        catch
+        {
+            // 打不开文件管理器时忽略，路径会显示在状态文本里。
+        }
     }
 
     private void ButtonResetVariable_OnClick(object? sender, RoutedEventArgs e)

@@ -801,6 +801,32 @@ public partial class App : AppBase, IAppHost
             await GetService<ISplashService>().StartSplash();
         }
 
+        // 音频服务会加载 miniaudio.dll 等原生库，而这些库依赖 VC++ 运行库。在缺少
+        // VCRUNTIME140.dll 的机器上直接初始化会让整个程序在启动阶段崩溃（0x8007007E），
+        // 所以先补齐依赖：缺失的 VC++ 运行库自动下载安装，缺失的 NuGet 原生库自动还原。
+        if (Settings.IsNativeDependencyAutoRepairEnabled)
+        {
+            try
+            {
+                var nativeDependencyService = GetService<NativeDependencyService>();
+                var repairResult = await nativeDependencyService.EnsureAsync(
+                    new Progress<string>(message =>
+                        GetService<ISplashService>().SetDetailedStatus(message)));
+                if (repairResult is { RemainingIssues.Count: > 0 })
+                {
+                    Logger?.LogWarning("仍有 {Count} 项原生依赖问题未解决：{Issues}",
+                        repairResult.RemainingIssues.Count,
+                        string.Join("；", repairResult.RemainingIssues.Select(x => x.Description)));
+                }
+            }
+            catch (Exception ex)
+            {
+                // 依赖检查失败不能阻断启动：音频服务已经改成延迟初始化，
+                // 就算运行库没补上，其它功能仍然可以正常使用。
+                Logger?.LogWarning(ex, "检查原生库依赖失败，继续启动。");
+            }
+        }
+
         // 提前初始化好音频服务，防止在其他地方出现重复初始化的问题
         IAppHost.GetService<IAudioService>();
 

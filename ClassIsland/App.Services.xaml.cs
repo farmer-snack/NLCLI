@@ -71,6 +71,7 @@ public partial class App
         services.AddSingleton<HeartGestureService>();
         services.AddHostedService(provider => provider.GetRequiredService<HeartGestureService>());
         services.AddSingleton<DevelopmentUpdateService>();
+        services.AddSingleton<NativeDependencyService>();
         services.AddSingleton<INotificationHostService, NotificationHostService>();
         services.AddSingleton<INotificationWorkerService, NotificationWorkerService>();
         services.AddSingleton<ThemeService>();

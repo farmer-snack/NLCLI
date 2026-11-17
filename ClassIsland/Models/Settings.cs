@@ -108,6 +108,7 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private int _mainWindowFontWeight2 = (int)FontWeight.Medium;
     private int _taskBarIconClickBehavior = OperatingSystem.IsWindows() ? 0 : 4;
     private bool _isTaskBarIconVisible = true;
+    private bool _isNativeDependencyAutoRepairEnabled = true;
     private bool _showExtraInfoOnTimePoint = true;
     private int _extraInfoType = 0;
     private bool _isCountdownEnabled = true;
@@ -599,6 +600,21 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
         {
             if (value == _isTaskBarIconVisible) return;
             _isTaskBarIconVisible = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 是否在启动时自动检查原生库依赖，并在缺失时自动下载安装。
+    /// </summary>
+    [SettingsInfo("自动修复原生库依赖", "\uE897", order: 4)]
+    public bool IsNativeDependencyAutoRepairEnabled
+    {
+        get => _isNativeDependencyAutoRepairEnabled;
+        set
+        {
+            if (value == _isNativeDependencyAutoRepairEnabled) return;
+            _isNativeDependencyAutoRepairEnabled = value;
             OnPropertyChanged();
         }
     }
