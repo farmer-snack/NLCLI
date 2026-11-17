@@ -585,10 +585,10 @@ public sealed class HeartGestureService : IHostedService, IDisposable
     [DllImport("user32.dll")]
     private static extern IntPtr DispatchMessage(ref NativeMessage lpMsg);
 
-    [DllImport("user32.dll")]
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
-    [DllImport("user32.dll")]
+    [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll", SetLastError = true)]
