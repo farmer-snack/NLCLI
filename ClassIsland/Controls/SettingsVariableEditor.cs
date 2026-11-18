@@ -1,8 +1,10 @@
 using System;
 
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Layout;
+using Avalonia.Media;
 
 using ClassIsland.Models.Debugging;
 
@@ -44,14 +46,20 @@ public class SettingsVariableEditor : UserControl
     {
         if (!item.CanWrite)
         {
+            // 只读值（集合、复杂对象等）经常是一大串 JSON，单行文本框只能看到开头几个字符。
+            // 改成多行换行显示，超过一定高度后在框内滚动，既能看全又不会把页面撑爆。
             var readOnlyBox = new TextBox
             {
                 IsReadOnly = true,
                 Watermark = item.IsCollection ? "集合（只读预览）" : "只读",
                 MinWidth = 220,
-                MaxWidth = 520,
-                HorizontalAlignment = HorizontalAlignment.Left
+                MinHeight = 34,
+                MaxHeight = 160,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Stretch
             };
+            ScrollViewer.SetVerticalScrollBarVisibility(readOnlyBox, ScrollBarVisibility.Auto);
             readOnlyBox.Bind(TextBox.TextProperty, new Binding(nameof(ConfigVariableItem.DisplayValue))
             {
                 Source = item,
@@ -123,8 +131,7 @@ public class SettingsVariableEditor : UserControl
                     Text = item.StringValue,
                     Watermark = item.TypeName,
                     MinWidth = 220,
-                    MaxWidth = 520,
-                    HorizontalAlignment = HorizontalAlignment.Left
+                    HorizontalAlignment = HorizontalAlignment.Stretch
                 };
                 textBox.Bind(TextBox.TextProperty, new Binding(nameof(ConfigVariableItem.StringValue))
                 {

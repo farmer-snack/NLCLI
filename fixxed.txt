@@ -468,6 +468,18 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 涉及：ConfigDebugSettingsPage.axaml(.cs)、ConfigDebugSettingsViewModel.cs、
   Services/DevelopmentUpdateService.cs、App.Services.xaml.cs。
 
+滚动与布局（2026-11-18）
+- 原来根节点是 Grid(Auto,Auto,*)，顶部说明和三个折叠面板用 Auto 行占高，展开任一个就把
+  变量列表压成一条缝；页面本身没有滚动容器，内容超出一屏后整页既滚不动也看不到底部。
+- 改为根节点 ScrollViewer + StackPanel 整页滚动。变量列表从 ListBox 换成 ItemsControl，
+  不再有独立滚动区，滚轮和触摸拖动都作用于整个页面，不会出现「只有一小块能滑」。
+- 说明、改动记录、官方调试入口收进「说明与调试入口」折叠面板（默认收起）；
+  「拉取更新并编译运行」「原生库依赖检查」移到列表下方，一进页面就能看到变量列表。
+- SettingsVariableEditor：只读值（集合 / 复杂对象的 DisplayValue）由单行文本框改为多行换行，
+  超过 160 高度后在框内滚动；可写文本框去掉 MaxWidth 520，横向拉满剩余宽度。
+- 注意：ListBox 自带 ScrollViewer，会先吃掉滚轮与触摸手势，外层滚不动。需要整页滚动时
+  一律用 ItemsControl + 外层 ScrollViewer，不要为了省事沿用 ListBox。
+
 ================================================
 [长期] 托盘图标开关与爱心手势
 ================================================

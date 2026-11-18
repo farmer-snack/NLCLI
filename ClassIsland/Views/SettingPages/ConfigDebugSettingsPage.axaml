@@ -15,52 +15,130 @@
       Loaded="ConfigDebugSettingsPage_OnLoaded"
       Unloaded="ConfigDebugSettingsPage_OnUnloaded">
 
-    <Grid RowDefinitions="Auto,Auto,*" Margin="0">
-        <StackPanel Grid.Row="0" Classes="settings-container animated-intro" Margin="0 0 0 8">
-            <controls1:IconText Glyph="&#xE943;" Text="变量调试" Margin="0 0 0 6" />
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0 0 0 6">
+    <!--
+        整页放在一个 ScrollViewer 里：变量列表改成 ItemsControl，不再有内部滚动区，
+        鼠标滚轮和触摸拖动都统一滚动整个页面，不会出现「只有一小块能滑」的情况。
+    -->
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Classes="settings-container animated-intro" Spacing="8" Margin="0 0 0 24">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <controls1:IconText Glyph="&#xE943;" Text="变量调试" VerticalAlignment="Center" />
                 <Border Background="#1A4C8BF5" CornerRadius="4" Padding="7 2" VerticalAlignment="Center">
                     <TextBlock Text="该页面由 farmer-snack/NLCLI 维护" FontSize="11" Opacity="0.85" />
                 </Border>
             </StackPanel>
 
-            <!-- 完整改动记录：GitHub 主源 + jsDelivr CDN 备用源 -->
-            <StackPanel Spacing="2" Margin="0 0 0 10">
-                <TextBlock Text="完整改动记录：每次改动都写进 fixxed.txt，可点开查看；下面两个地址内容相同，任选其一。"
-                           Classes="l-instructive" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
-                <WrapPanel Orientation="Horizontal">
-                    <TextBlock Text="主源：" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
-                    <HyperlinkButton Content="GitHub · fixxed.txt" FontSize="11"
-                                     Tag="https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt"
-                                     Click="HyperlinkOpenLink_OnClick"
-                                     ToolTip.Tip="打开 GitHub 上的 fixxed.txt" />
-                    <TextBlock Text="备用源：" FontSize="11" Opacity="0.7" VerticalAlignment="Center" Margin="14 0 0 0" />
-                    <HyperlinkButton Content="CDN · jsDelivr" FontSize="11"
-                                     Tag="https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt"
-                                     Click="HyperlinkOpenLink_OnClick"
-                                     ToolTip.Tip="GitHub 打不开时用这个 CDN 备用源" />
-                </WrapPanel>
-                <SelectableTextBlock Text="https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt"
-                                     FontSize="10" Opacity="0.55" TextWrapping="Wrap" />
-                <SelectableTextBlock Text="https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt"
-                                     FontSize="10" Opacity="0.55" TextWrapping="Wrap" />
-            </StackPanel>
-            <TextBlock Text="直接读写 Settings.json 中的每一个配置变量。这里的修改会立即写入配置文件，部分设置需要重启应用后才会生效。"
-                       Classes="l-instructive" FontSize="12" Opacity="0.75"
-                       TextWrapping="Wrap" Margin="0 0 0 12" />
-
-            <controls3:FAInfoBar Severity="Warning"
-                                 IsOpen="True"
-                                 IsClosable="False"
-                                 Message="这是调试工具。修改不熟悉的变量可能导致应用行为异常，请谨慎操作。" />
-
-            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE2C8;}"
-                                          Header="显示其他调试页面"
-                                          Description="控制官方的「调试」入口。本页不受此开关影响，始终显示。">
-                <controls3:FASettingsExpander.Footer>
-                    <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsDebugOptionsEnabled, Mode=TwoWay}" />
-                </controls3:FASettingsExpander.Footer>
+            <!-- 说明、改动记录和其它调试入口收进折叠面板，默认收起，把高度让给变量列表 -->
+            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE946;}"
+                                          Header="说明与调试入口"
+                                          Description="改动记录、使用说明和官方调试页面开关">
+                <controls3:FASettingsExpanderItem>
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="直接读写 Settings.json 中的每一个配置变量。这里的修改会立即写入配置文件，部分设置需要重启应用后才会生效。"
+                                   Classes="l-instructive" FontSize="12" Opacity="0.75"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="完整改动记录：每次改动都写进 fixxed.txt，可点开查看；下面两个地址内容相同，任选其一。"
+                                   Classes="l-instructive" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+                        <WrapPanel Orientation="Horizontal">
+                            <TextBlock Text="主源：" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                            <HyperlinkButton Content="GitHub · fixxed.txt" FontSize="11"
+                                             Tag="https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt"
+                                             Click="HyperlinkOpenLink_OnClick"
+                                             ToolTip.Tip="打开 GitHub 上的 fixxed.txt" />
+                            <TextBlock Text="备用源：" FontSize="11" Opacity="0.7" VerticalAlignment="Center" Margin="14 0 0 0" />
+                            <HyperlinkButton Content="CDN · jsDelivr" FontSize="11"
+                                             Tag="https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt"
+                                             Click="HyperlinkOpenLink_OnClick"
+                                             ToolTip.Tip="GitHub 打不开时用这个 CDN 备用源" />
+                        </WrapPanel>
+                        <SelectableTextBlock Text="https://github.com/farmer-snack/NLCLI/blob/develop/v2/misha-alpha/fixxed.txt"
+                                             FontSize="10" Opacity="0.55" TextWrapping="Wrap" />
+                        <SelectableTextBlock Text="https://cdn.jsdelivr.net/gh/farmer-snack/NLCLI@develop/v2/misha-alpha/fixxed.txt"
+                                             FontSize="10" Opacity="0.55" TextWrapping="Wrap" />
+                        <controls3:FAInfoBar Severity="Warning"
+                                             IsOpen="True"
+                                             IsClosable="False"
+                                             Message="这是调试工具。修改不熟悉的变量可能导致应用行为异常，请谨慎操作。" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="显示官方「调试」入口" FontSize="13" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1"
+                                          IsChecked="{Binding ViewModel.SettingsService.Settings.IsDebugOptionsEnabled, Mode=TwoWay}"
+                                          ToolTip.Tip="控制官方的「调试」入口。本页不受此开关影响，始终显示。" />
+                        </Grid>
+                    </StackPanel>
+                </controls3:FASettingsExpanderItem>
             </controls3:FASettingsExpander>
+
+            <!-- 搜索与筛选（固定在列表上方，不参与折叠） -->
+            <Grid ColumnDefinitions="*,170,Auto,Auto" ColumnSpacing="8" Margin="0 4 0 0">
+                <TextBox Grid.Column="0"
+                         Watermark="搜索变量名（例如 Notification、Weather、Speech）…"
+                         Text="{Binding ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <ComboBox Grid.Column="1"
+                          ItemsSource="{Binding ViewModel.TypeFilters}"
+                          SelectedItem="{Binding ViewModel.SelectedTypeFilter, Mode=TwoWay}"
+                          HorizontalAlignment="Stretch" />
+                <ToggleSwitch Grid.Column="2"
+                              OnContent="只读"
+                              OffContent="可写"
+                              IsChecked="{Binding ViewModel.ShowReadOnly, Mode=TwoWay}"
+                              ToolTip.Tip="是否显示只读变量（集合、复杂对象等）" />
+                <Button Grid.Column="3"
+                        Content="重启应用"
+                        Click="ButtonRestart_OnClick"
+                        ToolTip.Tip="部分变量需要重启应用后才会生效" />
+            </Grid>
+
+            <TextBlock Text="{Binding ViewModel.StatusText}"
+                       FontSize="12"
+                       Opacity="0.7" />
+
+            <!-- 变量列表：跟随页面滚动，不再限制成一小块固定区域 -->
+            <ItemsControl ItemsSource="{Binding ViewModel.Variables}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="#18000000"
+                                BorderThickness="0 0 0 1"
+                                Padding="2 7">
+                            <Grid ColumnDefinitions="260,*,Auto" ColumnSpacing="12">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="1">
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="13"
+                                               FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip.Tip="{Binding Name}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding TypeName}" FontSize="11" Opacity="0.6" />
+                                        <TextBlock Text="只读" FontSize="11" Opacity="0.6"
+                                                   IsVisible="{Binding !CanWrite}" />
+                                        <TextBlock Text="不写入配置文件" FontSize="11"
+                                                   Foreground="#FFE8A33D"
+                                                   IsVisible="{Binding !IsPersisted}" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <controls2:SettingsVariableEditor />
+                                    <TextBlock Text="{Binding LastError}"
+                                               FontSize="11"
+                                               Foreground="#FFFF6B6B"
+                                               TextWrapping="Wrap"
+                                               IsVisible="{Binding LastError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                </StackPanel>
+
+                                <Button Grid.Column="2"
+                                        VerticalAlignment="Center"
+                                        Theme="{StaticResource TransparentButton}"
+                                        ToolTip.Tip="恢复默认值"
+                                        Click="ButtonResetVariable_OnClick">
+                                    <controls1:FluentIcon Glyph="&#xE4CC;" />
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
 
             <!-- 拉取更新并编译运行 -->
             <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE895;}"
@@ -139,77 +217,5 @@
                 </controls3:FASettingsExpanderItem>
             </controls3:FASettingsExpander>
         </StackPanel>
-
-        <Grid Grid.Row="1" ColumnDefinitions="*,170,Auto,Auto" Margin="0 0 0 8" ColumnSpacing="8">
-            <TextBox Grid.Column="0"
-                     Watermark="搜索变量名（例如 Notification、Weather、Speech）…"
-                     Text="{Binding ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-            <ComboBox Grid.Column="1"
-                      ItemsSource="{Binding ViewModel.TypeFilters}"
-                      SelectedItem="{Binding ViewModel.SelectedTypeFilter, Mode=TwoWay}"
-                      HorizontalAlignment="Stretch" />
-            <ToggleSwitch Grid.Column="2"
-                          OnContent="只读"
-                          OffContent="可写"
-                          IsChecked="{Binding ViewModel.ShowReadOnly, Mode=TwoWay}"
-                          ToolTip.Tip="是否显示只读变量（集合、复杂对象等）" />
-            <Button Grid.Column="3"
-                    Content="重启应用"
-                    Click="ButtonRestart_OnClick"
-                    ToolTip.Tip="部分变量需要重启应用后才会生效" />
-        </Grid>
-
-        <Grid Grid.Row="2" RowDefinitions="Auto,*">
-            <TextBlock Grid.Row="0"
-                       Text="{Binding ViewModel.StatusText}"
-                       FontSize="12"
-                       Opacity="0.7"
-                       Margin="0 0 0 6" />
-            <ListBox Grid.Row="1"
-                     ItemsSource="{Binding ViewModel.Variables}"
-                     SelectionMode="Single"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     Background="Transparent"
-                     BorderThickness="0">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Grid ColumnDefinitions="270,*,Auto" ColumnSpacing="12" Margin="0 3">
-                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="1">
-                                <TextBlock Text="{Binding Name}"
-                                           FontSize="13"
-                                           FontWeight="SemiBold"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip.Tip="{Binding Name}" />
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="{Binding TypeName}" FontSize="11" Opacity="0.6" />
-                                    <TextBlock Text="只读" FontSize="11" Opacity="0.6"
-                                               IsVisible="{Binding !CanWrite}" />
-                                    <TextBlock Text="不写入配置文件" FontSize="11"
-                                               Foreground="#FFE8A33D"
-                                               IsVisible="{Binding !IsPersisted}" />
-                                </StackPanel>
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                <controls2:SettingsVariableEditor />
-                                <TextBlock Text="{Binding LastError}"
-                                           FontSize="11"
-                                           Foreground="#FFFF6B6B"
-                                           TextWrapping="Wrap"
-                                           IsVisible="{Binding LastError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                            </StackPanel>
-
-                            <Button Grid.Column="2"
-                                    VerticalAlignment="Center"
-                                    Theme="{StaticResource TransparentButton}"
-                                    ToolTip.Tip="恢复默认值"
-                                    Click="ButtonResetVariable_OnClick">
-                                <controls1:FluentIcon Glyph="&#xE4CC;" />
-                            </Button>
-                        </Grid>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </Grid>
-    </Grid>
+    </ScrollViewer>
 </controls:SettingsPageBase>
