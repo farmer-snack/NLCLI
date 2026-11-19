@@ -117,7 +117,48 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     [ObservableProperty]
     private bool _hasNativeDependencyIssues;
 
+    [ObservableProperty]
+    private IReadOnlyList<string> _remoteBranches = Array.Empty<string>();
+
+    [ObservableProperty]
+    private bool _isRemoteBranchesLoading;
+
     public Settings DefaultSettings => _defaultSettings;
+
+    /// <summary>
+    /// 探测远程分支供下拉框选择。只查询一次仓库地址，不碰本地 remote。
+    /// </summary>
+    public async Task RefreshRemoteBranchesAsync()
+    {
+        if (IsRemoteBranchesLoading)
+        {
+            return;
+        }
+
+        IsRemoteBranchesLoading = true;
+        try
+        {
+            var branches = await DevelopmentUpdateService.GetRemoteBranchesAsync(CancellationToken.None);
+            RemoteBranches = branches.Count > 0
+                ? branches
+                : [SettingsService.Settings.DevelopmentUpdateBranch];
+
+            // 选中值要在列表里；否则保留当前值让用户可以手动输入分支名。
+            if (!RemoteBranches.Contains(SettingsService.Settings.DevelopmentUpdateBranch))
+            {
+                OnPropertyChanged(nameof(SettingsService));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "探测远程分支失败。");
+            RemoteBranches = [SettingsService.Settings.DevelopmentUpdateBranch];
+        }
+        finally
+        {
+            IsRemoteBranchesLoading = false;
+        }
+    }
 
     public async Task StartDevelopmentUpdateAsync()
     {

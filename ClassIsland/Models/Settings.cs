@@ -108,6 +108,8 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private int _mainWindowFontWeight2 = (int)FontWeight.Medium;
     private int _taskBarIconClickBehavior = OperatingSystem.IsWindows() ? 0 : 4;
     private bool _isTaskBarIconVisible = true;
+    private int _trayIconWakeGesture = 0;
+    private string _developmentUpdateBranch = "develop/v2/misha-alpha";
     private bool _isNativeDependencyAutoRepairEnabled = true;
     private bool _showExtraInfoOnTimePoint = true;
     private int _extraInfoType = 0;
@@ -600,6 +602,36 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
         {
             if (value == _isTaskBarIconVisible) return;
             _isTaskBarIconVisible = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 托盘图标隐藏后，用哪种手势临时唤出。
+    /// 0=爱心，1=大写 W，2=大写 S。
+    /// </summary>
+    public int TrayIconWakeGesture
+    {
+        get => _trayIconWakeGesture;
+        set
+        {
+            if (value == _trayIconWakeGesture) return;
+            _trayIconWakeGesture = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 「拉取更新并编译运行」使用的分支。留空时使用默认分支。
+    /// </summary>
+    public string DevelopmentUpdateBranch
+    {
+        get => _developmentUpdateBranch;
+        set
+        {
+            value ??= "develop/v2/misha-alpha";
+            if (value == _developmentUpdateBranch) return;
+            _developmentUpdateBranch = value;
             OnPropertyChanged();
         }
     }

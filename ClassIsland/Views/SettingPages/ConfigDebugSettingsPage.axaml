@@ -29,12 +29,15 @@
                 </Border>
             </StackPanel>
 
-            <!-- 说明、改动记录和其它调试入口收进折叠面板，默认收起，把高度让给变量列表 -->
+            <!--
+                说明、改动记录、官方调试入口、更新编译与原生库检查全部收进这一个折叠面板，
+                默认收起，不占页面底部的位置，把首屏高度留给变量列表。
+            -->
             <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE946;}"
                                           Header="说明与调试入口"
-                                          Description="改动记录、使用说明和官方调试页面开关">
+                                          Description="改动记录、使用说明、官方调试页面开关、更新编译与原生库检查">
                 <controls3:FASettingsExpanderItem>
-                    <StackPanel Spacing="6">
+                    <StackPanel Spacing="8">
                         <TextBlock Text="直接读写 Settings.json 中的每一个配置变量。这里的修改会立即写入配置文件，部分设置需要重启应用后才会生效。"
                                    Classes="l-instructive" FontSize="12" Opacity="0.75"
                                    TextWrapping="Wrap" />
@@ -66,6 +69,97 @@
                                           IsChecked="{Binding ViewModel.SettingsService.Settings.IsDebugOptionsEnabled, Mode=TwoWay}"
                                           ToolTip.Tip="控制官方的「调试」入口。本页不受此开关影响，始终显示。" />
                         </Grid>
+
+                        <!-- 拉取更新并编译运行（折叠在这里，不占页面底部） -->
+                        <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE895;}"
+                                                      Header="拉取更新并编译运行"
+                                                      Description="从当前 Git 仓库拉取最新提交，自动补齐子模块、安装缺失的 Git 与 .NET SDK，编译完成后打开输出目录并重启到新版本。仅在从源码目录运行时可用。">
+                            <controls3:FASettingsExpanderItem>
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                        <ComboBox Grid.Column="0"
+                                                  ItemsSource="{Binding ViewModel.RemoteBranches}"
+                                                  SelectedItem="{Binding ViewModel.SettingsService.Settings.DevelopmentUpdateBranch, Mode=TwoWay}"
+                                                  IsEditable="True"
+                                                  HorizontalAlignment="Stretch"
+                                                  ToolTip.Tip="分支列表从仓库自动探测；也可手动输入任意分支名。" />
+                                        <Button Grid.Column="1"
+                                                Content="刷新分支"
+                                                Click="ButtonRefreshRemoteBranches_OnClick"
+                                                IsEnabled="{Binding !ViewModel.IsRemoteBranchesLoading}"
+                                                ToolTip.Tip="重新从远程仓库探测可用分支" />
+                                        <Button Grid.Column="2"
+                                                Content="开始更新并编译"
+                                                Classes="accent"
+                                                Click="ButtonDevelopmentUpdate_OnClick"
+                                                IsEnabled="{Binding !ViewModel.IsDevelopmentUpdateRunning}" />
+                                    </Grid>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button Content="取消"
+                                                Click="ButtonCancelDevelopmentUpdate_OnClick"
+                                                IsEnabled="{Binding ViewModel.IsDevelopmentUpdateRunning}" />
+                                    </StackPanel>
+                                    <ProgressBar IsIndeterminate="True"
+                                                 IsVisible="{Binding ViewModel.IsDevelopmentUpdateRunning}" />
+                                    <TextBlock Text="{Binding ViewModel.DevelopmentUpdateStatus}"
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
+                                    <TextBox x:Name="DevelopmentUpdateLogBox"
+                                             Text="{Binding ViewModel.DevelopmentUpdateLog}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="NoWrap"
+                                             Height="180"
+                                             FontFamily="Cascadia Mono,Consolas,DejaVu Sans Mono,monospace"
+                                             IsVisible="{Binding ViewModel.HasDevelopmentUpdateLog}" />
+                                </StackPanel>
+                            </controls3:FASettingsExpanderItem>
+                        </controls3:FASettingsExpander>
+
+                        <!-- 原生库依赖检查（同样折叠在这里） -->
+                        <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE897;}"
+                                                      Header="原生库依赖检查"
+                                                      Description="扫描 runtimes 目录下的原生库，检查它们依赖的系统运行库是否齐全。缺失的 VC++ 运行库会自动从微软下载安装，缺失的 NuGet 原生库会自动从 nuget.org 还原。">
+                            <controls3:FASettingsExpanderItem>
+                                <StackPanel Spacing="8">
+                                    <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsNativeDependencyAutoRepairEnabled, Mode=TwoWay}"
+                                                  OnContent="启动时自动检查并修复"
+                                                  OffContent="启动时自动检查并修复"
+                                                  ToolTip.Tip="关闭后启动时不再检查，仍可在这里手动检查和修复" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button Content="立即检查"
+                                                Click="ButtonCheckNativeDependencies_OnClick"
+                                                IsEnabled="{Binding !ViewModel.IsNativeDependencyBusy}" />
+                                        <Button Content="自动修复"
+                                                Classes="accent"
+                                                Click="ButtonRepairNativeDependencies_OnClick"
+                                                IsEnabled="{Binding !ViewModel.IsNativeDependencyBusy}" />
+                                        <Button Content="打开 runtimes 目录"
+                                                Click="ButtonOpenRuntimesDirectory_OnClick" />
+                                    </StackPanel>
+                                    <ProgressBar IsIndeterminate="True"
+                                                 IsVisible="{Binding ViewModel.IsNativeDependencyBusy}" />
+                                    <TextBlock Text="{Binding ViewModel.NativeDependencyStatus}"
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
+                                    <ScrollViewer MaxHeight="200"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  IsVisible="{Binding ViewModel.HasNativeDependencyIssues}">
+                                        <ItemsControl ItemsSource="{Binding ViewModel.NativeDependencyIssues}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="#14FF6B6B" CornerRadius="4" Padding="8 4" Margin="0 2">
+                                                        <TextBlock Text="{Binding Description}"
+                                                                   FontSize="12"
+                                                                   TextWrapping="Wrap" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </controls3:FASettingsExpanderItem>
+                        </controls3:FASettingsExpander>
                     </StackPanel>
                 </controls3:FASettingsExpanderItem>
             </controls3:FASettingsExpander>
@@ -139,83 +233,6 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
-
-            <!-- 拉取更新并编译运行 -->
-            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE895;}"
-                                          Header="拉取更新并编译运行"
-                                          Description="从当前 Git 仓库拉取最新提交，自动补齐子模块、安装缺失的 Git 与 .NET SDK，编译完成后打开输出目录并重启到新版本。仅在从源码目录运行时可用。">
-                <controls3:FASettingsExpanderItem>
-                    <StackPanel Spacing="8">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="开始更新并编译"
-                                    Classes="accent"
-                                    Click="ButtonDevelopmentUpdate_OnClick"
-                                    IsEnabled="{Binding !ViewModel.IsDevelopmentUpdateRunning}" />
-                            <Button Content="取消"
-                                    Click="ButtonCancelDevelopmentUpdate_OnClick"
-                                    IsEnabled="{Binding ViewModel.IsDevelopmentUpdateRunning}" />
-                        </StackPanel>
-                        <ProgressBar IsIndeterminate="True"
-                                     IsVisible="{Binding ViewModel.IsDevelopmentUpdateRunning}" />
-                        <TextBlock Text="{Binding ViewModel.DevelopmentUpdateStatus}"
-                                   FontSize="12"
-                                   TextWrapping="Wrap" />
-                        <TextBox x:Name="DevelopmentUpdateLogBox"
-                                 Text="{Binding ViewModel.DevelopmentUpdateLog}"
-                                 IsReadOnly="True"
-                                 AcceptsReturn="True"
-                                 TextWrapping="NoWrap"
-                                 Height="180"
-                                 FontFamily="Cascadia Mono,Consolas,DejaVu Sans Mono,monospace"
-                                 IsVisible="{Binding ViewModel.HasDevelopmentUpdateLog}" />
-                    </StackPanel>
-                </controls3:FASettingsExpanderItem>
-            </controls3:FASettingsExpander>
-
-            <!-- 原生库依赖检查 -->
-            <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE897;}"
-                                          Header="原生库依赖检查"
-                                          Description="扫描 runtimes 目录下的原生库，检查它们依赖的系统运行库是否齐全。缺失的 VC++ 运行库会自动从微软下载安装，缺失的 NuGet 原生库会自动从 nuget.org 还原。">
-                <controls3:FASettingsExpanderItem>
-                    <StackPanel Spacing="8">
-                        <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsNativeDependencyAutoRepairEnabled, Mode=TwoWay}"
-                                      OnContent="启动时自动检查并修复"
-                                      OffContent="启动时自动检查并修复"
-                                      ToolTip.Tip="关闭后启动时不再检查，仍可在这里手动检查和修复" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="立即检查"
-                                    Click="ButtonCheckNativeDependencies_OnClick"
-                                    IsEnabled="{Binding !ViewModel.IsNativeDependencyBusy}" />
-                            <Button Content="自动修复"
-                                    Classes="accent"
-                                    Click="ButtonRepairNativeDependencies_OnClick"
-                                    IsEnabled="{Binding !ViewModel.IsNativeDependencyBusy}" />
-                            <Button Content="打开 runtimes 目录"
-                                    Click="ButtonOpenRuntimesDirectory_OnClick" />
-                        </StackPanel>
-                        <ProgressBar IsIndeterminate="True"
-                                     IsVisible="{Binding ViewModel.IsNativeDependencyBusy}" />
-                        <TextBlock Text="{Binding ViewModel.NativeDependencyStatus}"
-                                   FontSize="12"
-                                   TextWrapping="Wrap" />
-                        <ScrollViewer MaxHeight="200"
-                                      VerticalScrollBarVisibility="Auto"
-                                      IsVisible="{Binding ViewModel.HasNativeDependencyIssues}">
-                            <ItemsControl ItemsSource="{Binding ViewModel.NativeDependencyIssues}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Background="#14FF6B6B" CornerRadius="4" Padding="8 4" Margin="0 2">
-                                            <TextBlock Text="{Binding Description}"
-                                                       FontSize="12"
-                                                       TextWrapping="Wrap" />
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </StackPanel>
-                </controls3:FASettingsExpanderItem>
-            </controls3:FASettingsExpander>
         </StackPanel>
     </ScrollViewer>
 </controls:SettingsPageBase>

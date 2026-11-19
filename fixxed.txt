@@ -468,13 +468,30 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 涉及：ConfigDebugSettingsPage.axaml(.cs)、ConfigDebugSettingsViewModel.cs、
   Services/DevelopmentUpdateService.cs、App.Services.xaml.cs。
 
+更新源与分支策略（2026-11-19）
+- 不再要求当前目录是 Git 仓库，也不再用本地已有的 remote：remote 可能指向官方仓库或
+  别的副仓库，用它会编译进错误的代码。仓库地址写死为 farmer-snack/NLCLI。
+- 找不到本仓库时，按写死地址 clone 到 %LOCALAPPDATA%/ClassIsland/dev-update-source；
+  编译仍在仓库里做，新版本沿用当前工作目录启动（配置不漂移）。
+- 拉取改为 `git fetch <写死地址> +refs/heads/<分支>:refs/remotes/classisland-auto-update/<分支>`，
+  用专用引用名，不建立/枚举 remote；再用 --ff-only，分叉则 --rebase，失败 abort 并报错。
+- 直连同一地址最多 4 次，之后依次尝试 ghproxy / gh-proxy / ghfast / moeyy / gitmirror
+  镜像；clone 和 fetch 共用这套候选列表，指数退避。子模块重试第 4 次起也叠镜像 insteadOf。
+- 分支可选：Settings.DevelopmentUpdateBranch（默认 develop/v2/misha-alpha）；
+  GetRemoteBranchesAsync 用 ls-remote 探测远程分支，页面加载和「刷新分支」时填充 ComboBox，
+  下拉可编辑，允许手动输入任意分支名。
+- 涉及：DevelopmentUpdateService.cs、Settings.cs、ConfigDebugSettingsPage.axaml(.cs)、
+  ConfigDebugSettingsViewModel.cs。
+
 滚动与布局（2026-11-18）
 - 原来根节点是 Grid(Auto,Auto,*)，顶部说明和三个折叠面板用 Auto 行占高，展开任一个就把
   变量列表压成一条缝；页面本身没有滚动容器，内容超出一屏后整页既滚不动也看不到底部。
 - 改为根节点 ScrollViewer + StackPanel 整页滚动。变量列表从 ListBox 换成 ItemsControl，
   不再有独立滚动区，滚轮和触摸拖动都作用于整个页面，不会出现「只有一小块能滑」。
-- 说明、改动记录、官方调试入口收进「说明与调试入口」折叠面板（默认收起）；
-  「拉取更新并编译运行」「原生库依赖检查」移到列表下方，一进页面就能看到变量列表。
+- 说明、改动记录、官方调试入口「拉取更新并编译运行」「原生库依赖检查」全部收进
+  「说明与调试入口」折叠面板（默认收起，两处更新/依赖面板嵌在其中），
+  一进页面就能看到变量列表。注意：用户明确要求这些面板和调试开关放一起、都折叠，
+  不要再挪到页面底部。
 - SettingsVariableEditor：只读值（集合 / 复杂对象的 DisplayValue）由单行文本框改为多行换行，
   超过 160 高度后在框内滚动；可写文本框去掉 MaxWidth 520，横向拉满剩余宽度。
 - 注意：ListBox 自带 ScrollViewer，会先吃掉滚轮与触摸手势，外层滚不动。需要整页滚动时
@@ -499,13 +516,25 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   安装 WH_MOUSE_LL 全局鼠标钩子，记录左键按下到抬起的轨迹。
 - 识别流程：重采样到 128 点 → 尺寸 / 长宽比 / 路径长度 / 闭合度检查 → 顶部双凸起与底部尖角
   → 与参数方程心形模板做双向 Chamfer 距离比对（阈值 0.22）。
-- 命中后在 UI 线程把 IsTaskBarIconVisible 置回 true，托盘图标随之恢复。
+- 命中后只临时显示托盘（ShowTemporarily），不改 IsTaskBarIconVisible；用过一次后自动收起。
 - 钩子线程用 MsgWaitForMultipleObjects 带 100ms 超时轮询，不能裸阻塞在 GetMessage：
   线程 ID 在线程启动后才写入，停止请求可能早于线程就绪，一旦错过就永远退不出来，
   会造成钩子泄漏、下次隐藏时重复安装。
 - 只在 Windows 生效（Linux/macOS 没有等价的全局鼠标钩子）；设置页描述按平台区分。
 - 涉及：Models/Settings.cs、Services/TaskBarIconService.cs、Services/HeartGestureService.cs、
   MainWindow.axaml.cs、Views/SettingPages/GeneralSettingsPage.axaml、App.Services.xaml.cs。
+
+手势放宽与多手势（2026-11-19）
+- 用户反馈爱心识别太严、必须画很大：尺寸下限 90×80 降到 46×40，闭合距离比 0.35→0.55，
+  Chamfer 阈值 0.22→0.34，最小重采样点 32→24，路径长度范围放宽到对角线的 1.2~8 倍。
+- 新增 W、S 两种手势：BuildPolylineTemplate 用折线顶点生成归一化模板，
+  W=五个折点（上-下-上-下-上），S=六个折点；与心形模板一起用双向 Chamfer 匹配。
+  实测三类各自命中分 < 0.03、互相交错 > 0.095，抖动/拉伸仍可识别，直线不误触。
+- Settings 新增 TrayIconWakeGesture（int，0=爱心 1=W 2=S，默认 0）；基本设置页
+  「显示托盘图标」里加「唤出手势」下拉（仅 Windows 显示）。识别时实时读设置，
+  切换手势无需重建钩子；日志按手势名输出。
+- 注意：圆形会被判成爱心（轮廓相近，分数约 0.1），可接受——画圆唤出托盘符合直觉。
+- 涉及：HeartGestureService.cs、Settings.cs、GeneralSettingsPage.axaml。
 
 补充（2026-11-17）：
 - 修正原生 DLL 导入：GetCurrentThreadId、GetModuleHandle 由 kernel32.dll 导出，原先误写成

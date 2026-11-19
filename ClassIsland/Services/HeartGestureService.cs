@@ -29,12 +29,17 @@ public sealed class HeartGestureService : IHostedService, IDisposable
     private const uint PM_REMOVE = 0x0001;
     private const uint HookMessageWaitMilliseconds = 100;
 
-    private const double MinGestureSize = 90;
-    private const double MinGestureHeight = 80;
-    private const double CloseDistanceRatio = 0.35;
-    private const double MaxChamferDistance = 0.22;
+    // 阈值放宽：手势不必画得很大很标准，能看出大概形状就唤出托盘。
+    private const double MinGestureSize = 46;
+    private const double MinGestureHeight = 40;
+    private const double CloseDistanceRatio = 0.55;
+    private const double MaxChamferDistance = 0.34;
 
     private static readonly IReadOnlyList<PointD> HeartTemplate = BuildHeartTemplate();
+    private static readonly IReadOnlyList<PointD> WTemplate = BuildPolylineTemplate(
+        [(0, 0), (0.22, 0.85), (0.45, 0.15), (0.68, 0.85), (1, 0)]);
+    private static readonly IReadOnlyList<PointD> STemplate = BuildPolylineTemplate(
+        [(1, 0.05), (0.2, 0.05), (0.2, 0.45), (0.8, 0.5), (0.8, 0.95), (0.05, 0.95)]);
 
     private readonly ILogger<HeartGestureService> _logger;
     private readonly SettingsService _settingsService;
@@ -117,6 +122,7 @@ public sealed class HeartGestureService : IHostedService, IDisposable
         {
             ApplyState();
         }
+        // 切换手势类型不影响钩子本身，识别时实时读取设置即可，无需重建钩子。
     }
 
     private void ApplyState()
@@ -324,21 +330,23 @@ public sealed class HeartGestureService : IHostedService, IDisposable
 
         var points = _points.ToArray();
         _points.Clear();
+        var gesture = _settingsService.Settings.TrayIconWakeGesture;
         Task.Run(() =>
         {
             try
             {
-                if (IsHeart(points))
+                var name = GetGestureName(gesture);
+                if (IsGesture(points, gesture))
                 {
-                    _logger.LogInformation("检测到爱心手势，正在临时显示托盘图标。");
+                    _logger.LogInformation("检测到{ Gesture }手势，正在临时显示托盘图标。", name);
                     // 只临时显示，不把「显示托盘图标」设置改回开启：
-                    // 用户用完后图标会自动收起，下次仍可再画爱心唤出。
+                    // 用户用完后图标会自动收起，下次仍可再画手势唤出。
                     Dispatcher.UIThread.Post(_taskBarIconService.ShowTemporarily);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "识别爱心手势时发生异常。");
+                _logger.LogDebug(ex, "识别手势时发生异常。");
             }
             finally
             {
@@ -347,10 +355,21 @@ public sealed class HeartGestureService : IHostedService, IDisposable
         });
     }
 
-    private static bool IsHeart(IReadOnlyList<PointD> rawPoints)
+    private static string GetGestureName(int gesture) => gesture switch
+    {
+        1 => "W",
+        2 => "S",
+        _ => "爱心"
+    };
+
+    /// <summary>
+    /// 按设置选中的手势识别。所有手势共用尺寸/时长/复杂度的宽松预检查，
+    /// 再用各自的模板或特征做形状匹配。
+    /// </summary>
+    private static bool IsGesture(IReadOnlyList<PointD> rawPoints, int gesture)
     {
         var points = Resample(rawPoints, 128);
-        if (points.Count < 32)
+        if (points.Count < 24)
         {
             return false;
         }
@@ -366,12 +385,6 @@ public sealed class HeartGestureService : IHostedService, IDisposable
             return false;
         }
 
-        var ratio = width / height;
-        if (ratio is < 0.55 or > 1.9)
-        {
-            return false;
-        }
-
         var diagonal = Math.Sqrt(width * width + height * height);
         var pathLength = 0.0;
         for (var i = 1; i < points.Count; i++)
@@ -379,52 +392,28 @@ public sealed class HeartGestureService : IHostedService, IDisposable
             pathLength += Distance(points[i - 1], points[i]);
         }
 
-        if (pathLength < diagonal * 1.8 || pathLength > diagonal * 6.5)
-        {
-            return false;
-        }
-
-        if (Distance(points[0], points[^1]) > diagonal * CloseDistanceRatio)
-        {
-            return false;
-        }
-
-        var centerX = (minX + maxX) / 2;
-        var bottom = points[0];
-        foreach (var point in points)
-        {
-            if (point.Y > bottom.Y)
-            {
-                bottom = point;
-            }
-        }
-
-        if (Math.Abs(bottom.X - centerX) > width * 0.24)
-        {
-            return false;
-        }
-
-        var centerPoints = points.Where(p => Math.Abs(p.X - centerX) < width * 0.10).ToList();
-        var leftPoints = points.Where(p => p.X < centerX - width * 0.10).ToList();
-        var rightPoints = points.Where(p => p.X > centerX + width * 0.10).ToList();
-        if (centerPoints.Count == 0 || leftPoints.Count == 0 || rightPoints.Count == 0)
-        {
-            return false;
-        }
-
-        var centerTop = centerPoints.Min(p => p.Y);
-        var leftTop = leftPoints.Min(p => p.Y);
-        var rightTop = rightPoints.Min(p => p.Y);
-
-        // 心形上方有两个凸起（y 更小），中间有一个下凹。
-        if (leftTop > centerTop - height * 0.06 || rightTop > centerTop - height * 0.06)
+        if (pathLength < diagonal * 1.2 || pathLength > diagonal * 8.0)
         {
             return false;
         }
 
         var normalized = Normalize(points, minX, maxX, minY, maxY);
-        var toTemplate = ChamferDistance(normalized, HeartTemplate);
-        var fromTemplate = ChamferDistance(HeartTemplate, normalized);
+        return gesture switch
+        {
+            1 => MatchTemplate(normalized, WTemplate),
+            2 => MatchTemplate(normalized, STemplate),
+            _ => MatchTemplate(normalized, HeartTemplate)
+        };
+    }
+
+    /// <summary>
+    /// 双向 Chamfer 距离匹配：用户画的→模板、模板→用户画的都近才算命中，
+    /// 避免只画了模板的一小段也被误判。
+    /// </summary>
+    private static bool MatchTemplate(IReadOnlyList<PointD> normalized, IReadOnlyList<PointD> template)
+    {
+        var toTemplate = ChamferDistance(normalized, template);
+        var fromTemplate = ChamferDistance(template, normalized);
         return Math.Max(toTemplate, fromTemplate) < MaxChamferDistance;
     }
 
@@ -473,6 +462,25 @@ public sealed class HeartGestureService : IHostedService, IDisposable
         var width = Math.Max(maxX - minX, 1e-6);
         var height = Math.Max(maxY - minY, 1e-6);
         return points.Select(p => new PointD((p.X - minX) / width, (p.Y - minY) / height)).ToList();
+    }
+
+    /// <summary>
+    /// 用一串归一化折线顶点生成等距采样的手势模板（用于 W / S 这类折线手势）。
+    /// </summary>
+    private static IReadOnlyList<PointD> BuildPolylineTemplate(IReadOnlyList<(double X, double Y)> vertices)
+    {
+        var raw = new List<PointD>(vertices.Count);
+        foreach (var (x, y) in vertices)
+        {
+            raw.Add(new PointD(x, y));
+        }
+
+        var sampled = Resample(raw, 128);
+        var minX = sampled.Min(p => p.X);
+        var maxX = sampled.Max(p => p.X);
+        var minY = sampled.Min(p => p.Y);
+        var maxY = sampled.Max(p => p.Y);
+        return Normalize(sampled, minX, maxX, minY, maxY);
     }
 
     private static IReadOnlyList<PointD> BuildHeartTemplate()

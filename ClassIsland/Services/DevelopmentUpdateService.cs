@@ -32,10 +32,44 @@ public sealed record DevelopmentUpdateProgress(
 /// <summary>
 /// 调试页的“拉取更新并编译运行”功能。仅在从源码目录运行时可用。
 /// </summary>
-public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> logger)
+public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> logger,
+    SettingsService settingsService)
 {
     private const int SubmoduleRetryCount = 5;
     private const int NetworkRetryCount = 3;
+
+    /// <summary>
+    /// 直连拉取的尝试次数。用完仍失败就改用镜像源。
+    /// </summary>
+    private const int DirectFetchAttemptCount = 4;
+
+    /// <summary>
+    /// 源码仓库地址，写死在这里。
+    /// 不能拿本地已有的 remote 来拉：remote 可能指向官方仓库或别的副仓库，
+    /// 拉下来的是别人的代码，更新完编译出来的东西根本不是这个分支。
+    /// </summary>
+    private const string SourceRepositoryUrl = "https://github.com/farmer-snack/NLCLI.git";
+
+    private const string SourceBranch = "develop/v2/misha-alpha";
+
+    /// <summary>
+    /// 专用于本功能的远端引用名。fetch 时直接写引用而不建立 remote，
+    /// 避免和本地已有的 origin / 官方仓库 remote 混在一起。
+    /// </summary>
+    private const string UpdateRemoteName = "classisland-auto-update";
+
+    /// <summary>
+    /// GitHub 加速镜像。直连多次失败后按顺序尝试。
+    /// </summary>
+    private static readonly string[] SourceRepositoryMirrors =
+    [
+        "https://ghproxy.net/https://github.com/farmer-snack/NLCLI.git",
+        "https://gh-proxy.com/https://github.com/farmer-snack/NLCLI.git",
+        "https://ghfast.top/https://github.com/farmer-snack/NLCLI.git",
+        "https://github.moeyy.xyz/https://github.com/farmer-snack/NLCLI.git",
+        "https://hub.gitmirror.com/https://github.com/farmer-snack/NLCLI.git"
+    ];
+
     private int _isRunning;
 
     public bool IsRunning => Volatile.Read(ref _isRunning) == 1;
@@ -55,15 +89,15 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
 
         try
         {
-            var repositoryRoot = FindRepositoryRoot()
-                                 ?? throw new InvalidOperationException(
-                                     "当前运行目录不在 Git 仓库中。开发构建功能只能从源码目录运行。");
-            Report(progress, DevelopmentUpdateStage.Preparing, "已定位仓库", repositoryRoot);
-
             var git = await EnsureGitAsync(progress, cancellationToken);
             var dotnet = await EnsureDotnetAsync(progress, cancellationToken);
 
-            await PullAsync(git, repositoryRoot, progress, cancellationToken);
+            // 不再要求当前目录就是 Git 仓库：找不到就自己拉一份源码到独立目录，
+            // 编译仍然在仓库里进行，新版本沿用当前工作目录启动，配置不会漂移。
+            var branch = GetSelectedBranch();
+            Report(progress, DevelopmentUpdateStage.Preparing, $"目标分支：{branch}");
+            var repositoryRoot = await EnsureRepositoryAsync(git, branch, progress, cancellationToken);
+            await SyncRepositoryAsync(git, repositoryRoot, branch, progress, cancellationToken);
             await UpdateSubmodulesAsync(git, repositoryRoot, progress, cancellationToken);
             var buildOutput = await BuildAsync(dotnet, repositoryRoot, progress, cancellationToken);
 
@@ -104,6 +138,66 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         progress.Report(new DevelopmentUpdateProgress(stage, message, detail));
     }
 
+    /// <summary>
+    /// 构造候选地址列表：先直连 4 次，再依次尝试镜像。
+    /// 直连重复 4 次是为了在一过性网络抖动下不必切到可能过期的镜像。
+    /// </summary>
+    private static IReadOnlyList<string> BuildSourceCandidates()
+    {
+        var candidates = new List<string>(DirectFetchAttemptCount + SourceRepositoryMirrors.Length);
+        for (var i = 0; i < DirectFetchAttemptCount; i++)
+        {
+            candidates.Add(SourceRepositoryUrl);
+        }
+
+        candidates.AddRange(SourceRepositoryMirrors);
+        return candidates;
+    }
+
+    private string GetSelectedBranch()
+    {
+        var branch = settingsService.Settings.DevelopmentUpdateBranch;
+        return string.IsNullOrWhiteSpace(branch) ? SourceBranch : branch.Trim();
+    }
+
+    /// <summary>
+    /// 探测远程有哪些分支。只按写死的仓库地址查询，不碰本地配置的任何 remote。
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetRemoteBranchesAsync(CancellationToken cancellationToken)
+    {
+        var git = await FindToolAsync("git", "--version", cancellationToken) ?? FindGitInCommonPaths();
+        if (git == null)
+        {
+            return [];
+        }
+
+        foreach (var url in BuildSourceCandidates())
+        {
+            var result = await RunProcessAsync(git, ["ls-remote", "--heads", url],
+                Environment.CurrentDirectory, null, null, cancellationToken, false);
+            if (result.ExitCode != 0)
+            {
+                continue;
+            }
+
+            var branches = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Split('\t', StringSplitOptions.RemoveEmptyEntries))
+                .Where(parts => parts.Length >= 2 && parts[1].StartsWith("refs/heads/", StringComparison.Ordinal))
+                .Select(parts => parts[1]["refs/heads/".Length..])
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name == SourceBranch ? 0 : 1)
+                .ThenBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (branches.Count > 0)
+            {
+                return branches;
+            }
+        }
+
+        return [];
+    }
+
     private static string? FindRepositoryRoot()
     {
         var candidates = new[]
@@ -129,6 +223,109 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 获取源码工作目录。优先复用当前/父目录里已有的本仓库；
+    /// 找不到时就用固定目录，并由调用方按写死的地址 clone 一份。
+    /// </summary>
+    private static string GetSourceDirectory()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(local))
+        {
+            local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
+        }
+
+        return Path.Combine(local, "ClassIsland", "dev-update-source");
+    }
+
+    private static bool IsClassIslandRepository(string root)
+    {
+        return File.Exists(Path.Combine(root, "ClassIsland.Desktop", "ClassIsland.Desktop.csproj"));
+    }
+
+    /// <summary>
+    /// 确保有一份可用的源码仓库。当前目录树里找到本仓库就直接用；
+    /// 否则在固定目录里按写死的地址 clone（直连失败自动切镜像）。
+    /// </summary>
+    private async Task<string> EnsureRepositoryAsync(string git, string branch,
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        var existing = FindRepositoryRoot();
+        if (existing != null && IsClassIslandRepository(existing))
+        {
+            Report(progress, DevelopmentUpdateStage.Preparing, "已定位本地源码仓库", existing);
+            return existing;
+        }
+
+        var directory = GetSourceDirectory();
+        if (Directory.Exists(Path.Combine(directory, ".git")) && IsClassIslandRepository(directory))
+        {
+            Report(progress, DevelopmentUpdateStage.Preparing, "复用已下载的源码仓库", directory);
+            return directory;
+        }
+
+        var parent = Path.GetDirectoryName(directory)!;
+        Directory.CreateDirectory(parent);
+        var candidates = BuildSourceCandidates();
+        ProcessResult last = new(-1, "", "");
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var mirror = i >= DirectFetchAttemptCount;
+            var label = mirror
+                ? $"直连失败，尝试镜像 {i - DirectFetchAttemptCount + 1}/{SourceRepositoryMirrors.Length} 下载源码…"
+                : $"正在下载源码（第 {i + 1}/{DirectFetchAttemptCount} 次）…";
+            Report(progress, DevelopmentUpdateStage.Preparing, label, candidates[i]);
+
+            // clone 目标目录必须为空，失败后清掉残留再试下一个地址。
+            TryDeleteDirectory(directory);
+            last = await RunProcessAsync(git,
+                ["clone", "--branch", branch, "--single-branch", "--no-tags", candidates[i], directory],
+                parent, progress, null, cancellationToken, false);
+            if (last.ExitCode == 0 && IsClassIslandRepository(directory))
+            {
+                Report(progress, DevelopmentUpdateStage.Preparing, "源码已下载", directory);
+                return directory;
+            }
+
+            if (i + 1 < candidates.Count)
+            {
+                var delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(i, 5))));
+                Report(progress, DevelopmentUpdateStage.Preparing,
+                    $"下载失败，{delay.TotalSeconds:0} 秒后重试…", Tail(last.Error + last.Output, 8));
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        throw new InvalidOperationException("源码下载失败，直连和所有镜像都未成功。\n" +
+                                            Tail(last.Error + last.Output));
+    }
+
+    /// <summary>
+    /// 从镜像地址里取出「前缀 + https://github.com/」，用于 git 的 insteadOf 改写。
+    /// 例如 https://ghproxy.net/https://github.com/xxx.git → https://ghproxy.net/https://github.com/
+    /// </summary>
+    private static string GetMirrorPrefix(string mirrorUrl)
+    {
+        const string marker = "https://github.com/";
+        var index = mirrorUrl.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return index >= 0 ? mirrorUrl[..(index + marker.Length)] : mirrorUrl;
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+            }
+        }
+        catch
+        {
+            // 删不掉时 clone 自己会报更明确的错，这里不掩盖主流程。
+        }
     }
 
     private async Task<string> EnsureGitAsync(IProgress<DevelopmentUpdateProgress> progress,
@@ -322,7 +519,7 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         return (fileName, arguments);
     }
 
-    private async Task PullAsync(string git, string repositoryRoot,
+    private async Task SyncRepositoryAsync(string git, string repositoryRoot, string branch,
         IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
     {
         Report(progress, DevelopmentUpdateStage.Pulling, "检查本地改动…");
@@ -345,46 +542,76 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             stashed = true;
         }
 
-        Report(progress, DevelopmentUpdateStage.Pulling, "拉取远程提交…");
-        var fetch = await RunWithRetryAsync(git, ["fetch", "--all", "--prune"], repositoryRoot,
-            progress, "拉取远程提交", NetworkRetryCount, cancellationToken);
-        if (fetch.ExitCode != 0)
+        // 只按写死的仓库地址拉取目标分支，不枚举、不使用本地已有的任何 remote。
+        // remote 可能指向官方仓库或别的副仓库，用它会把错误的代码编译进去。
+        var candidates = BuildSourceCandidates();
+        ProcessResult fetch = new(-1, "", "");
+        var fetched = false;
+        for (var i = 0; i < candidates.Count; i++)
         {
-            throw new InvalidOperationException("拉取远程提交失败。\n" + Tail(fetch.Error + fetch.Output));
+            var mirror = i >= DirectFetchAttemptCount;
+            var label = mirror
+                ? $"直连失败，尝试镜像 {i - DirectFetchAttemptCount + 1}/{SourceRepositoryMirrors.Length} 拉取…"
+                : $"拉取 {branch}（第 {i + 1}/{DirectFetchAttemptCount} 次）…";
+            Report(progress, DevelopmentUpdateStage.Pulling, label, candidates[i]);
+            fetch = await RunProcessAsync(git,
+                ["fetch", "--no-tags", "--prune", candidates[i], $"+refs/heads/{branch}:refs/remotes/{UpdateRemoteName}/{branch}"],
+                repositoryRoot, progress, null, cancellationToken, false);
+            if (fetch.ExitCode == 0)
+            {
+                fetched = true;
+                break;
+            }
+
+            if (i + 1 < candidates.Count)
+            {
+                var delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(i, 5))));
+                Report(progress, DevelopmentUpdateStage.Pulling,
+                    $"拉取失败，{delay.TotalSeconds:0} 秒后重试…", Tail(fetch.Error + fetch.Output, 8));
+                await Task.Delay(delay, cancellationToken);
+            }
         }
 
-        var branch = await RunProcessAsync(git, ["rev-parse", "--abbrev-ref", "HEAD"], repositoryRoot,
-            progress, null, cancellationToken);
-        var upstream = await RunProcessAsync(git,
-            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repositoryRoot, progress, null,
-            cancellationToken, false);
-        if (upstream.ExitCode != 0 || string.IsNullOrWhiteSpace(upstream.Output))
+        if (!fetched)
         {
-            Report(progress, DevelopmentUpdateStage.Pulling,
-                $"当前分支 {branch.Output.Trim()} 没有上游分支，跳过 git pull，直接编译。");
+            throw new InvalidOperationException($"拉取分支 {branch} 失败，直连和所有镜像都未成功。\n" +
+                                                Tail(fetch.Error + fetch.Output));
         }
-        else
+
+        var remoteRef = $"{UpdateRemoteName}/{branch}";
+        // 切到目标分支：本地没有就基于远端引用创建，有就切过去再对齐。
+        var current = await RunProcessAsync(git, ["rev-parse", "--abbrev-ref", "HEAD"], repositoryRoot,
+            progress, null, cancellationToken);
+        if (string.Equals(current.Output.Trim(), branch, StringComparison.Ordinal))
         {
-            Report(progress, DevelopmentUpdateStage.Pulling,
-                $"更新 {branch.Output.Trim()} ← {upstream.Output.Trim()}…");
-            var pull = await RunProcessAsync(git, ["pull", "--ff-only"], repositoryRoot, progress, null,
+            var merge = await RunProcessAsync(git, ["merge", "--ff-only", remoteRef], repositoryRoot, progress, null,
                 cancellationToken);
-            if (pull.ExitCode != 0)
+            if (merge.ExitCode != 0)
             {
-                // 本地与远端分叉时 --ff-only 必然失败。先尝试变基；变基失败就中止，
-                // 不能让仓库停在一半的变基状态里，否则用户下次打开仓库会一脸问号。
-                Report(progress, DevelopmentUpdateStage.Pulling, "快进拉取失败，尝试变基到远端…",
-                    Tail(pull.Error + pull.Output, 10));
-                var rebase = await RunProcessAsync(git, ["pull", "--rebase"], repositoryRoot, progress, null,
+                // 本地与远端分叉时 --ff-only 必然失败。先尝试变基；变基失败就中止并回滚，
+                // 不能让仓库停在一半的变基状态里。
+                Report(progress, DevelopmentUpdateStage.Pulling, "快进失败，尝试变基到远端…",
+                    Tail(merge.Error + merge.Output, 10));
+                var rebase = await RunProcessAsync(git, ["rebase", remoteRef], repositoryRoot, progress, null,
                     cancellationToken);
                 if (rebase.ExitCode != 0)
                 {
                     await RunProcessAsync(git, ["rebase", "--abort"], repositoryRoot, null, null,
                         cancellationToken, false);
                     throw new InvalidOperationException(
-                        "git pull 失败：本地分支与远端存在冲突，已中止变基。请手动处理后重试。\n" +
+                        "更新失败：本地分支与远端存在冲突，已中止变基。请手动处理后重试。\n" +
                         Tail(rebase.Error + rebase.Output));
                 }
+            }
+        }
+        else
+        {
+            var checkout = await RunProcessAsync(git, ["checkout", "-B", branch, remoteRef], repositoryRoot,
+                progress, null, cancellationToken);
+            if (checkout.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"切换到分支 {branch} 失败。\n" +
+                                                    Tail(checkout.Error + checkout.Output));
             }
         }
 
@@ -418,14 +645,29 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         {
             Report(progress, DevelopmentUpdateStage.UpdatingSubmodules,
                 $"初始化子模块（第 {attempt}/{SubmoduleRetryCount} 次）…");
-            var environment = attempt >= 2
-                ? new Dictionary<string, string>
+            // 第 2 次起把 SSH 改写成 HTTPS（照顾没配 SSH key 的机器）；
+            // 更靠后的重试叠加上镜像前缀，绕开直连不通的网络环境。
+            Dictionary<string, string>? environment = null;
+            var mirrorIndex = attempt - 3; // attempt 4 -> 镜像 0
+            if (attempt >= 2 || mirrorIndex >= 0)
+            {
+                environment = new Dictionary<string, string>();
+                if (mirrorIndex >= 0 && mirrorIndex < SourceRepositoryMirrors.Length)
                 {
-                    ["GIT_CONFIG_COUNT"] = "1",
-                    ["GIT_CONFIG_KEY_0"] = "url.https://github.com/.insteadOf",
-                    ["GIT_CONFIG_VALUE_0"] = "git@github.com:"
+                    var prefix = GetMirrorPrefix(SourceRepositoryMirrors[mirrorIndex]);
+                    environment["GIT_CONFIG_COUNT"] = "2";
+                    environment["GIT_CONFIG_KEY_0"] = $"url.{prefix}.insteadOf";
+                    environment["GIT_CONFIG_VALUE_0"] = "https://github.com/";
+                    environment["GIT_CONFIG_KEY_1"] = $"url.{prefix}.insteadOf";
+                    environment["GIT_CONFIG_VALUE_1"] = "git@github.com:";
                 }
-                : null;
+                else
+                {
+                    environment["GIT_CONFIG_COUNT"] = "1";
+                    environment["GIT_CONFIG_KEY_0"] = "url.https://github.com/.insteadOf";
+                    environment["GIT_CONFIG_VALUE_0"] = "git@github.com:";
+                }
+            }
             var result = await RunProcessAsync(git, ["submodule", "update", "--init", "--recursive"],
                 repositoryRoot, progress, environment, cancellationToken, false);
             if (result.ExitCode == 0)

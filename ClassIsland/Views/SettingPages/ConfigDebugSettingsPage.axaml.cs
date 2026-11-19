@@ -51,6 +51,11 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
         await ViewModel.StartDevelopmentUpdateAsync();
     }
 
+    private async void ButtonRefreshRemoteBranches_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ViewModel.RefreshRemoteBranchesAsync();
+    }
+
     private void ButtonCancelDevelopmentUpdate_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel.CancelDevelopmentUpdate();
@@ -142,6 +147,11 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
     private void ConfigDebugSettingsPage_OnLoaded(object? sender, RoutedEventArgs e)
     {
         ViewModel.EnsureSubscribed();
+        // 首次进入时自动探测一次远程分支；失败也不影响页面使用。
+        if (ViewModel.RemoteBranches.Count == 0)
+        {
+            _ = ViewModel.RefreshRemoteBranchesAsync();
+        }
     }
 
     private void ConfigDebugSettingsPage_OnUnloaded(object? sender, RoutedEventArgs e)
