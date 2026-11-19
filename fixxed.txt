@@ -536,6 +536,15 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 注意：圆形会被判成爱心（轮廓相近，分数约 0.1），可接受——画圆唤出托盘符合直觉。
 - 涉及：HeartGestureService.cs、Settings.cs、GeneralSettingsPage.axaml。
 
+补充（2026-11-19）：手势下拉的位置按用户要求调整。
+- 用户明确：手势切换必须放在基本设置页的「显示托盘图标」里，不能放到托盘右键菜单。
+  核对后确认原本就没进托盘右键菜单（AppMenu 无手势项、TaskBarIconService 的
+  MoreOptionsMenu 只挂 Opening/Closed 事件），只是在「显示托盘图标」的子项里。
+- 为满足「直接切换」，把 ComboBox 从 FASettingsExpanderItem 子项移到该项的 Footer，
+  与显示开关并排放在同一行（StackPanel 横向），一进页面就能看到；说明文字
+  「可在下方选择」改为「可在右侧选择」。Linux/macOS 仍用 OnPlatform 隐藏下拉。
+- 涉及：GeneralSettingsPage.axaml。
+
 补充（2026-11-17）：
 - 修正原生 DLL 导入：GetCurrentThreadId、GetModuleHandle 由 kernel32.dll 导出，原先误写成
   user32.dll。隐藏托盘图标后启动钩子线程会抛 EntryPointNotFoundException，整个应用直接崩溃。

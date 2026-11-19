@@ -114,30 +114,26 @@
             <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE7B3;}"
                                         Header="显示托盘图标">
                 <controls3:FASettingsExpander.Description>
-                    <OnPlatform Default="关闭后托盘图标会从任务栏通知区域隐藏。隐藏时在屏幕上画一个大大的手势（爱心 / W / S，可在下方选择），即可重新显示托盘图标。">
+                    <OnPlatform Default="关闭后托盘图标会从任务栏通知区域隐藏。隐藏时在屏幕上画一个大大的手势（爱心 / W / S，可在右侧选择），即可重新显示托盘图标。">
                         <On Options="Linux" Content="关闭后托盘图标会从任务栏通知区域隐藏。"/>
                         <On Options="macOS" Content="关闭后托盘图标会从菜单栏隐藏。"/>
                     </OnPlatform>
                 </controls3:FASettingsExpander.Description>
                 <controls3:FASettingsExpander.Footer>
-                    <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsTaskBarIconVisible}"/>
-                </controls3:FASettingsExpander.Footer>
-                <!-- 唤出手势：仅 Windows 生效（依赖全局鼠标钩子） -->
-                <controls3:FASettingsExpanderItem Content="唤出手势">
-                    <controls3:FASettingsExpanderItem.IsVisible>
-                        <OnPlatform Default="True">
-                            <On Options="Linux" Content="False" />
-                            <On Options="macOS" Content="False" />
-                        </OnPlatform>
-                    </controls3:FASettingsExpanderItem.IsVisible>
-                    <controls3:FASettingsExpanderItem.Footer>
-                        <ComboBox SelectedIndex="{Binding ViewModel.SettingsService.Settings.TrayIconWakeGesture}">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <!-- 唤出手势下拉直接放在「显示托盘图标」这一行，跟开关并排，一眼可见。
+                             仅 Windows 生效（依赖全局鼠标钩子），其它平台隐藏。 -->
+                        <ComboBox SelectedIndex="{Binding ViewModel.SettingsService.Settings.TrayIconWakeGesture}"
+                                  VerticalAlignment="Center" Width="100"
+                                  IsVisible="{OnPlatform Default=True, Linux=False, macOS=False}">
                             <ComboBoxItem Content="爱心" />
                             <ComboBoxItem Content="大写 W" />
                             <ComboBoxItem Content="大写 S" />
                         </ComboBox>
-                    </controls3:FASettingsExpanderItem.Footer>
-                </controls3:FASettingsExpanderItem>
+                        <ToggleSwitch IsChecked="{Binding ViewModel.SettingsService.Settings.IsTaskBarIconVisible}"
+                                      VerticalAlignment="Center"/>
+                    </StackPanel>
+                </controls3:FASettingsExpander.Footer>
             </controls3:FASettingsExpander>
 
             <!-- 点击托盘图标行为 -->
