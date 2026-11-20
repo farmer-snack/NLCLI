@@ -207,6 +207,27 @@ PluginService 与可观测性
   触发该库加载时，「需要兼容层」的标记会突然变回「原生支持」，列表页和详情页同时显示错误值。
   → 只有 CompatibilityLayer 或当前为 Unknown 时才写入，Native 不会把已有结论降级。
 
+补充（2026-11-20：FluentAvalonia Expander 展开动画空引用）
+--------
+需求：用户展开设置页里的 FASettingsExpander 时抛 NullReferenceException 并弹崩溃窗
+（TraceID 04e11f83…，堆栈 FluentAvalonia.UI.Controls.FAExpanderExt.ExpanderInfo.HandleExpanderTemplateApplied）。
+- 根因（已反编译 FluentAvaloniaUI 3.0.0/3.0.1/3.0.2/3.1.0 的 dll 逐版本确认，四个版本方法 IL 完全一致）：
+  ExpanderInfo 仅在附加属性 ExpanderAnimationType=FluentV2 时创建并订阅 TemplateApplied；
+  HandleExpanderTemplateApplied 对 e.NameScope.Get("ExpanderContentClip") 的返回值未判空就传给
+  ElementComposition.GetElementVisual，模板缺少该部件时 NRE。异常出自 async void 动画延续，冒泡到 Dispatcher，
+  走 ProcessUnhandledException → CrashWindow，误报为严重崩溃。
+- 修法：App_OnDispatcherUnhandledException 开头新增 IsFluentAvaloniaExpanderAnimationException 精准判定
+  （必须同时是 NullReferenceException 且堆栈含 FAExpanderExt + HandleExpanderTemplateApplied，
+  并沿 InnerException 向内展开），命中则记 warning 日志后 e.Handled=true 直接返回，不进崩溃流程。
+  条件刻意收窄，真正的其它空引用仍照常上报；仅隔离这一次无害的动画异常。
+- 为什么不动依赖：升级 FluentAvaloniaUI 到 3.1.0 无法规避（该方法 IL 与 3.0.0 相同，均未判空）。
+- 涉及文件：ClassIsland/App.axaml.cs（App_OnDispatcherUnhandledException + 新增判定方法）。
+下次同步注意
+------------
+- 上游若在 App.axaml.cs 改 Dispatcher 异常处理，保留 IsFluentAvaloniaExpanderAnimationException 这一段前置隔离。
+- 若将来官方 FluentAvalonia 修复了该判空（HandleExpanderTemplateApplied 对 ExpanderContentClip 判空），
+  可移除本隔离，但需先确认新dll确实判空，别凭版本号猜。
+
 ================================================
 [长期] 旧版本数据迁移（插件与备份）
 ================================================

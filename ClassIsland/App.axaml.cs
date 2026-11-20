@@ -367,6 +367,21 @@ public partial class App : AppBase, IAppHost
 
     private void App_OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        // FluentAvalonia 3.x 的 Expander 展开动画存在缺陷：ExpanderInfo.HandleExpanderTemplateApplied
+        // 在模板应用时对 NameScope.Get("ExpanderContentClip") 的返回值未判空就传给
+        // ElementComposition.GetElementVisual，部件缺失时会抛 NullReferenceException。
+        // 该异常发生在 async void 动画的延续里，最终冒泡到 Dispatcher；它只影响一次展开动画，
+        // 不影响数据与功能，不该弹崩溃窗口或中断应用。这里按堆栈精确识别并降级为一条警告日志。
+        // 官方 3.0.0/3.0.1/3.0.2/3.1.0 的该方法均未判空，升级依赖无法规避，故在此隔离。
+        if (IsFluentAvaloniaExpanderAnimationException(e.Exception))
+        {
+            Logger?.LogWarning(e.Exception,
+                "已隔离 FluentAvalonia Expander 展开动画的空引用异常（不影响功能）：{Message}",
+                e.Exception.Message);
+            e.Handled = true;
+            return;
+        }
+
         // COMException: UCEERR_RENDERTHREADFAILURE (0x88980406)
         if (e.Exception is COMException comException && (uint)comException.HResult == 0x88980406)
         {
@@ -382,6 +397,37 @@ public partial class App : AppBase, IAppHost
             ProcessWpfCriticalException(e.Exception);
         }
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// 判断是否为 FluentAvalonia Expander 展开动画的已知空引用异常。
+    /// 必须同时满足：是 NullReferenceException，且堆栈命中 FAExpanderExt.HandleExpanderTemplateApplied。
+    /// 条件做得足够窄，避免把真正严重的空引用误判为良性而吞掉。
+    /// </summary>
+    private static bool IsFluentAvaloniaExpanderAnimationException(Exception exception)
+    {
+        if (exception is not NullReferenceException)
+        {
+            return false;
+        }
+
+        // 向内展开聚合/包装异常，覆盖 async void 动画经 Task 抛出的情况。
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            var stack = current.StackTrace;
+            if (string.IsNullOrEmpty(stack))
+            {
+                continue;
+            }
+
+            if (stack.Contains("FAExpanderExt", StringComparison.Ordinal) &&
+                stack.Contains("HandleExpanderTemplateApplied", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void ProcessWpfCriticalException(Exception ex)
