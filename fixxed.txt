@@ -832,6 +832,11 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
 - 欢迎页开源反诈 Toast：WelcomePage.axaml.cs 移除。
 - 隐私政策强制同意：LicensePage.axaml/.cs 移除勾选与「下一步」的绑定。
 - 贡献者：.all-contributorsrc 与 README.md 只保留 farmer-snack。
+- README 重写（2026-11-21）：根目录 README.md 改为本 fork 专属介绍（定位、定制大类索引、
+  变量调试页工具、分支同步、下载、致谢），开头引用 README.upstream.md。原 README（官方原版，
+  含上游全部推广/截图/社区链接）用 git mv 改名为 README.upstream.md，留在根目录、内容一字未改。
+  下次同步上游若改 README.md：先比对，把上游新信息补进 README.upstream.md，不要直接覆盖
+  本 fork 的 README.md，也不要把 README.upstream.md 当成多余文件删掉。
 - Release 构建的「欢迎使用 2.2-Misha Developer Preview」对话框：
   删掉 App.axaml.cs 里 #if RELEASE 包住的整块 FATaskDialog（标题、正文、米沙图标、确定按钮）。
   上游若又往这段加内容（搜 `#if RELEASE` + FATaskDialog），继续删除，别恢复。
