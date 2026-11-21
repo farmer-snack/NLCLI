@@ -234,7 +234,8 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
     /// 非自包含则关掉这两项、保留 win-x64 目标与 PlatformTarget=x64（与自包含无关的平台常量）。
     /// </summary>
     private async Task RunDotnetPublishAsync(string dotnet, string repositoryRoot, bool selfContained,
-        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken,
+        bool allowAiFix = true)
     {
         var project = Path.Combine(repositoryRoot, "ClassIsland.Desktop", "ClassIsland.Desktop.csproj");
         if (!File.Exists(project))
@@ -260,7 +261,16 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             NetworkRetryCount, cancellationToken, IsNetworkFailure, DevelopmentUpdateStage.Building);
         if (result.ExitCode != 0)
         {
-            throw new InvalidOperationException("dotnet publish 打包失败。\n" + Tail(result.Error + result.Output, 40));
+            var error = result.Error + result.Output;
+            // 程序自身能力已用尽（含网络重试），尝试交给 AI 修复一次；只重试一次，避免死循环。
+            if (allowAiFix && await TryFixBuildWithAiAsync(Tail(error, 60), repositoryRoot, progress, cancellationToken))
+            {
+                Report(progress, DevelopmentUpdateStage.Building, "AI 已修复代码，正在重新打包…");
+                await RunDotnetPublishAsync(dotnet, repositoryRoot, selfContained, progress, cancellationToken, false);
+                return;
+            }
+
+            throw new InvalidOperationException("dotnet publish 打包失败。\n" + Tail(error, 40));
         }
     }
 
@@ -338,6 +348,273 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             }
         }
         return removed;
+    }
+
+    /// <summary>
+    /// 编译失败且自身重试也无法解决时，尝试借助命令行 AI 自动修复：
+    /// 安装 BUN → 通过 BUN 安装 OpenCode CLI → 探测免费模型（DeepSeek &gt; Mimo &gt; 混元4 Flash）
+    /// → 把编译错误交给 AI，让它在仓库里直接改代码。
+    /// <para>返回 true 表示 AI 已实际执行修复，调用方应重新编译一次；任何环节失败都返回 false，
+    /// 由调用方抛出原始编译错误，不掩盖真正的问题。</para>
+    /// </summary>
+    private async Task<bool> TryFixBuildWithAiAsync(string buildError, string repositoryRoot,
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Report(progress, DevelopmentUpdateStage.Building,
+                "编译失败，尝试用 AI 自动修复…", Tail(buildError, 8));
+            var bun = await EnsureBunAsync(progress, cancellationToken);
+            var opencode = await EnsureOpenCodeAsync(bun, progress, cancellationToken);
+            var model = await SelectFreeModelAsync(opencode, bun, repositoryRoot, progress, cancellationToken);
+            return await RunAiFixAsync(opencode, bun, model, buildError, repositoryRoot, progress, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "AI 自动修复 compilation 失败。");
+            Report(progress, DevelopmentUpdateStage.Building, $"AI 自动修复未成功：{ex.Message}", Tail(ex.ToString()));
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 确保本机有 BUN：PATH 或常见位置找到就复用，否则按平台安装并安装到 ~/.bun/bin。
+    /// </summary>
+    private async Task<string> EnsureBunAsync(IProgress<DevelopmentUpdateProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        var bun = await FindToolAsync("bun", "--version", cancellationToken) ?? FindBunInCommonPaths();
+        if (bun != null)
+        {
+            Report(progress, DevelopmentUpdateStage.Building, "已检测到 BUN。", bun);
+            return bun;
+        }
+
+        Report(progress, DevelopmentUpdateStage.Building, "未检测到 BUN，正在安装…");
+        if (OperatingSystem.IsWindows())
+        {
+            var installed = false;
+            if (await CommandExistsAsync("winget", cancellationToken))
+            {
+                var result = await RunProcessAsync("winget",
+                    ["install", "--id", "Oven.Bun", "-e", "--source", "winget",
+                        "--accept-package-agreements", "--accept-source-agreements", "--silent"],
+                    Environment.CurrentDirectory, progress, null, cancellationToken, false);
+                installed = result.ExitCode == 0;
+            }
+
+            if (!installed)
+            {
+                await RunCheckedAsync("powershell.exe",
+                    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                        "-Command", "irm bun.sh/install.ps1 | iex"],
+                    Environment.CurrentDirectory, progress, cancellationToken, DevelopmentUpdateStage.Building);
+            }
+        }
+        else
+        {
+            const string script = """
+                set -e
+                if command -v curl >/dev/null 2>&1; then
+                    curl -fsSL https://bun.sh/install | bash
+                elif command -v wget >/dev/null 2>&1; then
+                    wget -qO- https://bun.sh/install | bash
+                else
+                    echo "缺少 curl 或 wget，无法安装 BUN" >&2
+                    exit 1
+                fi
+                """;
+            await RunCheckedAsync("/bin/bash", ["-c", script], Environment.CurrentDirectory, progress,
+                cancellationToken, DevelopmentUpdateStage.Building);
+        }
+
+        bun = FindBunInCommonPaths() ?? await FindToolAsync("bun", "--version", cancellationToken);
+        if (bun == null)
+        {
+            throw new InvalidOperationException("BUN 安装完成，但仍找不到 bun 命令。请重新启动应用后重试。");
+        }
+
+        Report(progress, DevelopmentUpdateStage.Building, "BUN 已就绪。", bun);
+        return bun;
+    }
+
+    /// <summary>
+    /// 确保安装了命令行版 OpenCode：优先复用，否则用 BUN 全局安装 opencode-ai。
+    /// </summary>
+    private async Task<string> EnsureOpenCodeAsync(string bun, IProgress<DevelopmentUpdateProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        var opencode = FindOpenCodeInCommonPaths();
+        if (opencode != null && await IsToolRunnableAsync(opencode, "--version", bun, cancellationToken))
+        {
+            Report(progress, DevelopmentUpdateStage.Building, "已检测到命令行版 OpenCode。", opencode);
+            return opencode;
+        }
+
+        Report(progress, DevelopmentUpdateStage.Building, "未检测到 OpenCode，正在通过 BUN 安装命令行版…");
+        var env = BuildBunEnvironment(bun);
+        var result = await RunProcessAsync(bun, ["install", "-g", "opencode-ai"],
+            Environment.CurrentDirectory, progress, env, cancellationToken, false, DevelopmentUpdateStage.Building);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException("通过 BUN 安装 OpenCode 失败。\n" + Tail(result.Error + result.Output));
+        }
+
+        opencode = FindOpenCodeInCommonPaths();
+        if (opencode == null || !await IsToolRunnableAsync(opencode, "--version", bun, cancellationToken))
+        {
+            throw new InvalidOperationException("OpenCode 安装完成，但仍找不到可运行的 opencode 命令。请重新启动应用后重试。");
+        }
+
+        Report(progress, DevelopmentUpdateStage.Building, "OpenCode 已就绪。", opencode);
+        return opencode;
+    }
+
+    /// <summary>
+    /// 探测 OpenCode 自带的免费模型，按 DeepSeek &gt; Mimo &gt; 混元4 Flash 的优先级挑选一个。
+    /// </summary>
+    private async Task<string> SelectFreeModelAsync(string opencode, string bun, string repositoryRoot,
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        var env = BuildBunEnvironment(bun, opencode);
+        var result = await RunProcessAsync(opencode, ["models"], repositoryRoot, progress, env,
+            cancellationToken, false, DevelopmentUpdateStage.Building);
+        var models = ParseModelIds(result.Output);
+
+        // 首次为空可能是模型缓存未加载，刷新后再取一次。
+        if (models.Count == 0)
+        {
+            await RunProcessAsync(opencode, ["models", "--refresh"], repositoryRoot, progress, env,
+                cancellationToken, false, DevelopmentUpdateStage.Building);
+            result = await RunProcessAsync(opencode, ["models"], repositoryRoot, progress, env,
+                cancellationToken, false, DevelopmentUpdateStage.Building);
+            models = ParseModelIds(result.Output);
+        }
+
+        // 免费模型是内置 opencode provider 下、id 带 free 的条目。
+        var freeModels = models
+            .Where(x => x.StartsWith("opencode/", StringComparison.OrdinalIgnoreCase) &&
+                        x.Contains("free", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (freeModels.Count == 0)
+        {
+            // 兼容把免费模型挂在别的 provider 下的情况。
+            freeModels = models.Where(x => x.Contains("free", StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        var chosen = freeModels.FirstOrDefault(x => x.Contains("deepseek", StringComparison.OrdinalIgnoreCase))
+                     ?? freeModels.FirstOrDefault(x => x.Contains("mimo", StringComparison.OrdinalIgnoreCase))
+                     ?? freeModels.FirstOrDefault(x => x.Contains("hy4", StringComparison.OrdinalIgnoreCase) ||
+                                                       x.Contains("hunyuan", StringComparison.OrdinalIgnoreCase));
+        if (chosen == null)
+        {
+            throw new InvalidOperationException(
+                "未在 OpenCode 免费模型中找到 DeepSeek / Mimo / 混元4 Flash。\n" +
+                "可用免费模型：" + (freeModels.Count > 0 ? string.Join(", ", freeModels) : "（无）"));
+        }
+
+        Report(progress, DevelopmentUpdateStage.Building, $"选用免费模型：{chosen}", chosen);
+        return chosen;
+    }
+
+    /// <summary>
+    /// 把编译错误作为提示词交给 OpenCode，在仓库目录里以非交互方式自动修复代码。
+    /// </summary>
+    private async Task<bool> RunAiFixAsync(string opencode, string bun, string model, string buildError,
+        string repositoryRoot, IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        var env = BuildBunEnvironment(bun, opencode);
+        // 非交互 run 模式下权限请求默认被拒绝，这里内联放开编辑/写入/命令执行权限，让 AI 能真正改代码。
+        env["OPENCODE_PERMISSION"] = """{"edit":"allow","write":"allow","bash":"allow","patch":"allow"}""";
+
+        var errorText = Tail(buildError, 60);
+        const string instruction = """
+            你在协助修复一个 .NET（Avalonia）桌面项目的编译错误。下面是 Release / win-x64 编译失败的完整错误输出。
+            请直接在当前工作目录中定位并修改源码，修复全部编译错误，使 dotnet build 能通过。要求：
+            1. 只修改必要的源码或项目文件，不要改动无关文件。
+            2. 针对缺失命名空间、类型错误、API 变更、空引用等问题给出正确的修复代码。
+            3. 不要通过删除功能、注释掉代码或屏蔽错误的方式绕过问题。
+            4. 修复完成后，简要列出改动的文件。
+            编译错误输出：
+            ----
+            """;
+        var prompt = instruction + "\n" + errorText + "\n----";
+
+        // 单条命令带超时保护，避免 AI 长时间无响应卡住整个更新流程。
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(10));
+        Report(progress, DevelopmentUpdateStage.Building, $"正在交由 AI（{model}）修复编译错误…");
+        var result = await RunProcessAsync(opencode,
+            ["run", "-m", model, "--dir", repositoryRoot, prompt],
+            repositoryRoot, progress, env, timeout.Token, false, DevelopmentUpdateStage.Building);
+        if (result.ExitCode != 0)
+        {
+            Report(progress, DevelopmentUpdateStage.Building, "AI 修复命令执行失败。",
+                Tail(result.Error + result.Output, 20));
+            return false;
+        }
+
+        Report(progress, DevelopmentUpdateStage.Building, "AI 已完成修复，准备重新编译。",
+            Tail(result.Output, 12));
+        return true;
+    }
+
+    /// <summary>
+    /// 构造子进程环境：把 bun / opencode 所在目录加到 PATH 前面，保证其子进程能找到工具。
+    /// </summary>
+    private static Dictionary<string, string> BuildBunEnvironment(string bun, string? opencode = null)
+    {
+        var dirs = new List<string>();
+        if (Path.IsPathRooted(bun) && Path.GetDirectoryName(bun) is { } bunDir)
+        {
+            dirs.Add(bunDir);
+        }
+        if (opencode != null && Path.IsPathRooted(opencode) && Path.GetDirectoryName(opencode) is { } ocDir)
+        {
+            dirs.Add(ocDir);
+        }
+        var env = new Dictionary<string, string>();
+        if (dirs.Count > 0)
+        {
+            var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            env["PATH"] = string.Join(Path.PathSeparator, dirs) + Path.PathSeparator + currentPath;
+        }
+        return env;
+    }
+
+    private async Task<bool> IsToolRunnableAsync(string path, string argument, string bun,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunProcessAsync(path, [argument], Environment.CurrentDirectory, null,
+            BuildBunEnvironment(bun), cancellationToken, false);
+        return result.ExitCode == 0;
+    }
+
+    /// <summary>
+    /// 从 opencode models 的输出里解析 provider/model 形式的模型 id。
+    /// 输出可能带表格/描述，逐行取第一个含 “/” 的 token。
+    /// </summary>
+    private static List<string> ParseModelIds(string output)
+    {
+        var ids = new List<string>();
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0) continue;
+            foreach (var token in line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (token.Contains('/') && !token.Contains(' '))
+                {
+                    ids.Add(token);
+                    break;
+                }
+            }
+        }
+        return ids.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private void Report(IProgress<DevelopmentUpdateProgress> progress, DevelopmentUpdateStage stage,
@@ -901,7 +1178,8 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
     }
 
     private async Task<BuildOutput> BuildAsync(string dotnet, string repositoryRoot,
-        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken,
+        bool allowAiFix = true)
     {
         var project = Path.Combine(repositoryRoot, "ClassIsland.Desktop", "ClassIsland.Desktop.csproj");
         if (!File.Exists(project))
@@ -920,7 +1198,15 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             DevelopmentUpdateStage.Building);
         if (result.ExitCode != 0)
         {
-            throw new InvalidOperationException("编译失败。\n" + Tail(result.Error + result.Output, 40));
+            var error = result.Error + result.Output;
+            // 程序自身能力已用尽（含网络重试），尝试交给 AI 修复一次；只重试一次，避免死循环。
+            if (allowAiFix && await TryFixBuildWithAiAsync(Tail(error, 60), repositoryRoot, progress, cancellationToken))
+            {
+                Report(progress, DevelopmentUpdateStage.Building, "AI 已修复代码，正在重新编译…");
+                return await BuildAsync(dotnet, repositoryRoot, progress, cancellationToken, false);
+            }
+
+            throw new InvalidOperationException("编译失败。\n" + Tail(error, 40));
         }
 
         var executable = FindBuildExecutable(artifactsPath)
@@ -1203,6 +1489,58 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         }
 
         return candidates.FirstOrDefault(File.Exists);
+    }
+
+    /// <summary>
+    /// BUN 的默认安装位置：Windows 走 %USERPROFILE%\.bun\bin，Unix 走 ~/.bun/bin。
+    /// </summary>
+    private static string? FindBunInCommonPaths()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var candidates = new List<string>
+        {
+            Path.Combine(home, ".bun", "bin", OperatingSystem.IsWindows() ? "bun.exe" : "bun"),
+            Path.Combine(home, ".bun", "bin", OperatingSystem.IsWindows() ? "bun.cmd" : "bun")
+        };
+        if (OperatingSystem.IsWindows())
+        {
+            candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "bun", "bun.exe"));
+        }
+        else
+        {
+            candidates.AddRange(["/usr/local/bin/bun", "/usr/bin/bun"]);
+        }
+        return candidates.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+    }
+
+    /// <summary>
+    /// OpenCode CLI 的常见位置：BUN 全局 bin（~/.bun/bin）优先，其次是 npm 全局目录。
+    /// Windows 上 bun 的全局命令是 .cmd / .exe 垫片。
+    /// </summary>
+    private static string? FindOpenCodeInCommonPaths()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var bunBin = Path.Combine(home, ".bun", "bin");
+        var candidates = new List<string>();
+        if (OperatingSystem.IsWindows())
+        {
+            candidates.AddRange([
+                Path.Combine(bunBin, "opencode.cmd"),
+                Path.Combine(bunBin, "opencode.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "npm", "opencode.cmd")
+            ]);
+        }
+        else
+        {
+            candidates.AddRange([
+                Path.Combine(bunBin, "opencode"),
+                Path.Combine(home, ".npm", "global", "bin", "opencode"),
+                "/usr/local/bin/opencode", "/usr/bin/opencode"
+            ]);
+        }
+        return candidates.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).FirstOrDefault();
     }
 
     private static string EscapePowerShell(string value) => value.Replace("'", "''");

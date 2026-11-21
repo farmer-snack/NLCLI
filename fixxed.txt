@@ -541,6 +541,23 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   ConfigDebugSettingsViewModel.cs（IsPublishRunning/IsAnyBuildRunning/StartPublishAsync）、
   ConfigDebugSettingsPage.axaml(.cs)（新按钮、CheckBox、事件、Description、绑定改 IsAnyBuildRunning）。
 
+编译失败自动交给 AI 修复（2026-11-21）
+- 两处编译（Release 编译 BuildAsync、打包 RunDotnetPublishAsync）在程序自身能力用尽（含网络重试）
+  仍失败时，自动尝试用命令行 AI 在仓库里修代码，只重试一次（allowAiFix 闸门，避免死循环）。
+- 链路：EnsureBunAsync（PATH/常见位置找 bun，没有就按平台装：Windows winget Oven.Bun 或
+  irm bun.sh/install.ps1|iex；Unix curl/wget bun.sh/install）→ EnsureOpenCodeAsync（有则复用，
+  没有就 bun install -g opencode-ai；bun/opencode 都在 ~/.bun/bin）→ SelectFreeModelAsync
+  （opencode models 解析 provider/model，筛免费模型，优先级 DeepSeek > Mimo > 混元4 Flash/hy4）
+  → RunAiFixAsync（opencode run -m <model> --dir <仓库> <prompt>，OPENCODE_PERMISSION 放开编辑/
+  写入/bash/patch 权限，非交互自动改代码，10 分钟超时）。
+- 模型标识参考（会变，靠 opencode models 动态探测而非写死）：DeepSeek = opencode/deepseek-*-flash-free、
+  Mimo = opencode/mimo-*-flash-free、混元4 Flash = opencode/hy4-flash-free（2026-11-16 上线）。
+- AI 修复是"尽力而为"：整体 try/catch，任一环节失败都返回 false 并继续抛原始编译错误，
+  不掩盖真正的问题；AI 真正执行了修复才重新编译一次。bun/opencode 所在目录注入子进程 PATH。
+- 涉及：DevelopmentUpdateService.cs（TryFixBuildWithAiAsync / EnsureBunAsync / EnsureOpenCodeAsync /
+  SelectFreeModelAsync / RunAiFixAsync / BuildBunEnvironment / IsToolRunnableAsync / ParseModelIds /
+  FindBunInCommonPaths / FindOpenCodeInCommonPaths）。
+
 ================================================
 [长期] 托盘图标开关与爱心手势
 ================================================
