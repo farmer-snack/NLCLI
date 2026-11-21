@@ -625,18 +625,21 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
     }
 
     /// <summary>
-    /// 构造候选地址列表：先直连 4 次，再依次尝试镜像。
-    /// 直连重复 4 次是为了在一过性网络抖动下不必切到可能过期的镜像。
+    /// 构造候选地址列表（含是否为镜像的标记，避免靠索引判断导致顺序反转后计数错乱）。
+    /// 默认：官方直连重试 DirectFetchAttemptCount 次，再依次尝试镜像。
+    /// 加速模式（DevelopmentUpdatePreferMirror）：跳过直连，先依次尝试所有镜像；镜像全部失败
+    /// 仍回退直连，避免镜像内容过期时彻底无法更新。
     /// </summary>
-    private static IReadOnlyList<string> BuildSourceCandidates()
+    private IReadOnlyList<(string Url, bool IsMirror)> BuildSourceCandidates()
     {
-        var candidates = new List<string>(DirectFetchAttemptCount + SourceRepositoryMirrors.Length);
-        for (var i = 0; i < DirectFetchAttemptCount; i++)
-        {
-            candidates.Add(SourceRepositoryUrl);
-        }
+        var preferMirror = settingsService.Settings.DevelopmentUpdatePreferMirror;
+        var direct = Enumerable.Range(0, DirectFetchAttemptCount)
+            .Select(_ => (Url: SourceRepositoryUrl, IsMirror: false));
+        var mirrors = SourceRepositoryMirrors.Select(url => (Url: url, IsMirror: true));
 
-        candidates.AddRange(SourceRepositoryMirrors);
+        List<(string Url, bool IsMirror)> candidates = preferMirror
+            ? mirrors.Concat(direct).ToList()
+            : direct.Concat(mirrors).ToList();
         return candidates;
     }
 
@@ -657,9 +660,9 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             return [];
         }
 
-        foreach (var url in BuildSourceCandidates())
+        foreach (var candidate in BuildSourceCandidates())
         {
-            var result = await RunProcessAsync(git, ["ls-remote", "--heads", url],
+            var result = await RunProcessAsync(git, ["ls-remote", "--heads", candidate.Url],
                 Environment.CurrentDirectory, null, null, cancellationToken, false);
             if (result.ExitCode != 0)
             {
@@ -755,19 +758,21 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         var parent = Path.GetDirectoryName(directory)!;
         Directory.CreateDirectory(parent);
         var candidates = BuildSourceCandidates();
+        var mirrorAttempt = 0;
+        var directAttempt = 0;
         ProcessResult last = new(-1, "", "");
         for (var i = 0; i < candidates.Count; i++)
         {
-            var mirror = i >= DirectFetchAttemptCount;
-            var label = mirror
-                ? $"直连失败，尝试镜像 {i - DirectFetchAttemptCount + 1}/{SourceRepositoryMirrors.Length} 下载源码…"
-                : $"正在下载源码（第 {i + 1}/{DirectFetchAttemptCount} 次）…";
-            Report(progress, DevelopmentUpdateStage.Preparing, label, candidates[i]);
+            var candidate = candidates[i];
+            var label = candidate.IsMirror
+                ? $"尝试镜像 {++mirrorAttempt}/{SourceRepositoryMirrors.Length} 下载源码…"
+                : $"正在下载源码（官方直连第 {++directAttempt}/{DirectFetchAttemptCount} 次）…";
+            Report(progress, DevelopmentUpdateStage.Preparing, label, candidate.Url);
 
             // clone 目标目录必须为空，失败后清掉残留再试下一个地址。
             TryDeleteDirectory(directory);
             last = await RunProcessAsync(git,
-                ["clone", "--branch", branch, "--single-branch", "--no-tags", candidates[i], directory],
+                ["clone", "--branch", branch, "--single-branch", "--no-tags", candidate.Url, directory],
                 parent, progress, null, cancellationToken, false);
             if (last.ExitCode == 0 && IsClassIslandRepository(directory))
             {
@@ -1031,17 +1036,19 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         // 只按写死的仓库地址拉取目标分支，不枚举、不使用本地已有的任何 remote。
         // remote 可能指向官方仓库或别的副仓库，用它会把错误的代码编译进去。
         var candidates = BuildSourceCandidates();
+        var mirrorAttempt = 0;
+        var directAttempt = 0;
         ProcessResult fetch = new(-1, "", "");
         var fetched = false;
         for (var i = 0; i < candidates.Count; i++)
         {
-            var mirror = i >= DirectFetchAttemptCount;
-            var label = mirror
-                ? $"直连失败，尝试镜像 {i - DirectFetchAttemptCount + 1}/{SourceRepositoryMirrors.Length} 拉取…"
-                : $"拉取 {branch}（第 {i + 1}/{DirectFetchAttemptCount} 次）…";
-            Report(progress, DevelopmentUpdateStage.Pulling, label, candidates[i]);
+            var candidate = candidates[i];
+            var label = candidate.IsMirror
+                ? $"尝试镜像 {++mirrorAttempt}/{SourceRepositoryMirrors.Length} 拉取…"
+                : $"拉取 {branch}（官方直连第 {++directAttempt}/{DirectFetchAttemptCount} 次）…";
+            Report(progress, DevelopmentUpdateStage.Pulling, label, candidate.Url);
             fetch = await RunProcessAsync(git,
-                ["fetch", "--no-tags", "--prune", candidates[i], $"+refs/heads/{branch}:refs/remotes/{UpdateRemoteName}/{branch}"],
+                ["fetch", "--no-tags", "--prune", candidate.Url, $"+refs/heads/{branch}:refs/remotes/{UpdateRemoteName}/{branch}"],
                 repositoryRoot, progress, null, cancellationToken, false);
             if (fetch.ExitCode == 0)
             {

@@ -73,7 +73,7 @@
                         <!-- 拉取更新并编译运行（折叠在这里，不占页面底部） -->
                         <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE895;}"
                                                       Header="拉取更新并编译运行"
-                                                      Description="从当前 Git 仓库拉取最新提交，自动补齐子模块、安装缺失的 Git 与 .NET SDK。「开始更新并编译」会编译后重启到新版本；「打包编译产物」直接调用 dotnet publish（参数同仓库 build-publish.bat，可选自包含/非自包含），先清理旧 out 目录、打包后删除 .pdb 并生成 out.zip 压缩包。仅在从源码目录运行时可用。">
+                                                      Description="从当前 Git 仓库拉取最新提交，自动补齐子模块、安装缺失的 Git 与 .NET SDK。「开始更新并编译」会编译后重启到新版本；「打包编译产物」直接调用 dotnet publish（参数同仓库 build-publish.bat，可选自包含/非自包含），先清理旧 out 目录、打包后删除 .pdb 并生成 out.zip 压缩包。可勾选「网络加速」优先走镜像。仅在从源码目录运行时可用。">
                             <controls3:FASettingsExpanderItem>
                                 <StackPanel Spacing="8">
                                     <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
@@ -103,6 +103,9 @@
                                         <CheckBox Content="打包为自包含（含 .NET 运行时，体积较大）"
                                                   IsChecked="{Binding ViewModel.SettingsService.Settings.DevelopmentPublishSelfContained, Mode=TwoWay}"
                                                   ToolTip.Tip="勾选：self-contained，产物自带运行时可独立运行（默认）；取消：依赖目标机器已安装 .NET 运行时。" />
+                                        <CheckBox Content="网络加速（优先镜像）"
+                                                  IsChecked="{Binding ViewModel.SettingsService.Settings.DevelopmentUpdatePreferMirror, Mode=TwoWay}"
+                                                  ToolTip.Tip="勾选后跳过官方直连、先依次尝试加速镜像；镜像全部失败再回退直连。不勾选则维持直连优先。" />
                                         <Button Content="取消"
                                                 Click="ButtonCancelDevelopmentUpdate_OnClick"
                                                 IsEnabled="{Binding ViewModel.IsAnyBuildRunning}" />

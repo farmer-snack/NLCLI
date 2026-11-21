@@ -558,6 +558,22 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   SelectFreeModelAsync / RunAiFixAsync / BuildBunEnvironment / IsToolRunnableAsync / ParseModelIds /
   FindBunInCommonPaths / FindOpenCodeInCommonPaths）。
 
+网络加速：优先镜像开关（2026-11-21）
+- 「拉取更新并编译运行」面板新增「网络加速（优先镜像）」CheckBox，绑定
+  Settings.DevelopmentUpdatePreferMirror（默认 false，保持原行为）。
+- BuildSourceCandidates 改为实例方法读取该设置，返回带 IsMirror 标记的候选项：
+  不勾选＝官方直连重试 DirectFetchAttemptCount(4) 次 + 依次尝试镜像（原顺序）；
+  勾选＝镜像全部在前（依次尝试），直连 4 次放最后作为回退——镜像全失败仍回退直连，
+  避免镜像内容过期时彻底无法更新。
+- 关键：clone（EnsureRepositoryAsync）、fetch（SyncRepositoryAsync）、探测分支
+  （GetRemoteBranchesAsync）三处都改用这个候选列表，加速模式对三者一致生效。
+- 日志的镜像/直连计数不再靠索引（i >= DirectFetchAttemptCount）判断——顺序反转后会错，
+  改为按候选项 IsMirror 标记分别累加 mirrorAttempt/directAttempt，措辞统一为
+  「尝试镜像 x/N」「官方直连第 x/4 次」。
+- 涉及：Settings.cs（新设置项）、DevelopmentUpdateService.cs（BuildSourceCandidates 改为实例方法
+  返回元组列表、三处遍历改用 candidate.Url 与标记计数）、ConfigDebugSettingsPage.axaml（新 CheckBox、
+  Description 同步）。
+
 ================================================
 [长期] 托盘图标开关与爱心手势
 ================================================

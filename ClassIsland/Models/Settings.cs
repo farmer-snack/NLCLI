@@ -111,6 +111,7 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private int _trayIconWakeGesture = 0;
     private string _developmentUpdateBranch = "develop/v2/misha-alpha";
     private bool _developmentPublishSelfContained = true;
+    private bool _developmentUpdatePreferMirror = false;
     private bool _isNativeDependencyAutoRepairEnabled = true;
     private bool _showExtraInfoOnTimePoint = true;
     private int _extraInfoType = 0;
@@ -648,6 +649,22 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
         {
             if (value == _developmentPublishSelfContained) return;
             _developmentPublishSelfContained = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 「拉取更新并编译」/「打包编译产物」是否启用网络加速（优先镜像）。
+    /// 勾选后跳过官方直连、先依次尝试加速镜像，镜像全部失败再回退直连；
+    /// 不勾选则维持原来的直连优先（直连重试若干次后再走镜像）。默认关闭。
+    /// </summary>
+    public bool DevelopmentUpdatePreferMirror
+    {
+        get => _developmentUpdatePreferMirror;
+        set
+        {
+            if (value == _developmentUpdatePreferMirror) return;
+            _developmentUpdatePreferMirror = value;
             OnPropertyChanged();
         }
     }
