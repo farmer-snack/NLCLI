@@ -74,6 +74,15 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
 
     public bool IsRunning => Volatile.Read(ref _isRunning) == 1;
 
+    private int _isPublishing;
+
+    /// <summary>
+    /// 当前正在运行的是“打包编译产物”（否则为“拉取更新并编译”）。
+    /// 页面切换后 ViewModel 重建时用它恢复正确的按钮状态。
+    /// 两个操作共用 <see cref="_isRunning"/> 闸门，不会同时进行。
+    /// </summary>
+    public bool IsPublishing => Volatile.Read(ref _isPublishing) == 1;
+
     /// <summary>
     /// 最近一次报告的状态文本。设置窗口切到别的页面再切回来时，
     /// ViewModel 会被重建，靠这个值恢复界面显示，避免看起来像没在运行。
@@ -129,6 +138,163 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         {
             Interlocked.Exchange(ref _isRunning, 0);
         }
+    }
+
+    /// <summary>
+    /// 调试页的“打包编译产物”功能。环境准备（补齐 Git / .NET SDK、定位并拉取仓库）
+    /// 与“拉取更新并编译”完全一致；区别是把编译这一步换成执行仓库根目录的
+    /// <c>build-publish.bat</c>，并在打包前清理旧的 out 目录、打包后删除其中的 .pdb 文件。
+    /// 打包产物位于 out 目录，并非当前运行版本，因此完成后只打开目录、不重启应用。
+    /// </summary>
+    public async Task RunPublishAsync(IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _isRunning, 1) == 1)
+        {
+            throw new InvalidOperationException("开发构建正在进行中。");
+        }
+        Interlocked.Exchange(ref _isPublishing, 1);
+
+        try
+        {
+            var git = await EnsureGitAsync(progress, cancellationToken);
+            var dotnet = await EnsureDotnetAsync(progress, cancellationToken);
+
+            var branch = GetSelectedBranch();
+            Report(progress, DevelopmentUpdateStage.Preparing, $"目标分支：{branch}");
+            var repositoryRoot = await EnsureRepositoryAsync(git, branch, progress, cancellationToken);
+            await SyncRepositoryAsync(git, repositoryRoot, branch, progress, cancellationToken);
+            await UpdateSubmodulesAsync(git, repositoryRoot, progress, cancellationToken);
+
+            // 打包前必须先删掉旧的 out，避免上一次的残留文件混进本次产物。
+            // 删除失败要立刻提示用户，不能带着旧文件继续打包。
+            var outDirectory = Path.Combine(repositoryRoot, "out");
+            await DeleteOutDirectoryAsync(outDirectory, progress, cancellationToken);
+
+            // 用仓库自带的 build-publish.bat 完成打包（它内部负责 dotnet publish 到 out）。
+            await RunBuildPublishScriptAsync(git, dotnet, repositoryRoot, progress, cancellationToken);
+
+            // 打包完成后清理 out 中的调试符号文件。
+            var removedPdb = DeletePdbFiles(outDirectory);
+            var pdbNote = removedPdb > 0 ? $"，已清理 {removedPdb} 个 .pdb 文件" : "";
+            Report(progress, DevelopmentUpdateStage.Completed, $"打包完成{pdbNote}。", outDirectory);
+            OpenDirectory(outDirectory);
+        }
+        catch (OperationCanceledException)
+        {
+            Report(progress, DevelopmentUpdateStage.Failed, "操作已取消。");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "打包编译产物失败。");
+            Report(progress, DevelopmentUpdateStage.Failed, $"打包失败：{ex.Message}", ex.ToString());
+            throw;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _isPublishing, 0);
+            Interlocked.Exchange(ref _isRunning, 0);
+        }
+    }
+
+    /// <summary>
+    /// 打包前删除旧的 out 目录。与 clone 时的静默清理不同，这里删除失败必须中断并提示用户。
+    /// </summary>
+    private async Task DeleteOutDirectoryAsync(string outDirectory,
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(outDirectory))
+        {
+            return;
+        }
+
+        Report(progress, DevelopmentUpdateStage.Preparing, "正在删除旧的 out 目录…", outDirectory);
+        try
+        {
+            await Task.Run(() => Directory.Delete(outDirectory, true), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"无法删除旧的 out 目录：{outDirectory}\n" +
+                "该目录可能正被占用（例如文件管理器或正在运行的旧版本）。请关闭占用它的程序后重试。\n" +
+                ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// 通过 cmd 执行仓库根目录的 build-publish.bat。bat 内部直接调用 git / dotnet，
+    /// 因此把这两个工具所在目录注入 PATH，保证自动安装、未加入系统 PATH 的工具也能被找到。
+    /// </summary>
+    private async Task RunBuildPublishScriptAsync(string git, string dotnet, string repositoryRoot,
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new InvalidOperationException(
+                "build-publish.bat 是 Windows 批处理脚本，且打包目标为 win-x64，只能在 Windows 上运行。");
+        }
+
+        var scriptPath = Path.Combine(repositoryRoot, "build-publish.bat");
+        if (!File.Exists(scriptPath))
+        {
+            throw new InvalidOperationException($"未找到打包脚本：{scriptPath}");
+        }
+
+        var pathEntries = new List<string>();
+        if (Path.IsPathRooted(git) && Path.GetDirectoryName(git) is { } gitDir)
+        {
+            pathEntries.Add(gitDir);
+        }
+        if (Path.IsPathRooted(dotnet) && Path.GetDirectoryName(dotnet) is { } dotnetDir)
+        {
+            pathEntries.Add(dotnetDir);
+        }
+        Dictionary<string, string>? environment = null;
+        if (pathEntries.Count > 0)
+        {
+            var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            environment = new Dictionary<string, string>
+            {
+                ["PATH"] = string.Join(Path.PathSeparator, pathEntries) + Path.PathSeparator + currentPath
+            };
+        }
+
+        Report(progress, DevelopmentUpdateStage.Building, "正在执行 build-publish.bat 打包…", scriptPath);
+        var result = await RunProcessAsync("cmd.exe", ["/c", "build-publish.bat"], repositoryRoot,
+            progress, environment, cancellationToken, false, DevelopmentUpdateStage.Building);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException("build-publish.bat 执行失败。\n" +
+                                                Tail(result.Error + result.Output, 40));
+        }
+    }
+
+    /// <summary>
+    /// 递归删除 out 目录中的 .pdb 调试符号文件，返回成功删除的数量。
+    /// 单个文件删除失败（例如被占用）不影响整体打包，只记录到日志。
+    /// </summary>
+    private int DeletePdbFiles(string outDirectory)
+    {
+        if (!Directory.Exists(outDirectory))
+        {
+            return 0;
+        }
+
+        var removed = 0;
+        foreach (var file in Directory.EnumerateFiles(outDirectory, "*.pdb", SearchOption.AllDirectories))
+        {
+            try
+            {
+                File.Delete(file);
+                removed++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "无法删除调试符号文件 {File}。", file);
+            }
+        }
+        return removed;
     }
 
     private void Report(IProgress<DevelopmentUpdateProgress> progress, DevelopmentUpdateStage stage,

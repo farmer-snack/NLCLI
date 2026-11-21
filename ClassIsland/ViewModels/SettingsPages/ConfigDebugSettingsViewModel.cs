@@ -56,7 +56,8 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
 
         // 页面切换后 ViewModel 会重建，从服务里恢复当前状态。
         DevelopmentUpdateStatus = developmentUpdateService.LastMessage;
-        IsDevelopmentUpdateRunning = developmentUpdateService.IsRunning;
+        IsDevelopmentUpdateRunning = developmentUpdateService.IsRunning && !developmentUpdateService.IsPublishing;
+        IsPublishRunning = developmentUpdateService.IsPublishing;
         NativeDependencyStatus = nativeDependencyService.LastReport is { } lastReport
             ? lastReport.IsHealthy
                 ? $"上次检查通过，共检查 {lastReport.ScannedFileCount} 个原生库。"
@@ -94,6 +95,20 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
 
     [ObservableProperty]
     private bool _isDevelopmentUpdateRunning;
+
+    [ObservableProperty]
+    private bool _isPublishRunning;
+
+    /// <summary>
+    /// 更新编译或打包任一正在进行。用于驱动进度条与取消按钮。
+    /// </summary>
+    public bool IsAnyBuildRunning => IsDevelopmentUpdateRunning || IsPublishRunning;
+
+    partial void OnIsDevelopmentUpdateRunningChanged(bool value) =>
+        OnPropertyChanged(nameof(IsAnyBuildRunning));
+
+    partial void OnIsPublishRunningChanged(bool value) =>
+        OnPropertyChanged(nameof(IsAnyBuildRunning));
 
     [ObservableProperty]
     private string _developmentUpdateStatus = "尚未开始。";
@@ -162,7 +177,7 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
 
     public async Task StartDevelopmentUpdateAsync()
     {
-        if (IsDevelopmentUpdateRunning)
+        if (IsAnyBuildRunning)
         {
             return;
         }
@@ -191,6 +206,47 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
         finally
         {
             IsDevelopmentUpdateRunning = false;
+            _developmentUpdateCancellation?.Dispose();
+            _developmentUpdateCancellation = null;
+            FlushDevelopmentUpdateLog();
+        }
+    }
+
+    /// <summary>
+    /// 打包编译产物：环境与拉取流程同“更新并编译”，最后改为执行 build-publish.bat。
+    /// 日志、状态、取消令牌与更新流程共用同一套展示。
+    /// </summary>
+    public async Task StartPublishAsync()
+    {
+        if (IsAnyBuildRunning)
+        {
+            return;
+        }
+
+        IsPublishRunning = true;
+        _developmentUpdateLogBuilder.Clear();
+        DevelopmentUpdateLog = "";
+        HasDevelopmentUpdateLog = false;
+        DevelopmentUpdateStatus = "正在准备打包…";
+        _developmentUpdateCancellation = new CancellationTokenSource();
+        var progress = new Progress<DevelopmentUpdateProgress>(OnDevelopmentUpdateProgress);
+
+        try
+        {
+            await DevelopmentUpdateService.RunPublishAsync(progress, _developmentUpdateCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            DevelopmentUpdateStatus = "已取消。";
+        }
+        catch (Exception ex)
+        {
+            DevelopmentUpdateStatus = $"打包失败：{ex.Message}";
+            AppendDevelopmentUpdateLog(ex.ToString());
+        }
+        finally
+        {
+            IsPublishRunning = false;
             _developmentUpdateCancellation?.Dispose();
             _developmentUpdateCancellation = null;
             FlushDevelopmentUpdateLog();

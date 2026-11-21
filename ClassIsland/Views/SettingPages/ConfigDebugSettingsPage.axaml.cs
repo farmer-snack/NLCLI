@@ -51,6 +51,11 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
         await ViewModel.StartDevelopmentUpdateAsync();
     }
 
+    private async void ButtonPublish_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ViewModel.StartPublishAsync();
+    }
+
     private async void ButtonRefreshRemoteBranches_OnClick(object? sender, RoutedEventArgs e)
     {
         await ViewModel.RefreshRemoteBranchesAsync();
