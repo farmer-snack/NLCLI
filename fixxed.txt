@@ -523,19 +523,23 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 环境准备与更新流程完全复用：EnsureGitAsync（缺 Git 自动装）、EnsureDotnetAsync（缺 .NET 10 SDK
   自动装）、EnsureRepositoryAsync（定位/按写死地址 clone 本仓库）、SyncRepositoryAsync（拉取目标分支）、
   UpdateSubmodulesAsync（初始化子模块，含 SSH→HTTPS 改写与镜像重试）。
-- 打包这一步不复用 BuildAsync（它用 --artifacts-path 编译到临时目录再重启新版本），改为通过
-  cmd.exe /c build-publish.bat 执行仓库根目录的脚本：git submodule update + dotnet publish
-  -c Release -r win-x64 --self-contained -o out。产物在 out 目录，因此完成后只打开目录、不重启应用。
+- 打包这一步不复用 BuildAsync（它用 --artifacts-path 编译到临时目录再重启新版本），也不执行
+  build-publish.bat 文件本身，而是在应用内直接调 dotnet publish，参数照搬该脚本那一套：
+  -c Release -r win-x64 --self-contained <sc> -p:ClassIsland_SelfContained=<sc>
+  -p:ClassIsland_PlatformTarget=x64 -o out。产出 out 目录，完成后不重启应用。
+- 是否自包含由 Settings.DevelopmentPublishSelfContained 决定（默认 true），页面用 CheckBox 切换。
+  自包含：--self-contained true + ClassIsland_SelfContained=true（定义 SelfContained 编译常量）；
+  非自包含：两项都置 false，保留 win-x64 与 PlatformTarget=x64（平台常量，与自包含无关）。
 - 打包前先删除旧的 out 目录，防止上次残留混进本次产物；删不掉就中断并明确提示用户
   （目录可能被文件管理器或旧版本占用）。打包后递归删除 out 内所有 .pdb，单个删不掉只记日志、不中断。
-- build-publish.bat 内部直接调 git / dotnet，执行时把两者所在目录注入子进程 PATH，
-  保证自动安装、未进系统 PATH 的工具也能被 bat 找到。脚本是 Windows 批处理 + win-x64 目标，
-  非 Windows 直接报明确错误。
+- 最后把 out 压成 out.zip（先删旧 zip，ZipFile.CreateFromDirectory，CompressionLevel.Optimal），
+  并用系统默认程序打开该压缩包（Windows explorer / macOS open / Linux xdg-open）。
 - 与更新按钮共用同一套进度/日志/取消/_isRunning 闸门，两者不会并发；IsAnyBuildRunning 聚合
   两个运行态驱动进度条、取消与按钮禁用；服务用 IsPublishing 标记，切页重建后恢复正确的按钮状态。
-- 涉及：DevelopmentUpdateService.cs（新增 RunPublishAsync 及配套方法、IsPublishing）、
+- 涉及：DevelopmentUpdateService.cs（RunPublishAsync / RunDotnetPublishAsync / CreateZipArchiveAsync /
+  OpenFile / DeletePdbFiles / DeleteOutDirectoryAsync、IsPublishing）、Settings.cs（新设置项）、
   ConfigDebugSettingsViewModel.cs（IsPublishRunning/IsAnyBuildRunning/StartPublishAsync）、
-  ConfigDebugSettingsPage.axaml(.cs)（新按钮与事件、Description、绑定改 IsAnyBuildRunning）。
+  ConfigDebugSettingsPage.axaml(.cs)（新按钮、CheckBox、事件、Description、绑定改 IsAnyBuildRunning）。
 
 ================================================
 [长期] 托盘图标开关与爱心手势

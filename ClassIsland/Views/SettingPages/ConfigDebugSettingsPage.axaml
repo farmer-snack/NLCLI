@@ -73,10 +73,10 @@
                         <!-- 拉取更新并编译运行（折叠在这里，不占页面底部） -->
                         <controls3:FASettingsExpander IconSource="{ci:FluentIconSource &#xE895;}"
                                                       Header="拉取更新并编译运行"
-                                                      Description="从当前 Git 仓库拉取最新提交，自动补齐子模块、安装缺失的 Git 与 .NET SDK。「开始更新并编译」会编译后重启到新版本；「打包编译产物」则执行仓库的 build-publish.bat，先清理旧 out 目录、打包后删除 .pdb（仅 Windows）。仅在从源码目录运行时可用。">
+                                                      Description="从当前 Git 仓库拉取最新提交，自动补齐子模块、安装缺失的 Git 与 .NET SDK。「开始更新并编译」会编译后重启到新版本；「打包编译产物」直接调用 dotnet publish（参数同仓库 build-publish.bat，可选自包含/非自包含），先清理旧 out 目录、打包后删除 .pdb 并生成 out.zip 压缩包。仅在从源码目录运行时可用。">
                             <controls3:FASettingsExpanderItem>
                                 <StackPanel Spacing="8">
-                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
                                         <ComboBox Grid.Column="0"
                                                   ItemsSource="{Binding ViewModel.RemoteBranches}"
                                                   SelectedItem="{Binding ViewModel.SettingsService.Settings.DevelopmentUpdateBranch, Mode=TwoWay}"
@@ -97,9 +97,12 @@
                                                 Content="打包编译产物"
                                                 Click="ButtonPublish_OnClick"
                                                 IsEnabled="{Binding !ViewModel.IsAnyBuildRunning}"
-                                                ToolTip.Tip="执行仓库根目录的 build-publish.bat 打包：先删除旧的 out 目录，打包后清理 .pdb 文件。打包目标为 win-x64，仅支持 Windows。" />
+                                                ToolTip.Tip="按仓库 build-publish.bat 的参数调用 dotnet publish：先删除旧 out 目录、打包后清理 .pdb，最后生成并打开 out.zip。" />
                                     </Grid>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="16">
+                                        <CheckBox Content="打包为自包含（含 .NET 运行时，体积较大）"
+                                                  IsChecked="{Binding ViewModel.SettingsService.Settings.DevelopmentPublishSelfContained, Mode=TwoWay}"
+                                                  ToolTip.Tip="勾选：self-contained，产物自带运行时可独立运行（默认）；取消：依赖目标机器已安装 .NET 运行时。" />
                                         <Button Content="取消"
                                                 Click="ButtonCancelDevelopmentUpdate_OnClick"
                                                 IsEnabled="{Binding ViewModel.IsAnyBuildRunning}" />

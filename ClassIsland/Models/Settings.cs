@@ -110,6 +110,7 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
     private bool _isTaskBarIconVisible = true;
     private int _trayIconWakeGesture = 0;
     private string _developmentUpdateBranch = "develop/v2/misha-alpha";
+    private bool _developmentPublishSelfContained = true;
     private bool _isNativeDependencyAutoRepairEnabled = true;
     private bool _showExtraInfoOnTimePoint = true;
     private int _extraInfoType = 0;
@@ -632,6 +633,21 @@ public partial class Settings : ObservableRecipient, ILessonControlSettings, INo
             value ??= "develop/v2/misha-alpha";
             if (value == _developmentUpdateBranch) return;
             _developmentUpdateBranch = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// 「打包编译产物」是否生成自包含（self-contained）包。默认开启。
+    /// 关闭时打包为依赖本机已安装 .NET 运行时的框架依赖包。
+    /// </summary>
+    public bool DevelopmentPublishSelfContained
+    {
+        get => _developmentPublishSelfContained;
+        set
+        {
+            if (value == _developmentPublishSelfContained) return;
+            _developmentPublishSelfContained = value;
             OnPropertyChanged();
         }
     }

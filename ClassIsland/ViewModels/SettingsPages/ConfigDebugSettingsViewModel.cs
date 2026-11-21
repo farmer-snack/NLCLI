@@ -213,7 +213,7 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// 打包编译产物：环境与拉取流程同“更新并编译”，最后改为执行 build-publish.bat。
+    /// 打包编译产物：环境与拉取流程同“更新并编译”，最后改为 dotnet publish 打包并生成 out.zip。
     /// 日志、状态、取消令牌与更新流程共用同一套展示。
     /// </summary>
     public async Task StartPublishAsync()

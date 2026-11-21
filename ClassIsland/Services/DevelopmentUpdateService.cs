@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -142,9 +143,9 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
 
     /// <summary>
     /// 调试页的“打包编译产物”功能。环境准备（补齐 Git / .NET SDK、定位并拉取仓库）
-    /// 与“拉取更新并编译”完全一致；区别是把编译这一步换成执行仓库根目录的
-    /// <c>build-publish.bat</c>，并在打包前清理旧的 out 目录、打包后删除其中的 .pdb 文件。
-    /// 打包产物位于 out 目录，并非当前运行版本，因此完成后只打开目录、不重启应用。
+    /// 与“拉取更新并编译”完全一致；区别是把编译这一步换成直接调用 dotnet publish
+    /// （参数照搬 build-publish.bat，自包含可选）：打包前清理旧的 out 目录、打包后删除
+    /// 其中的 .pdb 文件，最后把 out 压成 out.zip 并打开。产物并非当前运行版本，不重启应用。
     /// </summary>
     public async Task RunPublishAsync(IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
     {
@@ -170,14 +171,19 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             var outDirectory = Path.Combine(repositoryRoot, "out");
             await DeleteOutDirectoryAsync(outDirectory, progress, cancellationToken);
 
-            // 用仓库自带的 build-publish.bat 完成打包（它内部负责 dotnet publish 到 out）。
-            await RunBuildPublishScriptAsync(git, dotnet, repositoryRoot, progress, cancellationToken);
+            // 打包这一步不执行仓库的 build-publish.bat，而是在应用内直接调用 dotnet publish，
+            // 参数照搬该脚本里的那一套；是否自包含由用户在页面上选择（默认自包含）。
+            var selfContained = settingsService.Settings.DevelopmentPublishSelfContained;
+            await RunDotnetPublishAsync(dotnet, repositoryRoot, selfContained, progress, cancellationToken);
 
             // 打包完成后清理 out 中的调试符号文件。
             var removedPdb = DeletePdbFiles(outDirectory);
             var pdbNote = removedPdb > 0 ? $"，已清理 {removedPdb} 个 .pdb 文件" : "";
-            Report(progress, DevelopmentUpdateStage.Completed, $"打包完成{pdbNote}。", outDirectory);
-            OpenDirectory(outDirectory);
+
+            // 把 out 目录压成 out.zip，并打开这个压缩包。
+            var zipPath = await CreateZipArchiveAsync(outDirectory, repositoryRoot, progress, cancellationToken);
+            Report(progress, DevelopmentUpdateStage.Completed, $"打包完成{pdbNote}，已生成 out.zip。", zipPath);
+            OpenFile(zipPath);
         }
         catch (OperationCanceledException)
         {
@@ -223,50 +229,87 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
     }
 
     /// <summary>
-    /// 通过 cmd 执行仓库根目录的 build-publish.bat。bat 内部直接调用 git / dotnet，
-    /// 因此把这两个工具所在目录注入 PATH，保证自动安装、未加入系统 PATH 的工具也能被找到。
+    /// 在应用内直接调用 dotnet publish 打包。参数照搬仓库 build-publish.bat：
+    /// 自包含用 --self-contained true + ClassIsland_SelfContained=true，输出到 out；
+    /// 非自包含则关掉这两项、保留 win-x64 目标与 PlatformTarget=x64（与自包含无关的平台常量）。
     /// </summary>
-    private async Task RunBuildPublishScriptAsync(string git, string dotnet, string repositoryRoot,
+    private async Task RunDotnetPublishAsync(string dotnet, string repositoryRoot, bool selfContained,
         IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsWindows())
+        var project = Path.Combine(repositoryRoot, "ClassIsland.Desktop", "ClassIsland.Desktop.csproj");
+        if (!File.Exists(project))
         {
-            throw new InvalidOperationException(
-                "build-publish.bat 是 Windows 批处理脚本，且打包目标为 win-x64，只能在 Windows 上运行。");
+            throw new InvalidOperationException("未找到 ClassIsland.Desktop/ClassIsland.Desktop.csproj。");
         }
 
-        var scriptPath = Path.Combine(repositoryRoot, "build-publish.bat");
-        if (!File.Exists(scriptPath))
-        {
-            throw new InvalidOperationException($"未找到打包脚本：{scriptPath}");
-        }
+        var selfContainedText = selfContained ? "true" : "false";
+        string[] arguments =
+        [
+            "publish", project,
+            "-c", "Release",
+            "-r", "win-x64",
+            "--self-contained", selfContainedText,
+            $"-p:ClassIsland_SelfContained={selfContainedText}",
+            "-p:ClassIsland_PlatformTarget=x64",
+            "-o", "out"
+        ];
 
-        var pathEntries = new List<string>();
-        if (Path.IsPathRooted(git) && Path.GetDirectoryName(git) is { } gitDir)
-        {
-            pathEntries.Add(gitDir);
-        }
-        if (Path.IsPathRooted(dotnet) && Path.GetDirectoryName(dotnet) is { } dotnetDir)
-        {
-            pathEntries.Add(dotnetDir);
-        }
-        Dictionary<string, string>? environment = null;
-        if (pathEntries.Count > 0)
-        {
-            var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-            environment = new Dictionary<string, string>
-            {
-                ["PATH"] = string.Join(Path.PathSeparator, pathEntries) + Path.PathSeparator + currentPath
-            };
-        }
-
-        Report(progress, DevelopmentUpdateStage.Building, "正在执行 build-publish.bat 打包…", scriptPath);
-        var result = await RunProcessAsync("cmd.exe", ["/c", "build-publish.bat"], repositoryRoot,
-            progress, environment, cancellationToken, false, DevelopmentUpdateStage.Building);
+        var mode = selfContained ? "自包含" : "框架依赖（非自包含）";
+        Report(progress, DevelopmentUpdateStage.Building, $"正在打包（{mode}）…", string.Join(' ', arguments));
+        var result = await RunWithRetryAsync(dotnet, arguments, repositoryRoot, progress, "打包",
+            NetworkRetryCount, cancellationToken, IsNetworkFailure, DevelopmentUpdateStage.Building);
         if (result.ExitCode != 0)
         {
-            throw new InvalidOperationException("build-publish.bat 执行失败。\n" +
-                                                Tail(result.Error + result.Output, 40));
+            throw new InvalidOperationException("dotnet publish 打包失败。\n" + Tail(result.Error + result.Output, 40));
+        }
+    }
+
+    /// <summary>
+    /// 把 out 目录压成 out.zip（先删旧压缩包），返回压缩包路径。
+    /// </summary>
+    private async Task<string> CreateZipArchiveAsync(string outDirectory, string repositoryRoot,
+        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(outDirectory))
+        {
+            throw new InvalidOperationException("out 目录不存在，无法生成压缩包。");
+        }
+
+        var zipPath = Path.Combine(repositoryRoot, "out.zip");
+        Report(progress, DevelopmentUpdateStage.Building, "正在生成 out.zip…", zipPath);
+        await Task.Run(() =>
+        {
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+            ZipFile.CreateFromDirectory(outDirectory, zipPath, CompressionLevel.Optimal, false);
+        }, cancellationToken);
+        return zipPath;
+    }
+
+    /// <summary>
+    /// 用系统默认程序打开一个文件（这里用于打开 out.zip 压缩包）。
+    /// </summary>
+    private static void OpenFile(string path)
+    {
+        try
+        {
+            var (fileName, argument) = OperatingSystem.IsWindows()
+                ? ("explorer.exe", path)
+                : OperatingSystem.IsMacOS()
+                    ? ("open", path)
+                    : ("xdg-open", path);
+            var startInfo = new ProcessStartInfo(fileName)
+            {
+                UseShellExecute = true
+            };
+            startInfo.ArgumentList.Add(argument);
+            Process.Start(startInfo);
+        }
+        catch
+        {
+            // 打开压缩包失败不影响打包结果，路径已在状态消息里给出。
         }
     }
 
