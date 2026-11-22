@@ -650,7 +650,14 @@ internal static class PluginTypeCompatibility
 
         if (declaring == "Avalonia.Input.DragDrop" && name == "DoDragDrop" && parameterCount == 3)
         {
+            // Avalonia 11: DoDragDrop(PointerEventArgs, IDataObject, DragDropEffects)
+            // Avalonia 12: DoDragDropAsync(PointerPressedEventArgs, IDataTransfer, DragDropEffects)
+            // 三个参数的类型都变了：原来只改了方法名和第 2 个参数，漏掉第 1 个。
+            // 首参仍是 PointerEventArgs 的话，宿主侧按新签名解析会找不到方法，
+            // 插件执行拖放时抛 MissingMethodException。这里把首参一并改掉。
             method.Name = "DoDragDropAsync";
+            method.Parameters[0].ParameterType =
+                MakeTypeReference(module, "Avalonia.Input", "PointerPressedEventArgs", "Avalonia.Base");
             method.Parameters[1].ParameterType =
                 MakeTypeReference(module, "Avalonia.Input", "IDataTransfer", "Avalonia.Base");
             changes.Add("DragDrop.DoDragDrop → DragDrop.DoDragDropAsync");
@@ -1139,12 +1146,14 @@ internal static class PluginTypeCompatibility
             "RoutedEvent`1",
             "Avalonia.Base",
             MakeTypeReference(module, "Avalonia.Interactivity", "RoutedEventArgs", "Avalonia.Base"));
+        // 被替换的 CheckedEvent/UncheckedEvent 在 Avalonia 11 中是静态字段，
+        // 原指令 ldsfld 不往栈上压任何东西。因此替代品必须是无参静态方法；
+        // 之前多 Add 了一个 ToggleButton 参数，call 时栈上没有实参，
+        // 插件一旦读取该字段就会抛 InvalidProgramException（栈下溢）。
         var method = new Cecil.MethodReference(methodName, routedEvent, ShimType(module))
         {
             HasThis = false
         };
-        method.Parameters.Add(new Cecil.ParameterDefinition(
-            MakeTypeReference(module, "Avalonia.Controls.Primitives", "ToggleButton", "Avalonia.Controls")));
         replacement = method;
         return true;
     }

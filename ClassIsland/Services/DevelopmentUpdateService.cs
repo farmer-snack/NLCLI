@@ -548,9 +548,21 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(10));
         Report(progress, DevelopmentUpdateStage.Building, $"正在交由 AI（{model}）修复编译错误…");
-        var result = await RunProcessAsync(opencode,
-            ["run", "-m", model, "--dir", repositoryRoot, prompt],
-            repositoryRoot, progress, env, timeout.Token, false, DevelopmentUpdateStage.Building);
+        ProcessResult result;
+        try
+        {
+            result = await RunProcessAsync(opencode,
+                ["run", "-m", model, "--dir", repositoryRoot, prompt],
+                repositoryRoot, progress, env, timeout.Token, false, DevelopmentUpdateStage.Building);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // 这是 10 分钟超时触发的取消，不是用户主动取消。
+            // 必须在这里转成“未修复”，否则会一路冒泡到最外层被误报成“操作已取消”，
+            // 掩盖真正的编译错误。用户主动取消仍原样抛出。
+            Report(progress, DevelopmentUpdateStage.Building, "AI 修复超时（超过 10 分钟），已跳过自动修复。");
+            return false;
+        }
         if (result.ExitCode != 0)
         {
             Report(progress, DevelopmentUpdateStage.Building, "AI 修复命令执行失败。",

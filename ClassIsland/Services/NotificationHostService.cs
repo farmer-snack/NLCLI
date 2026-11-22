@@ -193,8 +193,25 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         EnqueueNotification(request, isPlayed);
     }
 
+    /// <summary>
+    /// 提醒队列的容量上限。上游在极端情况下（如 cron 触发器被反复重建）会高频推送，
+    /// 没有上限时 RequestQueue 会无限积压：旧提醒迟迟播不完，新提醒永远排在后面，
+    /// 而 ShowNotificationAsync 的调用方 await CompletedToken 会一直挂起。
+    /// 超过上限时直接丢弃新请求并 Cancel 其 CompletedToken，让调用方立即结束等待。
+    /// </summary>
+    private const int MaxRequestQueueLength = 256;
+
     private void EnqueueNotification(NotificationRequest request, bool isPlayed)
     {
+        // 队列已满：不接收这条请求。必须 Cancel 它的 CompletedToken，
+        // 否则 await ShowNotificationAsync 的调用方（自动化行动等）会永久挂起。
+        if (RequestQueue.Count >= MaxRequestQueueLength)
+        {
+            Logger.LogWarning("提醒队列已满（{} 条），丢弃新提醒并结束其等待。", RequestQueue.Count);
+            request.CompletedTokenSource.Cancel();
+            return;
+        }
+
         if (!EnqueuedRequests.Add(request))
         {
             return;
@@ -264,7 +281,10 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         }
 
         var rootCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(requests.Select(x => x.CancellationTokenSource.Token).ToArray());
-        var rootCompletedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(requests.Select(x => x.CompletedTokenSource.Token).ToArray());
+        // 原先这里还创建了一个 rootCompletedTokenSource 并写进每个 request，但它全仓没有任何读取点：
+        // 链式提醒的完成是靠各自的 CompletedToken 判断的，不需要一个聚合的 root。
+        // 它只会在每次链式提醒时白白创建一个 linked CTS（并在关联的每个 CTS 上挂注册）却永不释放，
+        // 属于纯泄漏，直接去掉，不影响任何功能。
         rootCancellationTokenSource.Token.Register(() =>
         {
             foreach (var request in requests.Where(x => !x.CancellationToken.IsCancellationRequested))
@@ -277,7 +297,6 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         foreach (var request in requests)
         {
             request.RootCancellationTokenSource = rootCancellationTokenSource;
-            request.RootCompletedTokenSource = rootCompletedTokenSource;
             request.ChainedHeadRequest = head;
             if (prevRequest != null)
             {

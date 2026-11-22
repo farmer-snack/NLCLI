@@ -401,19 +401,23 @@ public partial class App : AppBase, IAppHost
 
     /// <summary>
     /// 判断是否为 FluentAvalonia Expander 展开动画的已知空引用异常。
-    /// 必须同时满足：是 NullReferenceException，且堆栈命中 FAExpanderExt.HandleExpanderTemplateApplied。
+    /// 必须同时满足：某一层异常是 NullReferenceException，且该层堆栈命中
+    /// FAExpanderExt.HandleExpanderTemplateApplied。
     /// 条件做得足够窄，避免把真正严重的空引用误判为良性而吞掉。
     /// </summary>
     private static bool IsFluentAvaloniaExpanderAnimationException(Exception exception)
     {
-        if (exception is not NullReferenceException)
-        {
-            return false;
-        }
-
-        // 向内展开聚合/包装异常，覆盖 async void 动画经 Task 抛出的情况。
+        // 沿 InnerException 链向内展开，覆盖 async void 动画经 Task / 反射被
+        // AggregateException、TargetInvocationException 等包装后抛出的情况。
+        // 不能只看最外层：若 NRE 被包在聚合异常里，最外层并不是 NullReferenceException，
+        // 若在此之前就返回 false，展开逻辑就成了死代码，隔离会失效、崩溃窗口照弹。
         for (var current = exception; current != null; current = current.InnerException)
         {
+            if (current is not NullReferenceException)
+            {
+                continue;
+            }
+
             var stack = current.StackTrace;
             if (string.IsNullOrEmpty(stack))
             {

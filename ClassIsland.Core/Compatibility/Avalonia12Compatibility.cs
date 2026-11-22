@@ -29,7 +29,10 @@ public static class Avalonia12Compatibility
     /// 每次重新 <c>new</c> 一个包装器会导致退订静默失效。
     /// 用 <see cref="ConditionalWeakTable{TKey,TValue}"/> 挂在控件上，控件回收后缓存自动消失。
     /// </remarks>
-    private static readonly ConditionalWeakTable<InputElement, Dictionary<EventHandler<RoutedEventArgs>, EventHandler<FocusChangedEventArgs>>>
+    // 同一个 handler 可能被 -= 之前先 += 两次。Avalonia 的 AddHandler 允许同一委托重复挂载，
+    // 但原实现用 map[handler] = wrapped 覆盖旧值，只记住最后一个 wrapper，
+    // 先前的 wrapper 就再也退订不掉，会持续回调。改为每个 handler 维护一个 wrapper 列表。
+    private static readonly ConditionalWeakTable<InputElement, Dictionary<EventHandler<RoutedEventArgs>, List<EventHandler<FocusChangedEventArgs>>>>
         LostFocusHandlers = new();
 
     /// <summary>
@@ -52,7 +55,12 @@ public static class Avalonia12Compatibility
         var wrapped = new EventHandler<FocusChangedEventArgs>((sender, e) => handler(sender, e));
         lock (map)
         {
-            map[handler] = wrapped;
+            if (!map.TryGetValue(handler, out var wrappers))
+            {
+                wrappers = [];
+                map[handler] = wrappers;
+            }
+            wrappers.Add(wrapped);
         }
 
         element.AddHandler(InputElement.LostFocusEvent, wrapped);
@@ -68,28 +76,37 @@ public static class Avalonia12Compatibility
             return;
         }
 
-        EventHandler<FocusChangedEventArgs>? wrapped;
+        List<EventHandler<FocusChangedEventArgs>>? wrappers;
         lock (map)
         {
-            if (!map.Remove(handler, out wrapped))
+            if (!map.Remove(handler, out wrappers))
             {
                 return;
             }
         }
 
-        element.RemoveHandler(InputElement.LostFocusEvent, wrapped);
+        // 退订该 handler 的全部包装器，与 += 一次对应 -= 一次的语义一致。
+        foreach (var wrapped in wrappers)
+        {
+            element.RemoveHandler(InputElement.LostFocusEvent, wrapped);
+        }
     }
 
     /// <summary>
     /// 取 <see cref="ToggleButton"/> 的选中事件。Avalonia 12 将 Checked/Unchecked 合并为 IsCheckedChanged。
     /// </summary>
-    public static RoutedEvent<RoutedEventArgs> GetCheckedEvent(ToggleButton button) =>
+    /// <remarks>
+    /// 必须无参：被替换的 <c>ToggleButton.CheckedEvent</c> 在 Avalonia 11 里是静态字段，
+    /// 旧指令是 <c>ldsfld</c>（不压栈）。兼容层把它改写成对这个方法的 <c>call</c>，
+    /// 若方法带参数，调用时栈上没有实参，会栈下溢抛 InvalidProgramException。
+    /// </remarks>
+    public static RoutedEvent<RoutedEventArgs> GetCheckedEvent() =>
         ToggleButton.IsCheckedChangedEvent;
 
     /// <summary>
     /// 取 <see cref="ToggleButton"/> 的取消选中事件。Avalonia 12 将 Checked/Unchecked 合并为 IsCheckedChanged。
     /// </summary>
-    public static RoutedEvent<RoutedEventArgs> GetUncheckedEvent(ToggleButton button) =>
+    public static RoutedEvent<RoutedEventArgs> GetUncheckedEvent() =>
         ToggleButton.IsCheckedChangedEvent;
 
     /// <summary>
