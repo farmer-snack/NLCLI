@@ -152,11 +152,9 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
     private void ConfigDebugSettingsPage_OnLoaded(object? sender, RoutedEventArgs e)
     {
         ViewModel.EnsureSubscribed();
-        // 首次进入时自动探测一次远程分支；失败也不影响页面使用。
-        if (ViewModel.RemoteBranches.Count == 0)
-        {
-            _ = ViewModel.RefreshRemoteBranchesAsync();
-        }
+        // 不再在进入页面时自动探测远程分支：GetRemoteBranchesAsync 会串行执行
+        // git ls-remote（直连失败还要逐个尝试镜像），网络慢时点进本页会明显卡住。
+        // 分支列表改由用户点击「刷新」按钮时按需获取，避免无谓的阻塞和网络开销。
     }
 
     private void ConfigDebugSettingsPage_OnUnloaded(object? sender, RoutedEventArgs e)

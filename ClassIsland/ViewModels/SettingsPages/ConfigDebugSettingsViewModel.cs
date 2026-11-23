@@ -64,6 +64,13 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
                 : $"上次检查发现 {lastReport.Issues.Count} 项问题。"
             : "尚未检查。";
 
+        // 页面不再在进入时自动跑 git ls-remote（会卡 UI）。这里用当前配置的分支做
+        // 轻量初始化，保证下拉框始终有一个可选项；完整分支列表由用户点「刷新」获取。
+        var configuredBranch = settingsService.Settings.DevelopmentUpdateBranch;
+        RemoteBranches = string.IsNullOrWhiteSpace(configuredBranch)
+            ? Array.Empty<string>()
+            : [configuredBranch];
+
         BuildVariables();
         EnsureSubscribed();
         ApplyFilter();

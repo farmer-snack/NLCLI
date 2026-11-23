@@ -167,14 +167,22 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             await UpdateSubmodulesAsync(git, repositoryRoot, progress, cancellationToken);
 
             // 打包前必须先删掉旧的 out，避免上一次的残留文件混进本次产物。
-            // 删除失败要立刻提示用户，不能带着旧文件继续打包。
-            var outDirectory = Path.Combine(repositoryRoot, "out");
+            // 但若用户当前就在这个 out 目录里运行（工作目录/安装目录位于 out 内），直接删会
+            // 删掉正在使用的程序本身，且因文件被占用而失败。此时改用备用输出目录 out-publish。
+            var outputDirectoryName = ResolvePublishOutputDirectoryName(repositoryRoot);
+            var outDirectory = Path.Combine(repositoryRoot, outputDirectoryName);
+            if (outputDirectoryName != "out")
+            {
+                Report(progress, DevelopmentUpdateStage.Preparing,
+                    $"检测到当前程序正运行在 out 目录内，改用备用输出目录 {outputDirectoryName}。",
+                    outDirectory);
+            }
             await DeleteOutDirectoryAsync(outDirectory, progress, cancellationToken);
 
             // 打包这一步不执行仓库的 build-publish.bat，而是在应用内直接调用 dotnet publish，
             // 参数照搬该脚本里的那一套；是否自包含由用户在页面上选择（默认自包含）。
             var selfContained = settingsService.Settings.DevelopmentPublishSelfContained;
-            await RunDotnetPublishAsync(dotnet, repositoryRoot, selfContained, progress, cancellationToken);
+            await RunDotnetPublishAsync(dotnet, repositoryRoot, outputDirectoryName, selfContained, progress, cancellationToken);
 
             // 打包完成后清理 out 中的调试符号文件。
             var removedPdb = DeletePdbFiles(outDirectory);
@@ -201,6 +209,75 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             Interlocked.Exchange(ref _isPublishing, 0);
             Interlocked.Exchange(ref _isRunning, 0);
         }
+    }
+
+    /// <summary>
+    /// 决定本次打包的输出目录名。默认用 out；若当前程序正运行在 out（或某个备用目录）内，
+    /// 则依次改用 out-publish、out-publish-2 …，避免删除/覆盖正在使用的程序本身。
+    /// </summary>
+    private static string ResolvePublishOutputDirectoryName(string repositoryRoot)
+    {
+        // 当前进程所在的位置：工作目录、程序集基目录、可执行文件目录。
+        var runningPaths = new[]
+        {
+            Environment.CurrentDirectory,
+            AppContext.BaseDirectory,
+            Path.GetDirectoryName(Environment.ProcessPath) ?? ""
+        }.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+
+        bool IsRunningInside(string directoryName)
+        {
+            string fullDir;
+            try
+            {
+                fullDir = Path.GetFullPath(Path.Combine(repositoryRoot, directoryName))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                return false;
+            }
+
+            foreach (var running in runningPaths)
+            {
+                string fullRunning;
+                try
+                {
+                    fullRunning = Path.GetFullPath(running)
+                        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (fullRunning.Equals(fullDir, StringComparison.OrdinalIgnoreCase) ||
+                    fullRunning.StartsWith(fullDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (!IsRunningInside("out"))
+        {
+            return "out";
+        }
+
+        // out 正在被使用，挑一个没被占用的备用目录。
+        for (var i = 1; i < 100; i++)
+        {
+            var candidate = i == 1 ? "out-publish" : $"out-publish-{i}";
+            if (!IsRunningInside(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        // 极端情况：全部被占用，用时间戳兜底，保证不与正在运行的目录重合。
+        return $"out-publish-{DateTime.Now:yyyyMMddHHmmss}";
     }
 
     /// <summary>
@@ -233,8 +310,8 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
     /// 自包含用 --self-contained true + ClassIsland_SelfContained=true，输出到 out；
     /// 非自包含则关掉这两项、保留 win-x64 目标与 PlatformTarget=x64（与自包含无关的平台常量）。
     /// </summary>
-    private async Task RunDotnetPublishAsync(string dotnet, string repositoryRoot, bool selfContained,
-        IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken,
+    private async Task RunDotnetPublishAsync(string dotnet, string repositoryRoot, string outputDirectoryName,
+        bool selfContained, IProgress<DevelopmentUpdateProgress> progress, CancellationToken cancellationToken,
         bool allowAiFix = true)
     {
         var project = Path.Combine(repositoryRoot, "ClassIsland.Desktop", "ClassIsland.Desktop.csproj");
@@ -252,7 +329,7 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             "--self-contained", selfContainedText,
             $"-p:ClassIsland_SelfContained={selfContainedText}",
             "-p:ClassIsland_PlatformTarget=x64",
-            "-o", "out"
+            "-o", outputDirectoryName
         ];
 
         var mode = selfContained ? "自包含" : "框架依赖（非自包含）";
@@ -266,7 +343,7 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             if (allowAiFix && await TryFixBuildWithAiAsync(Tail(error, 60), repositoryRoot, progress, cancellationToken))
             {
                 Report(progress, DevelopmentUpdateStage.Building, "AI 已修复代码，正在重新打包…");
-                await RunDotnetPublishAsync(dotnet, repositoryRoot, selfContained, progress, cancellationToken, false);
+                await RunDotnetPublishAsync(dotnet, repositoryRoot, outputDirectoryName, selfContained, progress, cancellationToken, false);
                 return;
             }
 
@@ -1206,10 +1283,10 @@ public sealed class DevelopmentUpdateService(ILogger<DevelopmentUpdateService> l
             throw new InvalidOperationException("未找到 ClassIsland.Desktop/ClassIsland.Desktop.csproj。");
         }
 
-        // 应用很可能正从 ClassIsland.Desktop/bin/Release 下运行，直接编译回默认输出目录会
-        // 撞上正在被占用的 exe 和 dll（Windows 上是硬性文件锁，Linux 上会替换正在映射的文件）。
-        // 用 --artifacts-path 把中间产物和输出全部放到仓库外的独立目录，运行中的文件不参与编译。
-        var artifactsPath = Path.Combine(Path.GetTempPath(), "ClassIsland-dev-build");
+        // 用 --artifacts-path 把中间产物和输出放到仓库内一个独立的固定目录：
+        // 1) 不落在临时目录——临时目录里的产物带路径依赖/权限限制，往往是「编译完却启动不了」的原因；
+        // 2) 也不直接编译回 ClassIsland.Desktop/bin，避免撞上正在运行的 exe/dll 文件锁。
+        var artifactsPath = Path.Combine(repositoryRoot, ".dev-build");
         Report(progress, DevelopmentUpdateStage.Building, "开始编译（Release）…", artifactsPath);
         var result = await RunWithRetryAsync(dotnet,
             ["build", project, "-c", "Release", "--nologo", "--artifacts-path", artifactsPath],

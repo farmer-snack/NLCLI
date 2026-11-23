@@ -1107,16 +1107,35 @@ public partial class SettingsWindowNew : ViewBase, IFANavigationPageFactory
             return;
         }
 
+        // 关闭窗口时保存配置绝不能让异常冒泡到全局未处理异常处理器：
+        // 默认教学安全模式下，任何未处理异常都会触发 Stop() 退出整个主程序，
+        // 表现就是「关掉设置页把主程序也关了」。配置被占用/磁盘写入失败/etc 都只应记日志。
         try
         {
-            SettingsService.SaveSettings("关闭应用设置窗口");
-            ComponentsService.SaveConfig();
-            App.GetService<IAutomationService>().SaveConfig("关闭应用设置窗口");
+            TrySaveOnClose("应用设置", () => SettingsService.SaveSettings("关闭应用设置窗口"));
+            TrySaveOnClose("组件配置", () => ComponentsService.SaveConfig());
+            TrySaveOnClose("自动化配置", () => App.GetService<IAutomationService>().SaveConfig("关闭应用设置窗口"));
         }
         finally
         {
             ReleaseResources();
             GC.Collect();
+        }
+    }
+
+    /// <summary>
+    /// 关闭窗口时逐项保存配置。单项保存失败只记录日志，不影响其它项和窗口释放，
+    /// 更不会把异常抛到全局处理器而触发退出整个应用。
+    /// </summary>
+    private void TrySaveOnClose(string name, Action save)
+    {
+        try
+        {
+            save();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "关闭设置窗口时保存{Name}失败（已忽略，不影响主程序）。", name);
         }
     }
 

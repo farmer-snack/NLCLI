@@ -470,6 +470,21 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 管理策略 DisableDebugMenu 仍然优先：集控禁用调试菜单时本页同样隐藏，这是有意为之。
 - 上游若重新注册 TestSettingsPage，会把这个「点了必错」的入口带回来，同步后要复查。
 
+运行反馈修复（2026-11-23）
+- 「点一下变量调试页就卡一会儿」：ConfigDebugSettingsPage_OnLoaded 原先一进页面就 fire-and-forget
+  调用 RefreshRemoteBranchesAsync，内部串行执行 git ls-remote（直连失败再逐个试镜像），网络慢时
+  阻塞 UI。改为不再进页面自动探测；ViewModel 构造时用当前配置分支做轻量初始化保证下拉框非空，
+  完整列表只在用户点「刷新」按钮时按需获取。
+- 「编译产物不要放临时文件夹，临时文件夹不可启动」：BuildAsync 的 --artifacts-path 从
+  Path.GetTempPath()/ClassIsland-dev-build 改到仓库内的 .dev-build 固定目录（仍避开被占用的
+  ClassIsland.Desktop/bin）。「拉取更新并编译」的产物现在落在可启动的固定路径。
+- 「当前就在 out 文件夹里使用时不要盲目删 out」：打包前用 ResolvePublishOutputDirectoryName
+  检测当前工作目录/程序集目录/可执行文件目录是否位于 out 内，若是则改用 out-publish
+  （再冲突则 out-publish-2 … / 时间戳兜底），并把该目录名贯穿删除、dotnet publish 的 -o、
+  清 pdb、压 zip 全流程。
+- 文件：DevelopmentUpdateService.cs、ConfigDebugSettingsPage.axaml.cs、
+  ConfigDebugSettingsViewModel.cs。
+
 开发构建更新按钮（2026-11-16）
 - 页内新增「拉取更新并编译运行」：定位当前 Git 仓库 → git fetch / pull → 子模块初始化 → 编译桌面项目。
   pull 用 --ff-only，失败退回 --rebase（rebase 失败会中止并报错，不留半截状态）。
@@ -681,6 +696,17 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 涉及：Services/NativeDependencyService.cs、Services/AudioService.cs、Models/Settings.cs、
   App.axaml.cs、App.Services.xaml.cs、Views/SettingPages/ConfigDebugSettingsPage.axaml(.cs)、
   ViewModels/SettingsPages/ConfigDebugSettingsViewModel.cs。
+
+运行反馈修复（2026-11-23）
+- 「检查显示通过、关掉主程序再重启就立刻停止工作」= 假阳性：IsModuleAvailable 原先在应用
+  目录找不到时用 LoadLibraryExW(模块名) 兜底，而运行时被删的库仍以「内存残影」加载在进程里，
+  按名字一查就命中 → 漏报。改为以「磁盘实体文件是否存在」为准：应用目录、System32/Windows/
+  SysWOW64 只查文件；只有 API Set（api-ms-win-*/ext-ms-win-*）才回退 LoadLibrary。检查结论
+  现在反映冷启动后的真实状态。
+- 「实际 179 个却显示检查通过 392 个」：ScannedFileCount 原用 scanTargets.Count，里面混入了
+  根目录几百个托管 dll（它们会被 isManaged 跳过，根本没检查）。改为只统计真正参与导入表
+  解析的原生库数。
+- 文件：Services/NativeDependencyService.cs。
 
 ================================================
 [长期] 提醒语音与音效
@@ -1039,6 +1065,23 @@ ClassIsland/Assets/XamlThemePreviews/classisland.liquidglass.png（180 KB）。
 13. 原生库依赖自动检查与修复 —— 见同名段；文件：NativeDependencyService.cs、AudioService.cs、
     Settings.cs、App.axaml.cs、App.Services.xaml.cs、ConfigDebugSettingsPage.axaml(.cs)、
     ConfigDebugSettingsViewModel.cs
+14. 关闭设置窗口容错 —— 见「设置窗口关闭保存容错」段；文件：SettingsWindowNew.axaml.cs
+
+================================================
+[长期] 设置窗口关闭保存容错
+================================================
+
+运行反馈修复（2026-11-23）
+- 现象：「部分情况下关掉应用设置页面会直接把整个主程序关掉」，一天可触发三次。
+- 根因：ShutdownMode 是 OnExplicitShutdown，关设置窗口本身不会退出应用；真正的退出来自全局
+  未处理异常处理器——默认教学安全模式 CriticalSafeModeMethod=0 会对任何未处理异常执行 Stop()。
+  SettingsWindowNew.ViewBase_OnClosed 关闭窗口时保存设置/组件/自动化配置，三处调用此前没有任何
+  异常保护，任一处因文件占用/磁盘写入失败/服务已释放而抛异常，都会冒泡到全局处理器进而退出主程序。
+  与昨日提交（024eb3d0）无因果关系：该提交改的 6 个文件都不在设置窗口关闭链或退出链上；属于
+  重新编译后暴露的偶发竞态。
+- 处理：把三处保存各自用 try-catch 隔离（TrySaveOnClose），单项失败只记日志、不影响其它项和
+  ReleaseResources()，异常绝不冒泡到全局退出链。
+- 涉及文件：Views/SettingsWindowNew.axaml.cs。
 
 判定口径
 --------

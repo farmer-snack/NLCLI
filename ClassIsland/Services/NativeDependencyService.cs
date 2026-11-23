@@ -449,6 +449,10 @@ public static class NativeDependencyProbe
         }
 
         // 3. 解析导入表，逐个确认依赖模块能不能在目标机器上找到。
+        // 只统计真正参与导入表解析的原生库。scanTargets 里混入了大量托管程序集
+        // （根目录下几百个 *.dll），它们会在下面被 isManaged 跳过，不应该计入
+        // "已检查的原生库数量"，否则会出现"实际 179 个却显示检查了 392 个"的虚报。
+        var scannedNativeCount = 0;
         foreach (var target in scanTargets)
         {
             // 托管程序集也会带导入表（mscoree.dll），但它们的依赖由 .NET 运行时解析，跳过。
@@ -456,6 +460,8 @@ public static class NativeDependencyProbe
             {
                 continue;
             }
+
+            scannedNativeCount++;
 
             foreach (var module in imports)
             {
@@ -491,7 +497,7 @@ public static class NativeDependencyProbe
             }
         }
 
-        return new NativeDependencyReport(uniqueIssues, scanTargets.Count, root);
+        return new NativeDependencyReport(uniqueIssues, scannedNativeCount, root);
     }
 
     /// <summary>
@@ -515,8 +521,23 @@ public static class NativeDependencyProbe
         return OperatingSystem.IsMacOS() ? $"osx-{architecture}" : $"linux-{architecture}";
     }
 
+    /// <summary>
+    /// 判断依赖模块在「冷启动后」是否真的可用。
+    /// </summary>
+    /// <remarks>
+    /// 关键陷阱：本检查是在主程序正在运行时执行的，此时几乎所有原生库都已经被加载进
+    /// 进程内存。若直接调用 <c>LoadLibraryExW(module)</c> 按名字判断，Windows 会命中
+    /// 这些「内存残影」——即使磁盘上的文件已经被删除，也照样返回成功。这正是
+    /// 「检查显示通过、关掉主程序再重启就立刻停止工作」的根因：运行时查的是内存，
+    /// 重启后内存没了、文件也没了，才真正崩溃。
+    ///
+    /// 因此这里一律以「磁盘上是否真实存在该文件」为准，让检查结论反映冷启动后的
+    /// 真实状态。只有 API Set（api-ms-win-*/ext-ms-win-*）这类磁盘上没有实体、必须由
+    /// 系统解析的模块，才回退到 LoadLibrary 判断。
+    /// </remarks>
     private static bool IsModuleAvailable(string module, IReadOnlyList<string> localDirectories)
     {
+        // 1. 应用目录、原生库目录及其子目录：磁盘上真实存在才算可用。
         foreach (var directory in localDirectories)
         {
             if (File.Exists(Path.Combine(directory, module)))
@@ -525,37 +546,98 @@ public static class NativeDependencyProbe
             }
         }
 
+        if (!OperatingSystem.IsWindows())
+        {
+            // 非 Windows 平台：NativeLibrary 会按标准路径解析系统库；应用自带的库
+            // 已在上面按磁盘文件判断过。
+            return CanLoadNativeLibrary(module);
+        }
+
+        // 2. Windows 系统目录：只查实体文件，不触发任何加载（避免命中内存残影）。
+        foreach (var systemDirectory in GetWindowsSystemDirectories())
+        {
+            if (File.Exists(Path.Combine(systemDirectory, module)))
+            {
+                return true;
+            }
+        }
+
+        // 3. API Set 在磁盘上没有实体文件，只能由系统解析。这类属于操作系统组件，
+        //    不会因为删除应用原生库而缺失，用 LoadLibrary 判断不会造成假阳性。
+        var name = module.ToLowerInvariant();
+        if (name.StartsWith("api-ms-win-", StringComparison.Ordinal) ||
+            name.StartsWith("ext-ms-win-", StringComparison.Ordinal))
+        {
+            return CanLoadLibraryByName(module);
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<string> GetWindowsSystemDirectories()
+    {
+        var directories = new List<string>();
+
+        void Add(string? path)
+        {
+            if (!string.IsNullOrEmpty(path) &&
+                !directories.Contains(path, StringComparer.OrdinalIgnoreCase))
+            {
+                directories.Add(path);
+            }
+        }
+
+        Add(Environment.SystemDirectory); // System32
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        Add(windowsDirectory);
+        if (!string.IsNullOrEmpty(windowsDirectory))
+        {
+            Add(Path.Combine(windowsDirectory, "SysWOW64"));
+        }
+
+        return directories;
+    }
+
+    private static bool CanLoadLibraryByName(string module)
+    {
         try
         {
-            if (OperatingSystem.IsWindows())
+            // 先按数据文件映射（不会执行 DllMain），失败再按普通库加载。
+            var handle = LoadLibraryExW(module, IntPtr.Zero, LoadLibraryAsDataFile);
+            if (handle != IntPtr.Zero)
             {
-                // 先按数据文件映射（不会执行 DllMain），失败再按普通库加载。
-                var handle = LoadLibraryExW(module, IntPtr.Zero, LoadLibraryAsDataFile);
-                if (handle != IntPtr.Zero)
-                {
-                    FreeLibrary(handle);
-                    return true;
-                }
-
-                handle = LoadLibraryExW(module, IntPtr.Zero, 0);
-                if (handle != IntPtr.Zero)
-                {
-                    FreeLibrary(handle);
-                    return true;
-                }
-
-                return false;
+                FreeLibrary(handle);
+                return true;
             }
 
-            if (NativeLibrary.TryLoad(module, out var libraryHandle))
+            handle = LoadLibraryExW(module, IntPtr.Zero, 0);
+            if (handle != IntPtr.Zero)
             {
-                NativeLibrary.Free(libraryHandle);
+                FreeLibrary(handle);
                 return true;
             }
         }
         catch
         {
-            // 加载时抛出异常同样按缺失处理。
+            // 加载失败按缺失处理。
+        }
+
+        return false;
+    }
+
+    private static bool CanLoadNativeLibrary(string module)
+    {
+        try
+        {
+            if (NativeLibrary.TryLoad(module, out var handle))
+            {
+                NativeLibrary.Free(handle);
+                return true;
+            }
+        }
+        catch
+        {
+            // 加载失败按缺失处理。
         }
 
         return false;
