@@ -639,6 +639,16 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 注意：圆形会被判成爱心（轮廓相近，分数约 0.1），可接受——画圆唤出托盘符合直觉。
 - 涉及：HeartGestureService.cs、Settings.cs、GeneralSettingsPage.axaml。
 
+bug 修复（2026-11-24）：松开鼠标的最终点从未被记录。
+- HeartGestureService.EndStroke() 原先先 `_tracking = false` 再调用 `AddPoint(point)`，
+  而 AddPoint 开头有 `if (!_tracking) return;`，导致鼠标抬起时的最终点永远加不进 _points。
+  对爱心这类闭合手势，最终点决定轨迹能否闭合；对 W/S 折线手势则是末端点，缺失会让
+  识别不稳定或失败。改为在仍处于追踪状态时先 AddPoint(point) 记录最终点，再置
+  `_tracking = false`。最终点仍走 AddPoint 的 2px 去抖与距离检查，符合原设计。
+- 这是纯 fork 定制代码（HeartGestureService.cs 为 fork 新增，上游基线不存在）。
+- 编译验证：dotnet build ClassIsland/ClassIsland.csproj，0 Error(s)。
+- 涉及：HeartGestureService.cs。
+
 补充（2026-11-19）：手势下拉的位置按用户要求调整。
 - 用户明确：手势切换必须放在基本设置页的「显示托盘图标」里，不能放到托盘右键菜单。
   核对后确认原本就没进托盘右键菜单（AppMenu 无手势项、TaskBarIconService 的

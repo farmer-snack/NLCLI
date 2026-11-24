@@ -313,8 +313,11 @@ public sealed class HeartGestureService : IHostedService, IDisposable
             return;
         }
 
-        _tracking = false;
+        // 必须在清除 _tracking 之前记录松开鼠标的最终点：AddPoint 在 !_tracking 时会
+        // 直接返回，若先置 false 这里就等于什么都没做。对爱心这类闭合手势，最终点
+        // 是轨迹闭合的关键一环，缺失会导致识别不稳定。
         AddPoint(point);
+        _tracking = false;
 
         var duration = DateTime.UtcNow - _strokeStartedAt;
         if (_points.Count < 16 || duration < TimeSpan.FromMilliseconds(350) || duration > TimeSpan.FromSeconds(20))
