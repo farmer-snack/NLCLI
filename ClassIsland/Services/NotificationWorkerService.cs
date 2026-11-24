@@ -330,6 +330,16 @@ public class NotificationWorkerService : INotificationWorkerService
                 {
                     try
                     {
+                        // 取消提醒时语音队列也要一起清掉；否则音效停了，SpeechService
+                        // 仍会把已经入队的语音继续念完（取消后还在朗读）。
+                        SpeechService.ClearSpeechQueue();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "取消提醒语音时发生错误");
+                    }
+                    try
+                    {
                         await soundsCts.CancelAsync();
                     }
                     catch (Exception ex)

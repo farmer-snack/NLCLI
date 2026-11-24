@@ -32,7 +32,6 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
     {
         InitializeComponent();
         DataContext = this;
-        ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
     }
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -151,6 +150,9 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
 
     private void ConfigDebugSettingsPage_OnLoaded(object? sender, RoutedEventArgs e)
     {
+        // 页面可能被缓存复用，先退订再加，避免重复订阅导致日志光标回调叠加。
+        ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
+        ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
         ViewModel.EnsureSubscribed();
         // 不再在进入页面时自动探测远程分支：GetRemoteBranchesAsync 会串行执行
         // git ls-remote（直连失败还要逐个尝试镜像），网络慢时点进本页会明显卡住。
@@ -159,6 +161,7 @@ public partial class ConfigDebugSettingsPage : SettingsPageBase
 
     private void ConfigDebugSettingsPage_OnUnloaded(object? sender, RoutedEventArgs e)
     {
+        ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.Dispose();
     }
 }

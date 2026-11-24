@@ -145,7 +145,10 @@ public partial class App
         services.AddTransient<ErrorSettingsViewModel>();
         services.AddTransient<ThemesSettingsViewModel>();
         services.AddTransient<DebugPageViewModel>();
-        services.AddTransient<ConfigDebugSettingsViewModel>();
+        // 变量调试页的更新/打包状态、取消令牌和日志必须跨设置窗口关闭/重开存活：
+        // 若用 Transient，关闭窗口会丢弃 ViewModel，后台服务仍把进度推给旧实例，
+        // 新实例按钮禁用且取消无效。这里改为单例，配合页面的订阅/退订复用同一份状态。
+        services.AddSingleton<ConfigDebugSettingsViewModel>();
         services.AddTransient<RefreshingSettingsViewModel>();
         // Views
         services.AddSingleton<ITopmostEffectPlayer, PhonyTopmostEffectPlayer>();

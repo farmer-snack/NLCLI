@@ -228,6 +228,13 @@ PluginService 与可观测性
 - 若将来官方 FluentAvalonia 修复了该判空（HandleExpanderTemplateApplied 对 ExpanderContentClip 判空），
   可移除本隔离，但需先确认新dll确实判空，别凭版本号猜。
 
+补充（子代理审计：IL 改写计数自洽）
+- PluginTypeCompatibility.FixInstructionOperands 实际会把 newobj/callvirt 改成 call，并把
+  ToggleButton.CheckedEvent/UncheckedEvent 的 ldsfld 改成宿主垫片方法调用，但都没往 changes
+  里记账。若插件唯一的不兼容点就是读这两个字段，changes.Count==0 会让外层误判为「什么都没改」，
+  删掉已改写的程序集并回退原始插件，运行时 MissingFieldException。→ 每次真实 IL 改写都
+  changes.Add(...)，让「是否写入缓存」与「是否真的改过」一致。
+
 ================================================
 [长期] 旧版本数据迁移（插件与备份）
 ================================================
@@ -415,6 +422,15 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   会让提醒构造函数、规则处理器、WeatherComponent 抛 NRE；逐小时提醒的 Value 也补判空。
 - WeatherService.LoadData 是 async void，资源读取失败会直接终止进程，补 try/catch。
 
+补充（子代理审计：预警坏数据与露点字段）
+- WeatherService 只把 Alerts/Forecast... 集合兜成空，没兜数组元素和元素字段。一条
+  type/title/detail/images 为 null 或 images 缺 icon 键的预警，会在 Title.Contains、
+  GroupBy(...).ToDictionary（null key）、Images["icon"] 处抛异常，整批天气（包含正常
+  温度）都不更新。→ 先剔除 null 元素，逐条把字符串字段归一到 ""，Images 归一到空字典
+  并补 icon=""；接口整体返回 null 时保留旧数据。
+- WeatherDetailSettingsViewModel 顶部「露点」从 current.dew_point_2m 读，但 CurrentVariables
+  根本没请求这个字段，只有 hourly 才有。→ 按 currentHourIndex 从 hourly 读取 dew_point_2m。
+
 ================================================
 [长期] 变量调试页
 ================================================
@@ -599,6 +615,13 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
 - 涉及：Settings.cs（新设置项）、DevelopmentUpdateService.cs（BuildSourceCandidates 改为实例方法
   返回元组列表、三处遍历改用 candidate.Url 与标记计数）、ConfigDebugSettingsPage.axaml（新 CheckBox、
   Description 同步）。
+
+补充（子代理审计：后台更新状态跨窗口存活）
+- ConfigDebugSettingsViewModel 之前是 AddTransient：更新/打包中关闭设置窗口会销毁 ViewModel，
+  后台 RunAsync 仍把进度推给旧实例；新实例虽然从 DevelopmentUpdateService 读到 IsRunning=true
+  而禁用按钮，但取消令牌为 null、日志空白，后台结束后新实例还一直卡在运行中。
+  → 改为 AddSingleton，并用页面 OnLoaded/OnUnloaded 成对订阅/退订 ViewModel.PropertyChanged，
+  页面缓存复用也不会重复订阅；状态、取消令牌、日志跨窗口关闭/重开保持同一份。
 
 ================================================
 [长期] 托盘图标开关与爱心手势
@@ -794,6 +817,14 @@ bug 修复（2026-11-24）：松开鼠标的最终点从未被记录。
 - 票据取消兜底：取消时请求仍是 Playing 说明还有 processor 在跑，正常情况下它的 finally
   会给宿主完成信号；但「遮罩正常结束、正文因时长为 0 被跳过」没有任何 processor 收尾，
   宿主会一直等下去。→ 注册取消回调时挂一个 1.5 秒延迟兜底，到点强制放行。
+
+补充（子代理审计：取消后朗读与音频设备切换）
+- NotificationWorkerService 取消路径的 finally 只 CancelAsync 音效 CTS，没清 SpeechService 队列；
+  音效停了但已入队语音继续念完。→ 在取消收尾里 ClearSpeechQueue()，用 try/catch 隔离
+  清理异常，保证后面的 cancellationCompletedSource.TrySetResult() 不被打断。
+- AudioService 缓存命中路径读 PlaybackDevices 前没有 RefreshDevicesIfNeeded()，刷新只在
+  Internal 路径；热插拔后新默认设备不进列表，IsSameDevice 误判同一设备，继续从旧设备出声。
+  → 缓存命中路径也先 RefreshDevicesIfNeeded()（同锁可重入）。
 
 ================================================
 [长期] 液态玻璃主题（现为可选项）

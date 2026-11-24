@@ -447,6 +447,12 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 $"{Schema}://weatherapi.market.xiaomi.com/wtr-v3/weather/all?latitude={cityLatitude}&longitude={cityLongitude}&locationKey={Uri.EscapeDataString(Settings.CityId)}&days=15&appKey=weather20151024&sign=zUFJoAR2ZVrDy1vF3D07&isGlobal=false&locale=zh_cn";
             Logger.LogInformation("获取天气信息： {}", uri);
             var info = await WebRequestHelper.Default.GetJson<WeatherInfo>(new Uri(uri));
+            if (info == null)
+            {
+                Logger.LogWarning("天气接口返回空数据，保留上一次的天气信息。");
+                result.ErrorMessage = "天气接口返回空数据";
+                return result;
+            }
 
             // 排除天气预警
             // 接口偶尔会把 alerts / forecastDaily 直接返回成 null（不是省略字段），
@@ -456,6 +462,26 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
             info.ForecastHourly ??= new ForecastHourly();
             info.Minutely ??= new Minutely();
             info.Aqi ??= new AqiInfo();
+
+            // 预警数组里的元素本身也可能是 null，或某些字段被显式写成 null/缺失。
+            // 只兜集合不兜元素，依然会在下面的 Contains / GroupBy / Images["icon"] 处 NRE，
+            // 一条坏预警会让整批天气数据（包含正常温度）都更新失败。
+            info.Alerts.RemoveAll(alert => alert is null);
+            foreach (var alert in info.Alerts)
+            {
+                alert.Title ??= "";
+                alert.Type ??= "";
+                alert.Detail ??= "";
+                alert.AlertId ??= "";
+                alert.Level ??= "";
+                alert.LocationKey ??= "";
+                alert.Images ??= new();
+                if (!alert.Images.ContainsKey("icon") || alert.Images["icon"] == null)
+                {
+                    alert.Images["icon"] = "";
+                }
+            }
+
             var validExclusions = Settings.ExcludedWeatherAlerts
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .ToArray();

@@ -673,10 +673,12 @@ public partial class WeatherDetailSettingsViewModel : ObservableObject
         var visibility = hourly.Number("visibility", currentHourIndex);
         var uv = hourly.Number("uv_index", currentHourIndex);
         var sunshine = hourly.Number("sunshine_duration", currentHourIndex);
+        // 露点只在 hourly 请求里，current 块根本没有这个字段；读 current 会恒为 null。
+        var dewPoint = hourly.Number("dew_point_2m", currentHourIndex);
         OmMetrics = new List<OmMetricItem>
         {
             new("湿度", F(current.Number("relative_humidity_2m"), "0", "%")),
-            new("露点", F(current.Number("dew_point_2m"), "0", "°")),
+            new("露点", F(dewPoint, "0", "°")),
             new("气压", F(current.Number("pressure_msl"), "0", " hPa")),
             new("能见度", F(visibility is null ? null : visibility / 1000, "0.0", " km")),
             new("风速", F(current.Number("wind_speed_10m"), "0", " km/h")),

@@ -83,6 +83,12 @@ public class AudioService(ILogger<AudioService> logger) : IAudioService
                 // 先租再比：RefCounted 不暴露裸值，租约期间设备不会被释放。
                 var cachedLease = _sharedAudioPlaybackDevice.Rent();
                 var cachedDeviceInfo = cachedLease.Value.Info;
+
+                // 缓存命中路径也必须先刷新设备列表：PlaybackDevices 在引擎初始化时固化，
+                // 只在 Internal 路径刷新会导致热插拔后的新默认设备根本进不了列表，
+                // IsSameDevice 因而误判为「还是同一台设备」，继续从旧设备出声。
+                // 这里与 Internal 路径共用同一把锁，lock 可重入，不会死锁。
+                RefreshDevicesIfNeeded();
                 var defaultDeviceInfo = AudioEngine.PlaybackDevices.FirstOrDefault(x => x.IsDefault);
 
                 // 系统默认播放设备会被切换（插拔耳机、接上显示器音响等），但缓存的设备实例

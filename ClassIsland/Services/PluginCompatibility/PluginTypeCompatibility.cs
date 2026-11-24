@@ -1084,10 +1084,12 @@ internal static class PluginTypeCompatibility
                             if (instruction.OpCode == CecilIL.OpCodes.Newobj && !targetMethod.HasThis)
                             {
                                 instruction.OpCode = CecilIL.OpCodes.Call;
+                                changes.Add($"IL: {reference.FullName} newobj → call");
                             }
                             else if (instruction.OpCode == CecilIL.OpCodes.Callvirt && !targetMethod.HasThis)
                             {
                                 instruction.OpCode = CecilIL.OpCodes.Call;
+                                changes.Add($"IL: {reference.FullName} callvirt → call");
                             }
 
                             break;
@@ -1104,6 +1106,11 @@ internal static class PluginTypeCompatibility
                             {
                                 instruction.OpCode = CecilIL.OpCodes.Call;
                                 instruction.Operand = replacement;
+                                // 这是一次真实的 IL 改写，必须计入 changes。否则当插件唯一的
+                                // 不兼容点就是读取 ToggleButton.CheckedEvent 时，changes.Count
+                                // 仍为 0，外层会误判为「什么都没改」，删掉已改写的程序集并回退
+                                // 到原始插件，运行时抛 MissingFieldException。
+                                changes.Add($"IL: {field.FullName} → Avalonia12Compatibility.{replacement.Name}()");
                             }
 
                             break;
