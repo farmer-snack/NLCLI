@@ -1297,6 +1297,93 @@ echo "VERDICT=$VERDICT"
 **特别注意**：这里判断的只是官方有没有新提交。我自己的仓库有没有新推送，
 由第 1 步独立判断和处理——两者不要混为一谈。我自己的仓库有新推送就照样 pull，哪怕官方一动不动。
 
+### 3.1 同步基线深度核验（回答「上次到底同没同步干净」）
+
+**这一节什么时候做**：用户明确问「上次同步基线是不是真的」「跟官方有什么区别」「有没有官方最新
+提交的内容没应用」这类问题时做；平时 `NO_UPDATE` / 正常同步**不必每次跑**。它是只读体检，
+不改工作区、不改记录文件、不 commit。
+
+**为什么需要它（本 fork 特有，务必读懂）**：第 3 步的 `NO_UPDATE` 只证明「官方 HEAD == `action.txt`
+里的锚点」，也就是**官方没有新提交**。但它证明不了「上次同步真的把官方内容完整搬进了本地」。
+本 fork 是用一串 `chore(sync): 同步 develop/v2/misha-alpha 至 xxxxxxx` 提交把官方内容**搬**进来的，
+并不是让官方的 commit 对象成为本地祖先——所以：
+
+```
+git merge-base --is-ancestor "$LAST_SYNCED_SHA" HEAD   # 很可能返回「否」
+```
+
+**返回「否」不等于漏同步**，它是这种同步方式的表现形态。不能拿这条命令的失败就断定基线有问题，
+必须用下面的「内容级」核验来判定。反过来，也不能因为 `action.txt` 写着已同步就无条件相信——
+要真的比对内容。
+
+**判定口径（三问三答）**：
+
+| 问 | 判据 | 通过标准 |
+|---|---|---|
+| ① 官方 HEAD 是不是停在锚点 | `rev-parse upstream HEAD` 与 `LAST_SYNCED_SHA` 比对 | 相等 → 官方无新提交；不等 → 官方有新提交，按第 3 步正常处理 |
+| ② 官方改过的文件，本地内容在不在 | 对 `BASE..UPSTREAM` 改过的每个文件比 blob | 绝大多数逐字节相同；不同的必须能归因到 fork 定制 |
+| ③ 不同的文件是不是 fork 有意改的 | 把官方新增行在本地逐个查存在性 + 对照 `fixxed.txt` | 缺失行都能归因到账本里的大类定制（界面精简/排版/手势等）才算通过 |
+
+其中 `BASE` 用第 4 步的口径算（`LAST_SYNCED_SHA` 有效就用它，否则 `git merge-base HEAD "$UPSTREAM_REF"`）。
+下面是可直接执行的一整套（**只读**）：
+
+```bash
+source /tmp/upstream-sync.env 2>/dev/null || { echo "FAIL: 环境文件缺失，回第 0 步重建"; exit 1; }
+: "${REPO_ROOT:?FAIL}" "${UPSTREAM_REF:?FAIL}" "${LAST_SYNCED_SHA:?FAIL}"
+UP=$UPSTREAM_REF
+BASE=$(git rev-parse --verify --quiet "${LAST_SYNCED_SHA}^{commit}" 2>/dev/null \
+       || git merge-base HEAD "$UP" 2>/dev/null)
+[ -n "$BASE" ] || { echo "FAIL: 算不出 BASE"; exit 1; }
+
+# ---- ① 官方 HEAD vs 锚点 ----
+echo "官方 HEAD : $(git rev-parse "$UP")"
+echo "同步锚点  : $LAST_SYNCED_SHA"
+git rev-parse "$UP" | grep -qxF "$LAST_SYNCED_SHA" \
+  && echo "① 官方无新提交（HEAD == 锚点）" \
+  || echo "① 官方有新提交，转第 3 步 HAS_UPDATE 流程"
+
+# ---- ② 官方改过的文件，逐文件比 blob ----
+git diff --name-only "$BASE".."$UP" | sort -u > /tmp/vfy_up_changed.txt
+same=0; diff=0; > /tmp/vfy_content_diff.txt
+while IFS= read -r f; do
+  ub=$(git rev-parse "$UP:$f" 2>/dev/null)
+  hb=$(git rev-parse "HEAD:$f" 2>/dev/null)
+  if [ "$ub" = "$hb" ]; then same=$((same+1)); else diff=$((diff+1)); echo "$f" >> /tmp/vfy_content_diff.txt; fi
+done < /tmp/vfy_up_changed.txt
+echo "② 官方改过 $(wc -l < /tmp/vfy_up_changed.txt) 个文件：内容相同 $same，不同 $diff"
+echo "   不同的文件（应全部是 fork 定制文件）："
+cat /tmp/vfy_content_diff.txt
+
+# ---- ③ 不同的文件里，官方新增行是否仍存在于本地 ----
+> /tmp/vfy_missing.txt
+while IFS= read -r f; do
+  git diff --unified=0 "$BASE".."$UP" -- "$f" 2>/dev/null \
+    | grep -E '^\+[^+]' | sed 's/^+//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+    | awk 'length($0)>=18' | grep -vE '^(using |//|///|/\*|\*|\)|\}|\{|else|return;|;$)' \
+    | sort -u | while IFS= read -r line; do
+        git show "HEAD:$f" 2>/dev/null | grep -Fq -- "$line" || echo "$f | $line" >> /tmp/vfy_missing.txt
+      done
+done < /tmp/vfy_content_diff.txt
+echo "③ 官方新增行在本地缺失 $(wc -l < /tmp/vfy_missing.txt) 条，逐条对照 fixxed.txt："
+cat /tmp/vfy_missing.txt
+```
+
+**如何解读第 ③ 步的「缺失行」——不要一见缺失就当漏同步**：多数缺失是 fork **有意定制**，
+必须逐条归因到 `fixxed.txt` 的大类才算通过。常见可接受的归因：
+
+- 开源水印 / 关于页 / 更新日志 / 依赖清单 / 许可证相关行 → 账本「界面精简」大类**主动移除**的；
+- 关机保存的散装 `SaveXxx()` 被重构成 `SaveAllConfigs()` + `SaveSafely()` → 「关机保存」定制，功能在；
+- 设置页 Debug 过滤被扩展成放行变量调试页 → 「变量调试页」定制，官方条件被包含；
+- 提醒宽度/排版计算换了写法 → 「主界面宽度与提醒排版稳定」定制。
+
+**只有通过的标准**：② 里内容不同的文件**全部**是已知 fork 定制文件，且 ③ 里每一条缺失行都能归因到
+某个定制大类。若出现「既不是定制、官方又确实新增、本地却缺失」的行 → **停下问我**，不要自行判断，
+更不要在这套核验里改任何文件或动手合并。
+
+**汇报口径**：核验通过就明确告诉我三件事——(1) 官方 HEAD 与锚点是否一致、有无新提交；
+(2) 官方改过的文件里本地完整应用了多少、有差异的全是 fork 定制；(3) 结论「无未应用的官方内容」。
+全流程只读，不改代码。
+
 ## 4. 第 4 步：确定合并基线
 
 ```
