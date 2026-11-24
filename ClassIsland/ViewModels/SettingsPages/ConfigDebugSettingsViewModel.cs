@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
@@ -34,6 +35,12 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     /// </summary>
     private const int MaxDevelopmentUpdateLogLength = 60000;
 
+    /// <summary>
+    /// 变量列表每批渲染的数量。226 个变量若一次性全部塞给 ItemsControl，会在 UI 线程
+    /// 同步实例化几千个可视化对象，表现为「点进页面卡一下」。分批后每帧只渲染一批。
+    /// </summary>
+    private const int VariableRenderBatchSize = 40;
+
     private readonly SettingsService _settingsService;
     private readonly ILogger<ConfigDebugSettingsViewModel> _logger;
     private readonly List<ConfigVariableItem> _allVariables = [];
@@ -43,6 +50,12 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     private CancellationTokenSource? _developmentUpdateCancellation;
     private int _developmentUpdateLogFlushScheduled;
     private bool _subscribed;
+
+    // 变量列表分批渲染用的状态：_filteredVariables 是筛选后的完整结果，
+    // 按批追加进 Variables；筛选条件变化时用 _variableRenderGeneration 作废旧批次。
+    private List<ConfigVariableItem> _filteredVariables = [];
+    private int _variableRenderIndex;
+    private int _variableRenderGeneration;
 
     public ConfigDebugSettingsViewModel(SettingsService settingsService,
         ILogger<ConfigDebugSettingsViewModel> logger,
@@ -94,8 +107,10 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     [ObservableProperty]
     private bool _showReadOnly = true;
 
+    // 用 ObservableCollection 支持增量追加：首屏先渲染少量项，其余分批加载，
+    // 避免一次性实例化 226 套复杂编辑器控件把 UI 线程卡住。
     [ObservableProperty]
-    private IReadOnlyList<ConfigVariableItem> _variables = Array.Empty<ConfigVariableItem>();
+    private ObservableCollection<ConfigVariableItem> _variables = [];
 
     [ObservableProperty]
     private string _statusText = "";
@@ -491,8 +506,62 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
         };
 
         var list = query.ToList();
-        Variables = list;
         StatusText = $"共 {_allVariables.Count} 个变量，当前显示 {list.Count} 个。";
+
+        // 分批渲染：先把完整结果缓存下来，本次只同步放入第一批（首屏可见），
+        // 余下的通过 UI 线程的分批回调逐批追加。这样进页面时只渲染几十项，
+        // 不会因一次性创建 226 套编辑器控件而卡顿。
+        _filteredVariables = list;
+        var generation = ++_variableRenderGeneration;
+        Variables.Clear();
+        _variableRenderIndex = 0;
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        // 首屏同步渲染第一批，保证进页面立刻有内容；其余分批异步追加。
+        var firstBatchCount = Math.Min(VariableRenderBatchSize, list.Count);
+        for (var i = 0; i < firstBatchCount; i++)
+        {
+            Variables.Add(list[i]);
+        }
+        _variableRenderIndex = firstBatchCount;
+
+        ScheduleNextVariableBatch(generation);
+    }
+
+    /// <summary>
+    /// 若还有未渲染的变量，投递下一批到 UI 线程。generation 用于作废旧批次，
+    /// 供首次筛选与「缓存页面复用后续跑」两条路径共用。
+    /// </summary>
+    private void ScheduleNextVariableBatch(int generation)
+    {
+        if (_variableRenderIndex < _filteredVariables.Count)
+        {
+            Dispatcher.UIThread.Post(() => AppendNextVariableBatch(generation));
+        }
+    }
+
+    /// <summary>
+    /// 追加下一批变量。每批只处理 <see cref="VariableRenderBatchSize"/> 项，处理完继续投递
+    /// 下一批，让 UI 线程在批次之间有机会绘制，避免长时间占用导致页面卡住。
+    /// generation 变了说明筛选条件已更新，当前这批过期，直接停止。
+    /// </summary>
+    private void AppendNextVariableBatch(int generation)
+    {
+        if (generation != _variableRenderGeneration || _variableRenderIndex >= _filteredVariables.Count)
+        {
+            return;
+        }
+
+        var end = Math.Min(_variableRenderIndex + VariableRenderBatchSize, _filteredVariables.Count);
+        for (var i = _variableRenderIndex; i < end; i++)
+        {
+            Variables.Add(_filteredVariables[i]);
+        }
+        _variableRenderIndex = end;
+        ScheduleNextVariableBatch(generation);
     }
 
     public void ResetVariable(ConfigVariableItem item)
@@ -512,10 +581,19 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// 订阅配置变更。页面被缓存后重新显示时需要重新订阅。
+    /// 订阅配置变更。页面被缓存后重新显示时需要重新订阅，并续跑可能被打断的分批渲染。
     /// </summary>
     public void EnsureSubscribed()
     {
+        // 页面缓存复用后，OnUnloaded 里的 Dispose() 递增了 generation，会让尚未执行的
+        // 分批回调作废。若当时还有变量没渲染完，这里必须重新投递一批从断点继续，
+        // 否则切回来时列表会永远停在首批的几十项。递增 generation 同时让任何残留
+        // 的旧批次失效，避免与续跑的批次重复添加。
+        if (_variableRenderIndex < _filteredVariables.Count)
+        {
+            ScheduleNextVariableBatch(++_variableRenderGeneration);
+        }
+
         if (_subscribed) return;
         _settingsService.Settings.PropertyChanged += SettingsOnPropertyChanged;
         _subscribed = true;
@@ -523,6 +601,8 @@ public partial class ConfigDebugSettingsViewModel : ObservableObject, IDisposabl
 
     public void Dispose()
     {
+        // 让尚未执行的分批渲染回调失效，避免页面销毁后还往集合里加项。
+        _variableRenderGeneration++;
         if (!_subscribed) return;
         _settingsService.Settings.PropertyChanged -= SettingsOnPropertyChanged;
         _subscribed = false;

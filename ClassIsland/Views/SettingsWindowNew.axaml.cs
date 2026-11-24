@@ -580,7 +580,12 @@ public partial class SettingsWindowNew : ViewBase, IFANavigationPageFactory
             return page;
         }
         var pageNew = IAppHost.Host?.Services.GetKeyedService<SettingsPageBase>(id);
-        if (id != SettingsNavigationPage.PageId && SettingsService.Settings.SettingsPagesCachePolicy >= 1)
+        // 「变量调试」页有 226 个变量，每个都是一套复杂编辑器控件，重建一次会在 UI 线程
+        // 实例化几千个可视化对象，表现为「点进页面卡一下」。它的内容固定不变，且 ViewModel
+        // 已支持缓存后重新订阅（EnsureSubscribed），因此无论全局缓存策略如何都常驻缓存。
+        var alwaysCache = id == SettingPages.ConfigDebugSettingsPage.PageId;
+        if (id != SettingsNavigationPage.PageId &&
+            (alwaysCache || SettingsService.Settings.SettingsPagesCachePolicy >= 1))
         {
             _cachedPages[id ?? ""] = pageNew;
         }

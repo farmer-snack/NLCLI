@@ -475,6 +475,17 @@ ViewModels/SettingsPages/WeatherDetailSettingsViewModel.cs）
   调用 RefreshRemoteBranchesAsync，内部串行执行 git ls-remote（直连失败再逐个试镜像），网络慢时
   阻塞 UI。改为不再进页面自动探测；ViewModel 构造时用当前配置分支做轻量初始化保证下拉框非空，
   完整列表只在用户点「刷新」按钮时按需获取。
+- 「点进变量调试页还是卡一下」（同一问题二次反馈，根因不同）：上面只去掉了网络探测，真正卡顿来自
+  渲染本身——ConfigDebugSettingsViewModel 是 AddTransient、默认 SettingsPagesCachePolicy=0，页面每次
+  进入都重建；约 226 个变量每个都是一套复杂 SettingsVariableEditor，外层 ItemsControl 又无 UI 虚拟化，
+  首次进页会在 UI 线程同步实例化几千个可视化对象。两层修复：
+  ① SettingsWindowNew.GetPage 对本页（PageId=config-debug）无条件常驻缓存（alwaysCache），不受全局
+     缓存策略影响，切走再切回不再重建页面与 ViewModel。
+  ② ConfigDebugSettingsViewModel.Variables 改为 ObservableCollection，ApplyFilter 只同步渲染首屏 40 项，
+     其余经 Dispatcher.UIThread.Post 每批 40 项追加；用 _variableRenderGeneration 在筛选变化 / Dispose 时
+     作废旧批次。页面缓存复用时 OnUnloaded 的 Dispose 会递增 generation 打断分批，故 EnsureSubscribed
+     在还有未渲染项时用新 generation 重新投递一批从断点续跑（ScheduleNextVariableBatch 供首筛与续跑共用），
+     避免切回来列表永远停在首批几十项。
 - 「编译产物不要放临时文件夹，临时文件夹不可启动」：BuildAsync 的 --artifacts-path 从
   Path.GetTempPath()/ClassIsland-dev-build 改到仓库内的 .dev-build 固定目录（仍避开被占用的
   ClassIsland.Desktop/bin）。「拉取更新并编译」的产物现在落在可启动的固定路径。
