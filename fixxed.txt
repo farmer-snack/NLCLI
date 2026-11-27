@@ -826,6 +826,23 @@ bug 修复（2026-11-24）：松开鼠标的最终点从未被记录。
   Internal 路径；热插拔后新默认设备不进列表，IsSameDevice 误判同一设备，继续从旧设备出声。
   → 缓存命中路径也先 RefreshDevicesIfNeeded()（同锁可重入）。
 
+补充（子代理审计第二批：设置首次落盘 / 插件下载卡死 / 预报卡片空引用）
+- SettingsService 全新安装（没有 Settings.json）时，Settings 用的是字段初始化器里的默认实例，
+  没走 else 分支也就没挂 PropertyChanged → SettingsChanged。本次运行里所有设置修改都不触发
+  防抖保存，窗口大小、主题、语音开关等改动重启后全部丢失。→ 该分支补挂同一订阅。
+- PluginMarketService.RequestDownloadPluginCore：构造下载器、读设置、绑定回调都在 try 之外，
+  一旦抛异常就直接跳出方法，「task.IsDownloading=false; DownloadTasks.Remove(id)」被整体跳过，
+  这个 id 永久停在「正在下载」，再点下载被「已正在下载」挡回，只能重启应用。
+  → 把下载全过程抽到 DownloadAndInstallPluginCoreAsync，外层统一 try/catch/finally 收尾；
+  连 new DownloadProgress() 也做了兜底，避免它在登记下载任务时抛异常导致 Sentry 事务不结束。
+- WeatherForecastNotificationProvider.BuildDays 是 fork 新增的 7 天预报卡片，只对
+  Info.ForecastDaily 用了 ?.，Info 本身为 null、温度数组元素为 null 时仍会 NRE 打断整条提醒链路。
+  → Info 与元素都判空，缺数据的那天退化成空温度区间。
+- WeatherService 预警元素兜底（集合兜住了但元素字段没兜）：
+  alerts 里出现 null 元素或 title/type/detail/images 为 null、images 缺 icon 键时，
+  Title.Contains、GroupBy(...).ToDictionary（null key）、Images["icon"] 会连环抛异常，
+  整批天气（含正常温度）都不更新。→ 剔除 null 元素并逐条把字段归一到空值。
+
 ================================================
 [长期] 液态玻璃主题（现为可选项）
 ================================================

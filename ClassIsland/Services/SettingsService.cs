@@ -84,6 +84,11 @@ public class SettingsService(ILogger<SettingsService> Logger, IManagementService
             {
                 SkipMigration = true; // 如果是新的配置文件，那么就需要跳过迁移。
                 Logger.LogInformation("配置文件不存在，跳过加载。");
+                // 全新安装：Settings 用的是字段初始化器里的默认实例，没有经过上面的
+                // else 分支，也就没挂上变更订阅。结果本次运行里所有设置修改都不会触发
+                // ScheduleSave，窗口大小、主题、语音开关等改动重启后全部丢失。
+                // 这里补挂订阅（属性变更 → 防抖保存）。
+                Settings.PropertyChanged += (sender, args) => SettingsChanged(args.PropertyName);
             }
             else
             {

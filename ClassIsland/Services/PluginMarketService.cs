@@ -417,26 +417,60 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
         }
 
         Logger.LogInformation("开始下载插件：{}", id);
-        var spanDownload = transaction.StartChild("download");
         var url = item.DownloadUrl;
         var md5 = item.DownloadMd5;
-        var task = new DownloadProgress()
+        DownloadProgress task;
+        try
         {
-            IsDownloading = true
-        };
+            task = new DownloadProgress()
+            {
+                IsDownloading = true
+            };
+        }
+        catch
+        {
+            transaction.Finish(SpanStatus.InternalError);
+            throw;
+        }
         DownloadTasks[id] = task;
-        var archive = Path.GetTempFileName() + ".tmp";
-        var download = DownloadBuilder.New()
-            .WithUrl(url)
-            .WithFileLocation(archive)
-            .WithConfiguration(new DownloadConfiguration())
-            .Build();
         transaction.SetTag("url", url);
         if (Uri.TryCreate(url, UriKind.RelativeOrAbsolute, out var uri))
         {
             transaction.SetTag("url.host", uri.Host);
         }
 
+        // 从创建下载子事务、构造下载器到落盘都在独立方法里完成，外层只负责收尾。
+        // 以前构造下载器、读设置、绑定回调都在 try 之外，一旦抛异常就直接跳出方法，
+        // 下面「task.IsDownloading = false; DownloadTasks.Remove(id)」被整体跳过，
+        // 这个 id 会永久停在「正在下载」，再点下载被挡回，只能重启应用。
+        try
+        {
+            await DownloadAndInstallPluginCoreAsync(id, url, md5, item, task, transaction);
+        }
+        catch (Exception e)
+        {
+            task.Exception = e;
+            transaction.GetLastActiveSpan()?.Finish(e, SpanStatus.InternalError);
+            transaction.Finish(e, SpanStatus.InternalError);
+            Logger.LogError(e, "无法从 {} 下载插件 {}", url, id);
+        }
+        finally
+        {
+            task.IsDownloading = false;
+            DownloadTasks.Remove(id);
+        }
+    }
+
+    private async Task DownloadAndInstallPluginCoreAsync(string id, string url, string? md5, PluginIndexItem item,
+        DownloadProgress task, ISpan transaction)
+    {
+        var spanDownload = transaction.StartChild("download");
+        var archive = Path.GetTempFileName() + ".tmp";
+        var download = DownloadBuilder.New()
+            .WithUrl(url)
+            .WithFileLocation(archive)
+            .WithConfiguration(new DownloadConfiguration())
+            .Build();
         var stopwatch = new Stopwatch();
         var packagePath = Path.Combine(Services.PluginService.PluginsPkgRootPath, id + ".cipx");
         var downloadError = new Exception?[1];
@@ -519,13 +553,6 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
             Logger.LogInformation("插件 {} 下载完成。", id);
             transaction.Finish(SpanStatus.Ok);
         }
-        catch (Exception e)
-        {
-            task.Exception = e;
-            transaction.GetLastActiveSpan()?.Finish(e, SpanStatus.InternalError);
-            transaction.Finish(e, SpanStatus.InternalError);
-            Logger.LogError(e, "无法从 {} 下载插件 {}", url, id);
-        }
         finally
         {
             if (ignoreSsl)
@@ -533,8 +560,6 @@ public class PluginMarketService : ObservableRecipient, IPluginMarketService
                 ServicePointManager.ServerCertificateValidationCallback = prevCallback;
             }
         }
-        task.IsDownloading = false;
-        DownloadTasks.Remove(id);
     }
 
     public event EventHandler? RestartRequested;

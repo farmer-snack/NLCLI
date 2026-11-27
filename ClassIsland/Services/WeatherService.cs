@@ -447,12 +447,6 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 $"{Schema}://weatherapi.market.xiaomi.com/wtr-v3/weather/all?latitude={cityLatitude}&longitude={cityLongitude}&locationKey={Uri.EscapeDataString(Settings.CityId)}&days=15&appKey=weather20151024&sign=zUFJoAR2ZVrDy1vF3D07&isGlobal=false&locale=zh_cn";
             Logger.LogInformation("获取天气信息： {}", uri);
             var info = await WebRequestHelper.Default.GetJson<WeatherInfo>(new Uri(uri));
-            if (info == null)
-            {
-                Logger.LogWarning("天气接口返回空数据，保留上一次的天气信息。");
-                result.ErrorMessage = "天气接口返回空数据";
-                return result;
-            }
 
             // 排除天气预警
             // 接口偶尔会把 alerts / forecastDaily 直接返回成 null（不是省略字段），
